@@ -1,0 +1,42 @@
+# Bheem Workspace Backend Requirements
+
+# Web Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+
+# Database
+sqlalchemy[asyncio]==2.0.23
+asyncpg==0.29.0
+alembic==1.13.0
+
+# LiveKit
+livekit==0.9.0
+livekit-api==0.4.0
+
+# HTTP Client
+httpx==0.25.2
+aiohttp==3.9.1
+
+# AWS S3
+boto3==1.34.0
+
+# Authentication & Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+pyjwt==2.8.0
+
+# Validation
+pydantic==2.5.2
+pydantic-settings==2.1.0
+email-validator==2.1.0
+
+# Utilities
+python-dotenv==1.0.0
+python-dateutil==2.8.2
+
+# Redis (for caching)
+redis==5.0.1
+
+# FFmpeg wrapper (for video processing)
+ffmpeg-python==0.2.0

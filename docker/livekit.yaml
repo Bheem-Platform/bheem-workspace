@@ -1,0 +1,24 @@
+# LiveKit Server Configuration for Bheem Workspace
+port: 7880
+bind_addresses:
+  - ""
+
+rtc:
+  port_range_start: 50000
+  port_range_end: 50100
+  tcp_port: 7881
+  use_external_ip: true
+
+redis:
+  address: redis:6379
+
+keys:
+  BheemMeetAPI: BheemMeet2024SecretKey
+
+logging:
+  level: info
+
+room:
+  auto_create: true
+  empty_timeout: 300
+  max_participants: 100

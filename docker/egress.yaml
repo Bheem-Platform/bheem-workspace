@@ -1,0 +1,16 @@
+# LiveKit Egress Configuration for Bheem Workspace
+log_level: info
+api_key: BheemMeetAPI
+api_secret: BheemMeet2024SecretKey
+ws_url: ws://livekit:7880
+
+redis:
+  address: redis:6379
+
+s3:
+  access_key: ${S3_ACCESS_KEY}
+  secret: ${S3_SECRET_KEY}
+  region: ${S3_REGION}
+  endpoint: ${S3_ENDPOINT}
+  bucket: ${S3_BUCKET}
+  force_path_style: true

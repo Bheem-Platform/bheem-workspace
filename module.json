@@ -1,0 +1,73 @@
+{
+  "name": "bheem-workspace",
+  "version": "1.0.0",
+  "displayName": "Bheem Workspace",
+  "description": "Unified collaboration platform with video conferencing, document management, and email - sellable to customers",
+  "author": "Bheem Cloud",
+  "license": "proprietary",
+  "category": "collaboration",
+  "features": [
+    {
+      "id": "meet",
+      "name": "Bheem Meet",
+      "description": "Video conferencing with LiveKit",
+      "icon": "video"
+    },
+    {
+      "id": "docs",
+      "name": "Bheem Docs",
+      "description": "Document management with NextCloud + OnlyOffice",
+      "icon": "file-text"
+    },
+    {
+      "id": "mail",
+      "name": "Bheem Mail",
+      "description": "Email with Mailcow integration",
+      "icon": "mail"
+    },
+    {
+      "id": "recordings",
+      "name": "Secure Recordings",
+      "description": "Anti-piracy recording with watermarks and DRM",
+      "icon": "shield"
+    }
+  ],
+  "plans": {
+    "starter": {
+      "price": 0,
+      "maxUsers": 10,
+      "maxStorageGB": 10,
+      "features": ["meet", "docs"]
+    },
+    "professional": {
+      "price": 49,
+      "maxUsers": 50,
+      "maxStorageGB": 100,
+      "features": ["meet", "docs", "mail", "recordings"]
+    },
+    "enterprise": {
+      "price": 199,
+      "maxUsers": 500,
+      "maxStorageGB": 1000,
+      "features": ["meet", "docs", "mail", "recordings", "custom_domain", "sso", "api"]
+    }
+  },
+  "dependencies": {
+    "livekit": ">=1.4.0",
+    "nextcloud": ">=27.0.0",
+    "mailcow": ">=2023.12"
+  },
+  "ports": {
+    "api": 8000,
+    "frontend": 3000
+  },
+  "endpoints": {
+    "api": "/api/v1",
+    "docs": "/api/v1/docs",
+    "meet": "/api/v1/meet",
+    "mail": "/api/v1/mail",
+    "workspace": "/api/v1/workspace",
+    "tenants": "/api/v1/tenants",
+    "recordings": "/api/v1/recordings"
+  }
+}

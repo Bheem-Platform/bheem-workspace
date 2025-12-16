@@ -1,0 +1,283 @@
+"""
+Bheem Workspace - Meet API (LiveKit Integration)
+Video conferencing rooms, tokens, and recording management
+"""
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
+from pydantic import BaseModel
+from typing import Optional, List
+from datetime import datetime
+import uuid
+
+from core.database import get_db
+from core.security import get_current_user, get_optional_user
+from core.config import settings
+from services.livekit_service import livekit_service
+
+router = APIRouter(prefix="/meet", tags=["Bheem Meet"])
+
+# Schemas
+class CreateRoomRequest(BaseModel):
+    name: str
+    scheduled_time: Optional[datetime] = None
+    duration_minutes: Optional[int] = 60
+    description: Optional[str] = None
+    max_participants: Optional[int] = 100
+
+class CreateRoomResponse(BaseModel):
+    room_id: str
+    room_code: str
+    name: str
+    join_url: str
+    host_token: str
+    ws_url: str
+    created_at: datetime
+
+class JoinRoomRequest(BaseModel):
+    room_code: str
+    participant_name: str
+
+class JoinRoomResponse(BaseModel):
+    token: str
+    ws_url: str
+    room_code: str
+    room_name: str
+
+class RoomInfo(BaseModel):
+    id: str
+    room_code: str
+    name: str
+    status: str
+    join_url: str
+    created_by: Optional[str]
+    created_at: datetime
+    scheduled_time: Optional[datetime]
+    participant_count: int = 0
+
+# Endpoints
+@router.post("/rooms", response_model=CreateRoomResponse)
+async def create_room(
+    request: CreateRoomRequest,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a new meeting room"""
+    room_id = str(uuid.uuid4())
+    room_code = livekit_service.generate_room_code()
+    
+    # Generate host token
+    host_token = livekit_service.create_token(
+        room_name=room_code,
+        participant_identity=current_user["id"],
+        participant_name=current_user["username"],
+        is_host=True
+    )
+    
+    # Store room in ERP database
+    try:
+        await db.execute(
+            text("""
+                INSERT INTO project_management.pm_meeting_rooms 
+                (id, name, room_code, created_by, company_id, status, 
+                 scheduled_start, max_participants, created_at, updated_at)
+                VALUES (:id, :name, :room_code, :created_by, :company_id, 
+                        'scheduled', :scheduled_start, :max_participants, NOW(), NOW())
+            """),
+            {
+                "id": room_id,
+                "name": request.name,
+                "room_code": room_code,
+                "created_by": current_user["id"],
+                "company_id": current_user.get("company_id"),
+                "scheduled_start": request.scheduled_time,
+                "max_participants": request.max_participants or 100
+            }
+        )
+        await db.commit()
+    except Exception as e:
+        print(f"Warning: Could not save room to ERP: {e}")
+        # Continue even if ERP save fails
+    
+    return CreateRoomResponse(
+        room_id=room_id,
+        room_code=room_code,
+        name=request.name,
+        join_url=livekit_service.get_join_url(room_code),
+        host_token=host_token,
+        ws_url=livekit_service.get_ws_url(),
+        created_at=datetime.utcnow()
+    )
+
+@router.post("/token", response_model=JoinRoomResponse)
+async def get_join_token(
+    request: JoinRoomRequest,
+    current_user: Optional[dict] = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get a token to join a meeting room (works for guests too)"""
+    room_code = request.room_code
+    
+    # Try to find room in database
+    room_name = request.room_code  # Default to room code
+    try:
+        result = await db.execute(
+            text("SELECT name FROM project_management.pm_meeting_rooms WHERE room_code = :room_code"),
+            {"room_code": room_code}
+        )
+        room = result.fetchone()
+        if room:
+            room_name = room.name
+    except:
+        pass
+    
+    # Generate participant identity
+    if current_user:
+        participant_identity = current_user["id"]
+        participant_name = current_user["username"]
+        is_host = False  # Check if user is the room creator for host privileges
+    else:
+        participant_identity = f"guest-{uuid.uuid4().hex[:8]}"
+        participant_name = request.participant_name
+        is_host = False
+    
+    # Generate token
+    token = livekit_service.create_token(
+        room_name=room_code,
+        participant_identity=participant_identity,
+        participant_name=participant_name,
+        is_host=is_host
+    )
+    
+    return JoinRoomResponse(
+        token=token,
+        ws_url=livekit_service.get_ws_url(),
+        room_code=room_code,
+        room_name=room_name
+    )
+
+@router.get("/rooms", response_model=List[RoomInfo])
+async def list_rooms(
+    status: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """List meeting rooms for current user"""
+    try:
+        query = """
+            SELECT id, room_code, name, status, created_by, created_at, scheduled_start
+            FROM project_management.pm_meeting_rooms
+            WHERE (created_by = :user_id OR company_id = :company_id)
+        """
+        params = {
+            "user_id": current_user["id"],
+            "company_id": current_user.get("company_id")
+        }
+        
+        if status:
+            query += " AND status = :status"
+            params["status"] = status
+        
+        query += " ORDER BY created_at DESC LIMIT 50"
+        
+        result = await db.execute(text(query), params)
+        rooms = result.fetchall()
+        
+        return [
+            RoomInfo(
+                id=str(room.id),
+                room_code=room.room_code,
+                name=room.name,
+                status=room.status,
+                join_url=livekit_service.get_join_url(room.room_code),
+                created_by=str(room.created_by) if room.created_by else None,
+                created_at=room.created_at,
+                scheduled_time=room.scheduled_start,
+                participant_count=0
+            )
+            for room in rooms
+        ]
+    except Exception as e:
+        print(f"Error listing rooms: {e}")
+        return []
+
+@router.get("/rooms/{room_code}")
+async def get_room(
+    room_code: str,
+    current_user: Optional[dict] = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get room info by code"""
+    try:
+        result = await db.execute(
+            text("""
+                SELECT id, room_code, name, status, created_by, created_at, scheduled_start, max_participants
+                FROM project_management.pm_meeting_rooms 
+                WHERE room_code = :room_code
+            """),
+            {"room_code": room_code}
+        )
+        room = result.fetchone()
+        
+        if not room:
+            # Room not in DB, but might exist in LiveKit
+            return {
+                "room_code": room_code,
+                "name": room_code,
+                "status": "active",
+                "join_url": livekit_service.get_join_url(room_code),
+                "ws_url": livekit_service.get_ws_url()
+            }
+        
+        return {
+            "id": str(room.id),
+            "room_code": room.room_code,
+            "name": room.name,
+            "status": room.status,
+            "join_url": livekit_service.get_join_url(room.room_code),
+            "ws_url": livekit_service.get_ws_url(),
+            "created_at": room.created_at,
+            "scheduled_time": room.scheduled_start,
+            "max_participants": room.max_participants
+        }
+    except Exception as e:
+        print(f"Error getting room: {e}")
+        return {
+            "room_code": room_code,
+            "name": room_code,
+            "status": "active",
+            "join_url": livekit_service.get_join_url(room_code),
+            "ws_url": livekit_service.get_ws_url()
+        }
+
+@router.post("/rooms/{room_code}/end")
+async def end_room(
+    room_code: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """End a meeting room"""
+    try:
+        await db.execute(
+            text("""
+                UPDATE project_management.pm_meeting_rooms 
+                SET status = 'ended', updated_at = NOW()
+                WHERE room_code = :room_code AND created_by = :user_id
+            """),
+            {"room_code": room_code, "user_id": current_user["id"]}
+        )
+        await db.commit()
+    except Exception as e:
+        print(f"Error ending room: {e}")
+    
+    return {"message": "Room ended", "room_code": room_code}
+
+@router.get("/config")
+async def get_meet_config():
+    """Get Meet configuration for frontend"""
+    return {
+        "ws_url": livekit_service.get_ws_url(),
+        "workspace_url": settings.WORKSPACE_URL,
+        "max_participants": 100,
+        "recording_enabled": True
+    }

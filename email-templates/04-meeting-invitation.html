@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meeting Invitation - Bheem Meet</title>
+</head>
+<body style="margin:0; padding:20px; background-color:#f5f7fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+    <div style="max-width:500px; margin:0 auto; background:white; border-radius:12px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,0.1);">
+        <!-- Header -->
+        <div style="background:linear-gradient(135deg, #3b82f6, #2563eb); color:white; padding:35px; text-align:center;">
+            <svg width="40" height="40" fill="white" viewBox="0 0 24 24" style="margin-bottom:10px;"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>
+            <h1 style="margin:0; font-size:26px; font-weight:600;">You're Invited!</h1>
+        </div>
+
+        <!-- Content -->
+        <div style="padding:35px;">
+            <p style="color:#64748b; font-size:16px; margin:0 0 25px 0;">
+                <strong style="color:#1e293b;">{{HOST_NAME}}</strong> has invited you to a meeting.
+            </p>
+
+            <!-- Meeting Details -->
+            <div style="background:#f8fafc; border-radius:10px; padding:25px; margin:20px 0;">
+                <div style="margin-bottom:15px;">
+                    <span style="color:#94a3b8; font-size:12px; text-transform:uppercase; letter-spacing:1px;">Meeting</span>
+                    <p style="color:#1e293b; font-size:18px; font-weight:600; margin:5px 0 0 0;">{{MEETING_NAME}}</p>
+                </div>
+                <div style="margin-bottom:15px;">
+                    <span style="color:#94a3b8; font-size:12px; text-transform:uppercase; letter-spacing:1px;">When</span>
+                    <p style="color:#1e293b; font-size:16px; margin:5px 0 0 0;">{{DATE_TIME}}</p>
+                </div>
+                <div>
+                    <span style="color:#94a3b8; font-size:12px; text-transform:uppercase; letter-spacing:1px;">Host</span>
+                    <p style="color:#1e293b; font-size:16px; margin:5px 0 0 0;">{{HOST_NAME}}</p>
+                </div>
+            </div>
+
+            <!-- CTA Button -->
+            <div style="text-align:center; margin:30px 0 10px 0;">
+                <a href="{{MEETING_URL}}" style="display:inline-block; background:linear-gradient(135deg, #3b82f6, #2563eb); color:white; padding:16px 40px; border-radius:8px; text-decoration:none; font-weight:600; font-size:16px;">Join Meeting</a>
+            </div>
+
+            <p style="color:#94a3b8; font-size:13px; text-align:center; margin-top:20px;">
+                Or join with this link:<br>
+                <a href="{{MEETING_URL}}" style="color:#2563eb;">{{MEETING_URL}}</a>
+            </p>
+        </div>
+
+        <!-- Footer -->
+        <div style="padding:20px 35px; background:#f8fafc; border-top:1px solid #e2e8f0; text-align:center;">
+            <p style="color:#94a3b8; font-size:12px; margin:0;">
+                Powered by <strong>Bheem Meet</strong><br>
+                <a href="https://meet.bheem.cloud" style="color:#2563eb; text-decoration:none;">meet.bheem.cloud</a>
+            </p>
+        </div>
+    </div>
+</body>
+</html>

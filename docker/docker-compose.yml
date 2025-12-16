@@ -1,0 +1,113 @@
+version: '3.8'
+
+services:
+  # Bheem Workspace API
+  workspace-api:
+    build:
+      context: ../backend
+      dockerfile: ../docker/Dockerfile.backend
+    container_name: bheem-workspace-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:${DB_PASSWORD}@${DB_HOST}:5432/bheem_workspace
+      - SECRET_KEY=${SECRET_KEY}
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
+      - LIVEKIT_URL=${LIVEKIT_URL}
+      - NEXTCLOUD_URL=${NEXTCLOUD_URL}
+      - NEXTCLOUD_ADMIN_USER=${NEXTCLOUD_ADMIN_USER}
+      - NEXTCLOUD_ADMIN_PASSWORD=${NEXTCLOUD_ADMIN_PASSWORD}
+      - MAILCOW_URL=${MAILCOW_URL}
+      - MAILCOW_API_KEY=${MAILCOW_API_KEY}
+      - S3_ENDPOINT=${S3_ENDPOINT}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY}
+      - S3_SECRET_KEY=${S3_SECRET_KEY}
+      - S3_BUCKET=${S3_BUCKET}
+      - S3_REGION=${S3_REGION}
+    volumes:
+      - workspace-recordings:/app/recordings
+    networks:
+      - bheem-workspace
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Bheem Workspace Frontend
+  workspace-frontend:
+    build:
+      context: ../frontend
+      dockerfile: ../docker/Dockerfile.frontend
+    container_name: bheem-workspace-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://workspace-api:8000/api/v1
+      - NEXT_PUBLIC_LIVEKIT_URL=${LIVEKIT_URL}
+    networks:
+      - bheem-workspace
+    depends_on:
+      - workspace-api
+
+  # Redis for caching and sessions
+  redis:
+    image: redis:7-alpine
+    container_name: bheem-workspace-redis
+    restart: unless-stopped
+    volumes:
+      - workspace-redis:/data
+    networks:
+      - bheem-workspace
+    command: redis-server --appendonly yes
+
+  # LiveKit Server (if running locally)
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: bheem-workspace-livekit
+    restart: unless-stopped
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+      - "50000-50100:50000-50100/udp"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    command: --config /etc/livekit.yaml
+    networks:
+      - bheem-workspace
+    profiles:
+      - with-livekit
+
+  # LiveKit Egress (for recording)
+  egress:
+    image: livekit/egress:latest
+    container_name: bheem-workspace-egress
+    restart: unless-stopped
+    environment:
+      - EGRESS_CONFIG_FILE=/etc/egress.yaml
+    volumes:
+      - ./egress.yaml:/etc/egress.yaml:ro
+      - workspace-recordings:/tmp/recordings
+    cap_add:
+      - SYS_ADMIN
+    networks:
+      - bheem-workspace
+    depends_on:
+      - livekit
+      - redis
+    profiles:
+      - with-livekit
+
+networks:
+  bheem-workspace:
+    driver: bridge
+
+volumes:
+  workspace-redis:
+  workspace-recordings:

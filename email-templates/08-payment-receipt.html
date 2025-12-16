@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Receipt - Bheem Workspace</title>
+</head>
+<body style="margin:0; padding:20px; background-color:#f5f7fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+    <div style="max-width:550px; margin:0 auto; background:white; border-radius:12px; padding:40px; box-shadow:0 4px 20px rgba(0,0,0,0.1);">
+        <!-- Logo -->
+        <div style="text-align:center; margin-bottom:30px;">
+            <div style="width:60px; height:60px; background:linear-gradient(135deg, #2563eb, #7c3aed); border-radius:12px; margin:0 auto 10px; display:flex; align-items:center; justify-content:center;">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="white"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            </div>
+            <h2 style="color:#1e293b; margin:0; font-size:22px;">Payment Successful</h2>
+        </div>
+
+        <!-- Success Badge -->
+        <div style="background:#dcfce7; border-radius:50px; padding:10px 20px; display:inline-block; margin:0 auto 25px; width:auto; text-align:center;">
+            <span style="color:#16a34a; font-size:14px; font-weight:600;">&#10003; Payment Confirmed</span>
+        </div>
+
+        <!-- Content -->
+        <p style="color:#64748b; font-size:16px; line-height:1.6;">Hi {{NAME}},</p>
+        <p style="color:#64748b; font-size:16px; line-height:1.6;">
+            Thank you for your payment. Here's your receipt for your records.
+        </p>
+
+        <!-- Receipt Details -->
+        <div style="background:#f8fafc; border-radius:10px; padding:25px; margin:25px 0;">
+            <table style="width:100%; border-collapse:collapse;">
+                <tr>
+                    <td style="color:#94a3b8; font-size:13px; padding:10px 0; border-bottom:1px solid #e2e8f0;">Receipt Number</td>
+                    <td style="color:#1e293b; font-size:14px; font-weight:600; text-align:right; padding:10px 0; border-bottom:1px solid #e2e8f0;">{{RECEIPT_NUMBER}}</td>
+                </tr>
+                <tr>
+                    <td style="color:#94a3b8; font-size:13px; padding:10px 0; border-bottom:1px solid #e2e8f0;">Date</td>
+                    <td style="color:#1e293b; font-size:14px; text-align:right; padding:10px 0; border-bottom:1px solid #e2e8f0;">{{DATE}}</td>
+                </tr>
+                <tr>
+                    <td style="color:#94a3b8; font-size:13px; padding:10px 0; border-bottom:1px solid #e2e8f0;">Plan</td>
+                    <td style="color:#1e293b; font-size:14px; text-align:right; padding:10px 0; border-bottom:1px solid #e2e8f0;">{{PLAN_NAME}}</td>
+                </tr>
+                <tr>
+                    <td style="color:#94a3b8; font-size:13px; padding:10px 0; border-bottom:1px solid #e2e8f0;">Billing Period</td>
+                    <td style="color:#1e293b; font-size:14px; text-align:right; padding:10px 0; border-bottom:1px solid #e2e8f0;">{{BILLING_PERIOD}}</td>
+                </tr>
+                <tr>
+                    <td style="color:#94a3b8; font-size:13px; padding:10px 0; border-bottom:1px solid #e2e8f0;">Payment Method</td>
+                    <td style="color:#1e293b; font-size:14px; text-align:right; padding:10px 0; border-bottom:1px solid #e2e8f0;">{{PAYMENT_METHOD}}</td>
+                </tr>
+                <tr>
+                    <td style="color:#1e293b; font-size:16px; font-weight:600; padding:15px 0 0 0;">Total Amount</td>
+                    <td style="color:#2563eb; font-size:20px; font-weight:700; text-align:right; padding:15px 0 0 0;">{{AMOUNT}}</td>
+                </tr>
+            </table>
+        </div>
+
+        <!-- CTA Button -->
+        <div style="text-align:center; margin:30px 0;">
+            <a href="{{INVOICE_URL}}" style="display:inline-block; background:#2563eb; color:white; padding:14px 30px; border-radius:8px; text-decoration:none; font-weight:600; font-size:15px;">Download Invoice</a>
+        </div>
+
+        <p style="color:#94a3b8; font-size:13px; text-align:center; line-height:1.6;">
+            Questions about your billing? Contact us at<br>
+            <a href="mailto:billing@bheem.cloud" style="color:#2563eb; text-decoration:none;">billing@bheem.cloud</a>
+        </p>
+
+        <!-- Footer -->
+        <hr style="border:none; border-top:1px solid #e2e8f0; margin:30px 0;">
+        <p style="color:#94a3b8; font-size:12px; text-align:center; margin:0;">
+            &copy; 2024 Bheem Workspace. All rights reserved.<br>
+            <a href="https://workspace.bheem.cloud" style="color:#2563eb; text-decoration:none;">workspace.bheem.cloud</a>
+        </p>
+    </div>
+</body>
+</html>

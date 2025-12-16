@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Team Invitation - Bheem Workspace</title>
+</head>
+<body style="margin:0; padding:20px; background-color:#f5f7fa; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;">
+    <div style="max-width:500px; margin:0 auto; background:white; border-radius:12px; padding:40px; box-shadow:0 4px 20px rgba(0,0,0,0.1);">
+        <!-- Logo -->
+        <div style="text-align:center; margin-bottom:30px;">
+            <div style="width:60px; height:60px; background:linear-gradient(135deg, #2563eb, #7c3aed); border-radius:12px; margin:0 auto 10px; display:flex; align-items:center; justify-content:center;">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="white"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+            </div>
+            <h2 style="color:#1e293b; margin:0; font-size:22px;">You've Been Invited!</h2>
+        </div>
+
+        <!-- Content -->
+        <p style="color:#64748b; font-size:16px; line-height:1.6; text-align:center;">
+            <strong style="color:#1e293b;">{{INVITER_NAME}}</strong> has invited you to join<br>
+            <strong style="color:#2563eb; font-size:20px;">{{TEAM_NAME}}</strong><br>
+            on Bheem Workspace.
+        </p>
+
+        <!-- Team Info Card -->
+        <div style="background:#f8fafc; border-radius:10px; padding:25px; margin:30px 0; text-align:center;">
+            <div style="width:70px; height:70px; background:linear-gradient(135deg, #8b5cf6, #6366f1); border-radius:50%; margin:0 auto 15px; display:flex; align-items:center; justify-content:center;">
+                <span style="color:white; font-size:28px; font-weight:bold;">{{TEAM_INITIAL}}</span>
+            </div>
+            <p style="color:#1e293b; font-size:18px; font-weight:600; margin:0;">{{TEAM_NAME}}</p>
+            <p style="color:#94a3b8; font-size:14px; margin:8px 0 0 0;">{{MEMBER_COUNT}} members</p>
+        </div>
+
+        <p style="color:#64748b; font-size:14px; text-align:center; line-height:1.6;">
+            Join the team to collaborate on documents, attend meetings, and work together seamlessly.
+        </p>
+
+        <!-- CTA Button -->
+        <div style="text-align:center; margin:30px 0;">
+            <a href="{{INVITE_LINK}}" style="display:inline-block; background:linear-gradient(135deg, #2563eb, #7c3aed); color:white; padding:16px 40px; border-radius:8px; text-decoration:none; font-weight:600; font-size:16px;">Accept Invitation</a>
+        </div>
+
+        <p style="color:#94a3b8; font-size:13px; text-align:center;">
+            This invitation expires in 7 days.
+        </p>
+
+        <!-- Footer -->
+        <hr style="border:none; border-top:1px solid #e2e8f0; margin:30px 0;">
+        <p style="color:#94a3b8; font-size:12px; text-align:center; margin:0;">
+            &copy; 2024 Bheem Workspace. All rights reserved.<br>
+            <a href="https://workspace.bheem.cloud" style="color:#2563eb; text-decoration:none;">workspace.bheem.cloud</a>
+        </p>
+    </div>
+</body>
+</html>
