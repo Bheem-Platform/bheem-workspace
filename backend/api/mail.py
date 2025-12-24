@@ -7,7 +7,8 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from core.security import get_current_user
 from services.mailcow_service import mailcow_service
-from services.msg91_service import msg91_service
+# Use centralized Bheem Notify service instead of direct MSG91
+from services.notify_client import msg91_service  # Backward compatible alias
 
 router = APIRouter(prefix="/mail", tags=["Bheem Mail"])
 
