@@ -143,6 +143,16 @@ async def homepage():
             return HTMLResponse(content=f.read())
     return HTMLResponse(content="<h1>Bheem Workspace</h1>")
 
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    path = os.path.join(FRONTEND_PATH, "login.html")
+    if os.path.exists(path):
+        with open(path, "r") as f:
+            return HTMLResponse(content=f.read())
+    # Redirect to Bheem Passport if no login page
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="https://platform.bheem.co.uk/login?redirect=https://workspace.bheem.cloud/dashboard")
+
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     path = os.path.join(FRONTEND_PATH, "dashboard.html")
