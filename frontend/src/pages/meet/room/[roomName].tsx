@@ -22,7 +22,7 @@ import {
   Settings,
   MoreVertical,
   Copy,
-  Record,
+  Disc,
   StopCircle,
 } from 'lucide-react';
 
@@ -154,7 +154,7 @@ export default function MeetingRoom() {
               }`}
               title={isRecording ? 'Stop recording' : 'Start recording'}
             >
-              {isRecording ? <StopCircle size={18} /> : <Record size={18} />}
+              {isRecording ? <StopCircle size={18} /> : <Disc size={18} />}
             </button>
             <button className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg">
               <Settings size={18} />

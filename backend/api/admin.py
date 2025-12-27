@@ -1,12 +1,25 @@
 """
-Bheem Workspace Admin API - Complete Administration Module
+Bheem Workspace Admin API - Database-backed Administration Module
 """
 from fastapi import APIRouter, HTTPException, Depends, Query, Body
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from enum import Enum
+from decimal import Decimal
 import uuid
+
+from sqlalchemy import select, func, and_, or_
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.database import get_db
+from models.admin_models import (
+    Tenant, TenantUser, Domain, DomainDNSRecord,
+    Developer, DeveloperProject, ActivityLog as ActivityLogModel
+)
+from services.mailgun_service import mailgun_service
+from services.cloudflare_service import cloudflare_service
+from services.mailcow_service import mailcow_service
 
 router = APIRouter()
 
@@ -28,7 +41,12 @@ class ServiceType(str, Enum):
     DOCS = "docs"
     MEET = "meet"
 
-# ==================== MODELS ====================
+class DomainType(str, Enum):
+    EMAIL = "email"
+    WORKSPACE = "workspace"
+    CUSTOM = "custom"
+
+# ==================== PYDANTIC MODELS ====================
 
 # Tenant/Organization Models
 class TenantCreate(BaseModel):
@@ -53,8 +71,10 @@ class TenantResponse(BaseModel):
     owner_email: str
     plan: str
     is_active: bool
+    is_suspended: bool
     settings: Dict[str, Any]
     # Quotas
+    max_users: int
     meet_quota_hours: int
     docs_quota_mb: int
     mail_quota_mb: int
@@ -67,37 +87,63 @@ class TenantResponse(BaseModel):
     created_at: datetime
     user_count: int = 0
 
+    class Config:
+        from_attributes = True
+
 # User Models
 class UserCreate(BaseModel):
     email: EmailStr
     name: str
     role: UserRole = UserRole.MEMBER
-    password: Optional[str] = None
+    user_id: str  # Reference to bheem-core user
 
 class UserUpdate(BaseModel):
-    name: Optional[str] = None
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
-    avatar_url: Optional[str] = None
+    permissions: Optional[Dict[str, Any]] = None
 
 class UserResponse(BaseModel):
     id: str
     tenant_id: str
-    email: str
-    name: str
+    user_id: str
     role: str
-    avatar_url: Optional[str]
     is_active: bool
-    last_login: Optional[datetime]
+    permissions: Dict[str, Any]
+    invited_at: Optional[datetime]
+    joined_at: Optional[datetime]
     created_at: datetime
 
-# Mail Admin Models
-class MailDomainCreate(BaseModel):
-    domain: str
-    max_mailboxes: int = 100
+    class Config:
+        from_attributes = True
 
+# Domain Models
+class DomainCreate(BaseModel):
+    domain: str
+    domain_type: DomainType = DomainType.EMAIL
+    is_primary: bool = False
+
+class DomainResponse(BaseModel):
+    id: str
+    tenant_id: str
+    domain: str
+    domain_type: str
+    is_primary: bool
+    is_active: bool
+    spf_verified: bool
+    dkim_verified: bool
+    mx_verified: bool
+    ownership_verified: bool
+    mailgun_domain_id: Optional[str]
+    cloudflare_zone_id: Optional[str]
+    created_at: datetime
+    verified_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+# Mail Admin Models
 class MailboxCreate(BaseModel):
-    local_part: str  # username part before @
+    local_part: str
     domain: str
     name: str
     password: str
@@ -121,7 +167,7 @@ class SharedFolderCreate(BaseModel):
     name: str
     path: str
     allowed_users: List[str]
-    permissions: str = "read"  # read, write, admin
+    permissions: str = "read"
 
 # Meet Admin Models
 class MeetingSettingsUpdate(BaseModel):
@@ -138,6 +184,21 @@ class RecordingPolicy(BaseModel):
     drm_enabled: bool = True
     watermark_enabled: bool = True
 
+# Developer Models
+class DeveloperCreate(BaseModel):
+    user_id: str
+    role: str  # lead_developer, developer, junior_developer
+    ssh_public_key: Optional[str] = None
+    github_username: Optional[str] = None
+
+class DeveloperProjectAccess(BaseModel):
+    project_name: str
+    access_level: str  # read, write, admin
+    git_branch_pattern: Optional[str] = None
+    can_push_to_main: bool = False
+    can_deploy_staging: bool = False
+    can_deploy_production: bool = False
+
 # Analytics Models
 class UsageStats(BaseModel):
     service: str
@@ -145,89 +206,65 @@ class UsageStats(BaseModel):
     total_usage: float
     quota: float
     usage_percent: float
-    trend: str  # up, down, stable
+    trend: str
 
-class ActivityLog(BaseModel):
+class ActivityLogResponse(BaseModel):
     id: str
-    user_id: str
-    user_email: str
+    tenant_id: Optional[str]
+    user_id: Optional[str]
     action: str
-    service: str
-    details: Dict[str, Any]
-    ip_address: str
-    timestamp: datetime
+    entity_type: Optional[str]
+    entity_id: Optional[str]
+    description: Optional[str]
+    ip_address: Optional[str]
+    extra_data: Optional[Dict[str, Any]]
+    created_at: datetime
 
-# ==================== IN-MEMORY STORAGE (Demo) ====================
-# In production, these would be database queries
+    class Config:
+        from_attributes = True
 
-tenants_db = {}
-users_db = {}
-mail_domains_db = {}
-mailboxes_db = {}
-activity_logs_db = []
+# ==================== HELPER FUNCTIONS ====================
 
-# Initialize demo data
-def init_demo_data():
-    tenant_id = str(uuid.uuid4())
-    tenants_db[tenant_id] = {
-        "id": tenant_id,
-        "name": "Demo Organization",
-        "slug": "demo",
-        "domain": "demo.bheem.cloud",
-        "owner_email": "admin@demo.bheem.cloud",
-        "plan": "business",
-        "is_active": True,
-        "settings": {"theme": "light", "language": "en"},
-        "meet_quota_hours": 500,
-        "docs_quota_mb": 102400,
-        "mail_quota_mb": 51200,
-        "recordings_quota_mb": 204800,
-        "meet_used_hours": 45.5,
-        "docs_used_mb": 2048,
-        "mail_used_mb": 512,
-        "recordings_used_mb": 8192,
-        "created_at": datetime.utcnow() - timedelta(days=30),
-        "user_count": 5
+def get_plan_quotas(plan: str) -> dict:
+    """Get quotas based on plan type"""
+    quotas = {
+        "free": {"max_users": 5, "meet": 10, "docs": 1024, "mail": 512, "recordings": 1024},
+        "starter": {"max_users": 25, "meet": 100, "docs": 10240, "mail": 5120, "recordings": 10240},
+        "business": {"max_users": 100, "meet": 500, "docs": 102400, "mail": 51200, "recordings": 204800},
+        "enterprise": {"max_users": 10000, "meet": 10000, "docs": 1048576, "mail": 524288, "recordings": 2097152}
     }
-    
-    # Demo users
-    for i, (email, name, role) in enumerate([
-        ("admin@demo.bheem.cloud", "Admin User", "admin"),
-        ("john@demo.bheem.cloud", "John Smith", "manager"),
-        ("sarah@demo.bheem.cloud", "Sarah Chen", "member"),
-        ("mike@demo.bheem.cloud", "Mike Johnson", "member"),
-        ("lisa@demo.bheem.cloud", "Lisa Wang", "member"),
-    ]):
-        user_id = str(uuid.uuid4())
-        users_db[user_id] = {
-            "id": user_id,
-            "tenant_id": tenant_id,
-            "email": email,
-            "name": name,
-            "role": role,
-            "avatar_url": None,
-            "is_active": True,
-            "last_login": datetime.utcnow() - timedelta(hours=i*2),
-            "created_at": datetime.utcnow() - timedelta(days=30-i)
-        }
-    
-    # Demo mail domain
-    mail_domains_db["demo.bheem.cloud"] = {
-        "domain": "demo.bheem.cloud",
-        "tenant_id": tenant_id,
-        "active": True,
-        "max_mailboxes": 100,
-        "created_at": datetime.utcnow() - timedelta(days=30)
-    }
-    
-    return tenant_id
+    return quotas.get(plan, quotas["free"])
 
-DEMO_TENANT_ID = init_demo_data()
+async def log_activity(
+    db: AsyncSession,
+    action: str,
+    tenant_id: str = None,
+    user_id: str = None,
+    entity_type: str = None,
+    entity_id: str = None,
+    description: str = None,
+    ip_address: str = None,
+    metadata: dict = None
+):
+    """Log an activity to the audit log"""
+    log_entry = ActivityLogModel(
+        tenant_id=uuid.UUID(tenant_id) if tenant_id else None,
+        user_id=uuid.UUID(user_id) if user_id else None,
+        action=action,
+        entity_type=entity_type,
+        entity_id=uuid.UUID(entity_id) if entity_id else None,
+        description=description,
+        ip_address=ip_address,
+        extra_data=metadata or {}
+    )
+    db.add(log_entry)
+    await db.commit()
 
 # ==================== TENANT ENDPOINTS ====================
 
 @router.get("/tenants", response_model=List[TenantResponse])
 async def list_tenants(
+    db: AsyncSession = Depends(get_db),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     search: Optional[str] = None,
@@ -235,479 +272,1100 @@ async def list_tenants(
     is_active: Optional[bool] = None
 ):
     """List all tenants/organizations"""
-    results = list(tenants_db.values())
-    
+    query = select(Tenant)
+
     if search:
-        results = [t for t in results if search.lower() in t["name"].lower() or search.lower() in t["slug"].lower()]
+        query = query.where(
+            or_(
+                Tenant.name.ilike(f"%{search}%"),
+                Tenant.slug.ilike(f"%{search}%")
+            )
+        )
     if plan:
-        results = [t for t in results if t["plan"] == plan]
+        query = query.where(Tenant.plan == plan.value)
     if is_active is not None:
-        results = [t for t in results if t["is_active"] == is_active]
-    
-    return results[skip:skip+limit]
+        query = query.where(Tenant.is_active == is_active)
+
+    query = query.offset(skip).limit(limit).order_by(Tenant.created_at.desc())
+
+    result = await db.execute(query)
+    tenants = result.scalars().all()
+
+    # Get user counts for each tenant
+    responses = []
+    for tenant in tenants:
+        user_count_query = select(func.count(TenantUser.id)).where(
+            TenantUser.tenant_id == tenant.id
+        )
+        user_count_result = await db.execute(user_count_query)
+        user_count = user_count_result.scalar() or 0
+
+        responses.append(TenantResponse(
+            id=str(tenant.id),
+            name=tenant.name,
+            slug=tenant.slug,
+            domain=tenant.domain,
+            owner_email=tenant.owner_email,
+            plan=tenant.plan,
+            is_active=tenant.is_active,
+            is_suspended=tenant.is_suspended or False,
+            settings=tenant.settings or {},
+            max_users=tenant.max_users,
+            meet_quota_hours=tenant.meet_quota_hours,
+            docs_quota_mb=tenant.docs_quota_mb,
+            mail_quota_mb=tenant.mail_quota_mb,
+            recordings_quota_mb=tenant.recordings_quota_mb,
+            meet_used_hours=float(tenant.meet_used_hours or 0),
+            docs_used_mb=float(tenant.docs_used_mb or 0),
+            mail_used_mb=float(tenant.mail_used_mb or 0),
+            recordings_used_mb=float(tenant.recordings_used_mb or 0),
+            created_at=tenant.created_at,
+            user_count=user_count
+        ))
+
+    return responses
 
 @router.post("/tenants", response_model=TenantResponse)
-async def create_tenant(tenant: TenantCreate):
+async def create_tenant(
+    tenant: TenantCreate,
+    db: AsyncSession = Depends(get_db)
+):
     """Create a new tenant/organization"""
-    tenant_id = str(uuid.uuid4())
-    
-    # Set quotas based on plan
-    quotas = {
-        "free": {"meet": 10, "docs": 1024, "mail": 512, "recordings": 1024},
-        "starter": {"meet": 100, "docs": 10240, "mail": 5120, "recordings": 10240},
-        "business": {"meet": 500, "docs": 102400, "mail": 51200, "recordings": 204800},
-        "enterprise": {"meet": 10000, "docs": 1048576, "mail": 524288, "recordings": 2097152}
-    }
-    plan_quotas = quotas.get(tenant.plan, quotas["free"])
-    
-    tenant_data = {
-        "id": tenant_id,
-        "name": tenant.name,
-        "slug": tenant.slug,
-        "domain": tenant.domain,
-        "owner_email": tenant.owner_email,
-        "plan": tenant.plan,
-        "is_active": True,
-        "settings": {},
-        "meet_quota_hours": plan_quotas["meet"],
-        "docs_quota_mb": plan_quotas["docs"],
-        "mail_quota_mb": plan_quotas["mail"],
-        "recordings_quota_mb": plan_quotas["recordings"],
-        "meet_used_hours": 0,
-        "docs_used_mb": 0,
-        "mail_used_mb": 0,
-        "recordings_used_mb": 0,
-        "created_at": datetime.utcnow(),
-        "user_count": 0
-    }
-    tenants_db[tenant_id] = tenant_data
-    return tenant_data
+    # Check if slug already exists
+    existing = await db.execute(
+        select(Tenant).where(Tenant.slug == tenant.slug)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Tenant slug already exists")
+
+    quotas = get_plan_quotas(tenant.plan.value)
+
+    new_tenant = Tenant(
+        name=tenant.name,
+        slug=tenant.slug,
+        domain=tenant.domain,
+        owner_email=tenant.owner_email,
+        plan=tenant.plan.value,
+        max_users=quotas["max_users"],
+        meet_quota_hours=quotas["meet"],
+        docs_quota_mb=quotas["docs"],
+        mail_quota_mb=quotas["mail"],
+        recordings_quota_mb=quotas["recordings"]
+    )
+
+    db.add(new_tenant)
+    await db.commit()
+    await db.refresh(new_tenant)
+
+    await log_activity(
+        db,
+        action="tenant_created",
+        tenant_id=str(new_tenant.id),
+        entity_type="tenant",
+        entity_id=str(new_tenant.id),
+        description=f"Created tenant: {tenant.name}"
+    )
+
+    return TenantResponse(
+        id=str(new_tenant.id),
+        name=new_tenant.name,
+        slug=new_tenant.slug,
+        domain=new_tenant.domain,
+        owner_email=new_tenant.owner_email,
+        plan=new_tenant.plan,
+        is_active=new_tenant.is_active,
+        is_suspended=new_tenant.is_suspended or False,
+        settings=new_tenant.settings or {},
+        max_users=new_tenant.max_users,
+        meet_quota_hours=new_tenant.meet_quota_hours,
+        docs_quota_mb=new_tenant.docs_quota_mb,
+        mail_quota_mb=new_tenant.mail_quota_mb,
+        recordings_quota_mb=new_tenant.recordings_quota_mb,
+        meet_used_hours=0,
+        docs_used_mb=0,
+        mail_used_mb=0,
+        recordings_used_mb=0,
+        created_at=new_tenant.created_at,
+        user_count=0
+    )
 
 @router.get("/tenants/{tenant_id}", response_model=TenantResponse)
-async def get_tenant(tenant_id: str):
+async def get_tenant(
+    tenant_id: str,
+    db: AsyncSession = Depends(get_db)
+):
     """Get tenant details"""
-    if tenant_id not in tenants_db:
+    result = await db.execute(
+        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+    )
+    tenant = result.scalar_one_or_none()
+
+    if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    return tenants_db[tenant_id]
+
+    user_count_result = await db.execute(
+        select(func.count(TenantUser.id)).where(TenantUser.tenant_id == tenant.id)
+    )
+    user_count = user_count_result.scalar() or 0
+
+    return TenantResponse(
+        id=str(tenant.id),
+        name=tenant.name,
+        slug=tenant.slug,
+        domain=tenant.domain,
+        owner_email=tenant.owner_email,
+        plan=tenant.plan,
+        is_active=tenant.is_active,
+        is_suspended=tenant.is_suspended or False,
+        settings=tenant.settings or {},
+        max_users=tenant.max_users,
+        meet_quota_hours=tenant.meet_quota_hours,
+        docs_quota_mb=tenant.docs_quota_mb,
+        mail_quota_mb=tenant.mail_quota_mb,
+        recordings_quota_mb=tenant.recordings_quota_mb,
+        meet_used_hours=float(tenant.meet_used_hours or 0),
+        docs_used_mb=float(tenant.docs_used_mb or 0),
+        mail_used_mb=float(tenant.mail_used_mb or 0),
+        recordings_used_mb=float(tenant.recordings_used_mb or 0),
+        created_at=tenant.created_at,
+        user_count=user_count
+    )
 
 @router.patch("/tenants/{tenant_id}", response_model=TenantResponse)
-async def update_tenant(tenant_id: str, update: TenantUpdate):
+async def update_tenant(
+    tenant_id: str,
+    update: TenantUpdate,
+    db: AsyncSession = Depends(get_db)
+):
     """Update tenant settings"""
-    if tenant_id not in tenants_db:
+    result = await db.execute(
+        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+    )
+    tenant = result.scalar_one_or_none()
+
+    if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    
-    tenant = tenants_db[tenant_id]
-    for field, value in update.dict(exclude_unset=True).items():
-        tenant[field] = value
-    
-    return tenant
+
+    update_data = update.model_dump(exclude_unset=True)
+
+    # If plan is being updated, update quotas too
+    if "plan" in update_data:
+        quotas = get_plan_quotas(update_data["plan"])
+        update_data["max_users"] = quotas["max_users"]
+        update_data["meet_quota_hours"] = quotas["meet"]
+        update_data["docs_quota_mb"] = quotas["docs"]
+        update_data["mail_quota_mb"] = quotas["mail"]
+        update_data["recordings_quota_mb"] = quotas["recordings"]
+
+    for field, value in update_data.items():
+        setattr(tenant, field, value)
+
+    tenant.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(tenant)
+
+    await log_activity(
+        db,
+        action="tenant_updated",
+        tenant_id=tenant_id,
+        entity_type="tenant",
+        entity_id=tenant_id,
+        description=f"Updated tenant: {tenant.name}",
+        metadata=update_data
+    )
+
+    return await get_tenant(tenant_id, db)
 
 @router.delete("/tenants/{tenant_id}")
-async def delete_tenant(tenant_id: str):
+async def delete_tenant(
+    tenant_id: str,
+    db: AsyncSession = Depends(get_db)
+):
     """Delete a tenant (soft delete)"""
-    if tenant_id not in tenants_db:
+    result = await db.execute(
+        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+    )
+    tenant = result.scalar_one_or_none()
+
+    if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    
-    tenants_db[tenant_id]["is_active"] = False
+
+    tenant.is_active = False
+    tenant.updated_at = datetime.utcnow()
+    await db.commit()
+
+    await log_activity(
+        db,
+        action="tenant_deactivated",
+        tenant_id=tenant_id,
+        entity_type="tenant",
+        entity_id=tenant_id,
+        description=f"Deactivated tenant: {tenant.name}"
+    )
+
     return {"message": "Tenant deactivated", "tenant_id": tenant_id}
 
-# ==================== USER ENDPOINTS ====================
+# ==================== TENANT USER ENDPOINTS ====================
 
 @router.get("/tenants/{tenant_id}/users", response_model=List[UserResponse])
-async def list_users(
+async def list_tenant_users(
     tenant_id: str,
+    db: AsyncSession = Depends(get_db),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
-    role: Optional[UserRole] = None,
-    search: Optional[str] = None
+    role: Optional[UserRole] = None
 ):
     """List users in a tenant"""
-    results = [u for u in users_db.values() if u["tenant_id"] == tenant_id]
-    
+    query = select(TenantUser).where(
+        TenantUser.tenant_id == uuid.UUID(tenant_id)
+    )
+
     if role:
-        results = [u for u in results if u["role"] == role]
-    if search:
-        results = [u for u in results if search.lower() in u["email"].lower() or search.lower() in u["name"].lower()]
-    
-    return results[skip:skip+limit]
+        query = query.where(TenantUser.role == role.value)
+
+    query = query.offset(skip).limit(limit).order_by(TenantUser.created_at.desc())
+
+    result = await db.execute(query)
+    users = result.scalars().all()
+
+    return [
+        UserResponse(
+            id=str(u.id),
+            tenant_id=str(u.tenant_id),
+            user_id=str(u.user_id),
+            role=u.role,
+            is_active=u.is_active,
+            permissions=u.permissions or {},
+            invited_at=u.invited_at,
+            joined_at=u.joined_at,
+            created_at=u.created_at
+        )
+        for u in users
+    ]
 
 @router.post("/tenants/{tenant_id}/users", response_model=UserResponse)
-async def create_user(tenant_id: str, user: UserCreate):
-    """Create a new user in tenant"""
-    if tenant_id not in tenants_db:
+async def add_tenant_user(
+    tenant_id: str,
+    user: UserCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Add a user to tenant"""
+    # Check tenant exists
+    tenant_result = await db.execute(
+        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+    )
+    tenant = tenant_result.scalar_one_or_none()
+    if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
-    
-    user_id = str(uuid.uuid4())
-    user_data = {
-        "id": user_id,
-        "tenant_id": tenant_id,
-        "email": user.email,
-        "name": user.name,
-        "role": user.role,
-        "avatar_url": None,
-        "is_active": True,
-        "last_login": None,
-        "created_at": datetime.utcnow()
-    }
-    users_db[user_id] = user_data
-    tenants_db[tenant_id]["user_count"] += 1
-    
-    return user_data
+
+    # Check user limit
+    user_count_result = await db.execute(
+        select(func.count(TenantUser.id)).where(
+            TenantUser.tenant_id == uuid.UUID(tenant_id)
+        )
+    )
+    user_count = user_count_result.scalar() or 0
+
+    if user_count >= tenant.max_users:
+        raise HTTPException(
+            status_code=400,
+            detail=f"User limit reached ({tenant.max_users}). Upgrade plan for more users."
+        )
+
+    # Check if user already in tenant
+    existing = await db.execute(
+        select(TenantUser).where(
+            and_(
+                TenantUser.tenant_id == uuid.UUID(tenant_id),
+                TenantUser.user_id == uuid.UUID(user.user_id)
+            )
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="User already in tenant")
+
+    new_user = TenantUser(
+        tenant_id=uuid.UUID(tenant_id),
+        user_id=uuid.UUID(user.user_id),
+        role=user.role.value,
+        invited_at=datetime.utcnow()
+    )
+
+    db.add(new_user)
+    await db.commit()
+    await db.refresh(new_user)
+
+    await log_activity(
+        db,
+        action="user_added",
+        tenant_id=tenant_id,
+        user_id=user.user_id,
+        entity_type="tenant_user",
+        entity_id=str(new_user.id),
+        description=f"Added user to tenant with role: {user.role.value}"
+    )
+
+    return UserResponse(
+        id=str(new_user.id),
+        tenant_id=str(new_user.tenant_id),
+        user_id=str(new_user.user_id),
+        role=new_user.role,
+        is_active=new_user.is_active,
+        permissions=new_user.permissions or {},
+        invited_at=new_user.invited_at,
+        joined_at=new_user.joined_at,
+        created_at=new_user.created_at
+    )
 
 @router.patch("/tenants/{tenant_id}/users/{user_id}", response_model=UserResponse)
-async def update_user(tenant_id: str, user_id: str, update: UserUpdate):
-    """Update user details"""
-    if user_id not in users_db:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    user = users_db[user_id]
-    for field, value in update.dict(exclude_unset=True).items():
-        user[field] = value
-    
-    return user
+async def update_tenant_user(
+    tenant_id: str,
+    user_id: str,
+    update: UserUpdate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Update user in tenant"""
+    result = await db.execute(
+        select(TenantUser).where(
+            and_(
+                TenantUser.tenant_id == uuid.UUID(tenant_id),
+                TenantUser.user_id == uuid.UUID(user_id)
+            )
+        )
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found in tenant")
+
+    update_data = update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        if field == "role" and value:
+            setattr(user, field, value.value if isinstance(value, UserRole) else value)
+        else:
+            setattr(user, field, value)
+
+    user.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(user)
+
+    return UserResponse(
+        id=str(user.id),
+        tenant_id=str(user.tenant_id),
+        user_id=str(user.user_id),
+        role=user.role,
+        is_active=user.is_active,
+        permissions=user.permissions or {},
+        invited_at=user.invited_at,
+        joined_at=user.joined_at,
+        created_at=user.created_at
+    )
 
 @router.delete("/tenants/{tenant_id}/users/{user_id}")
-async def delete_user(tenant_id: str, user_id: str):
-    """Delete/deactivate a user"""
-    if user_id not in users_db:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    users_db[user_id]["is_active"] = False
-    return {"message": "User deactivated", "user_id": user_id}
+async def remove_tenant_user(
+    tenant_id: str,
+    user_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Remove user from tenant"""
+    result = await db.execute(
+        select(TenantUser).where(
+            and_(
+                TenantUser.tenant_id == uuid.UUID(tenant_id),
+                TenantUser.user_id == uuid.UUID(user_id)
+            )
+        )
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found in tenant")
+
+    user.is_active = False
+    user.updated_at = datetime.utcnow()
+    await db.commit()
+
+    return {"message": "User removed from tenant", "user_id": user_id}
+
+# ==================== DOMAIN ENDPOINTS ====================
+
+@router.get("/tenants/{tenant_id}/domains", response_model=List[DomainResponse])
+async def list_domains(
+    tenant_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """List domains for tenant"""
+    result = await db.execute(
+        select(Domain).where(Domain.tenant_id == uuid.UUID(tenant_id))
+    )
+    domains = result.scalars().all()
+
+    return [
+        DomainResponse(
+            id=str(d.id),
+            tenant_id=str(d.tenant_id),
+            domain=d.domain,
+            domain_type=d.domain_type,
+            is_primary=d.is_primary,
+            is_active=d.is_active,
+            spf_verified=d.spf_verified or False,
+            dkim_verified=d.dkim_verified or False,
+            mx_verified=d.mx_verified or False,
+            ownership_verified=d.ownership_verified or False,
+            mailgun_domain_id=d.mailgun_domain_id,
+            cloudflare_zone_id=d.cloudflare_zone_id,
+            created_at=d.created_at,
+            verified_at=d.verified_at
+        )
+        for d in domains
+    ]
+
+@router.post("/tenants/{tenant_id}/domains", response_model=DomainResponse)
+async def add_domain(
+    tenant_id: str,
+    domain_data: DomainCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Add a domain to tenant with Mailgun and Cloudflare setup"""
+    # Check tenant exists
+    tenant_result = await db.execute(
+        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+    )
+    tenant = tenant_result.scalar_one_or_none()
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    # Check domain doesn't already exist
+    existing = await db.execute(
+        select(Domain).where(Domain.domain == domain_data.domain)
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="Domain already registered")
+
+    # Generate verification token
+    verification_token = f"bheem-verify-{uuid.uuid4().hex[:16]}"
+
+    # Create domain in database
+    new_domain = Domain(
+        tenant_id=uuid.UUID(tenant_id),
+        domain=domain_data.domain,
+        domain_type=domain_data.domain_type.value,
+        is_primary=domain_data.is_primary,
+        verification_token=verification_token
+    )
+
+    db.add(new_domain)
+    await db.commit()
+    await db.refresh(new_domain)
+
+    # Add to Mailgun for email domains
+    if domain_data.domain_type == DomainType.EMAIL:
+        mailgun_result = await mailgun_service.add_domain(domain_data.domain)
+        if "error" not in mailgun_result:
+            new_domain.mailgun_domain_id = domain_data.domain
+
+            # Get DNS records from Mailgun
+            dns_records = await mailgun_service.get_dns_records(domain_data.domain)
+            if "sending_dns_records" in dns_records:
+                for record in dns_records["sending_dns_records"]:
+                    dns_record = DomainDNSRecord(
+                        domain_id=new_domain.id,
+                        record_type=record.get("record_type", "TXT"),
+                        name=record.get("name", domain_data.domain),
+                        value=record.get("value", ""),
+                        priority=record.get("priority")
+                    )
+                    db.add(dns_record)
+
+            await db.commit()
+
+    # Check Cloudflare zone
+    zone = await cloudflare_service.get_zone_by_name(domain_data.domain)
+    if zone:
+        new_domain.cloudflare_zone_id = zone.get("id")
+        await db.commit()
+
+    await db.refresh(new_domain)
+
+    await log_activity(
+        db,
+        action="domain_added",
+        tenant_id=tenant_id,
+        entity_type="domain",
+        entity_id=str(new_domain.id),
+        description=f"Added domain: {domain_data.domain}"
+    )
+
+    return DomainResponse(
+        id=str(new_domain.id),
+        tenant_id=str(new_domain.tenant_id),
+        domain=new_domain.domain,
+        domain_type=new_domain.domain_type,
+        is_primary=new_domain.is_primary,
+        is_active=new_domain.is_active,
+        spf_verified=new_domain.spf_verified or False,
+        dkim_verified=new_domain.dkim_verified or False,
+        mx_verified=new_domain.mx_verified or False,
+        ownership_verified=new_domain.ownership_verified or False,
+        mailgun_domain_id=new_domain.mailgun_domain_id,
+        cloudflare_zone_id=new_domain.cloudflare_zone_id,
+        created_at=new_domain.created_at,
+        verified_at=new_domain.verified_at
+    )
+
+@router.get("/tenants/{tenant_id}/domains/{domain_id}/dns-records")
+async def get_domain_dns_records(
+    tenant_id: str,
+    domain_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get required DNS records for domain verification"""
+    result = await db.execute(
+        select(Domain).where(
+            and_(
+                Domain.id == uuid.UUID(domain_id),
+                Domain.tenant_id == uuid.UUID(tenant_id)
+            )
+        )
+    )
+    domain = result.scalar_one_or_none()
+
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+
+    # Get stored DNS records
+    records_result = await db.execute(
+        select(DomainDNSRecord).where(DomainDNSRecord.domain_id == domain.id)
+    )
+    records = records_result.scalars().all()
+
+    # Also add ownership verification record
+    verification_record = {
+        "record_type": "TXT",
+        "name": domain.domain,
+        "value": domain.verification_token,
+        "purpose": "ownership_verification"
+    }
+
+    return {
+        "domain": domain.domain,
+        "verification_record": verification_record,
+        "email_records": [
+            {
+                "id": str(r.id),
+                "record_type": r.record_type,
+                "name": r.name,
+                "value": r.value,
+                "priority": r.priority,
+                "is_verified": r.is_verified
+            }
+            for r in records
+        ]
+    }
+
+@router.post("/tenants/{tenant_id}/domains/{domain_id}/verify")
+async def verify_domain(
+    tenant_id: str,
+    domain_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Verify domain DNS records"""
+    result = await db.execute(
+        select(Domain).where(
+            and_(
+                Domain.id == uuid.UUID(domain_id),
+                Domain.tenant_id == uuid.UUID(tenant_id)
+            )
+        )
+    )
+    domain = result.scalar_one_or_none()
+
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+
+    verification_results = {
+        "domain": domain.domain,
+        "ownership_verified": False,
+        "spf_verified": False,
+        "dkim_verified": False,
+        "mx_verified": False
+    }
+
+    # Verify with Mailgun
+    if domain.mailgun_domain_id:
+        mailgun_result = await mailgun_service.verify_domain(domain.domain)
+        if "error" not in mailgun_result:
+            domain_info = mailgun_result.get("domain", {})
+            verification_results["spf_verified"] = domain_info.get("spf", False)
+            verification_results["dkim_verified"] = domain_info.get("dkim", False)
+            verification_results["mx_verified"] = domain_info.get("mx", False)
+
+            domain.spf_verified = verification_results["spf_verified"]
+            domain.dkim_verified = verification_results["dkim_verified"]
+            domain.mx_verified = verification_results["mx_verified"]
+
+    # Check ownership via Cloudflare
+    if domain.cloudflare_zone_id:
+        ownership_check = await cloudflare_service.verify_dns_record(
+            zone_id=domain.cloudflare_zone_id,
+            record_type="TXT",
+            name=domain.domain,
+            expected_content=domain.verification_token
+        )
+        verification_results["ownership_verified"] = ownership_check
+        domain.ownership_verified = ownership_check
+
+    # Update verified_at if all checks pass
+    if all([
+        domain.ownership_verified,
+        domain.spf_verified,
+        domain.dkim_verified,
+        domain.mx_verified
+    ]):
+        domain.verified_at = datetime.utcnow()
+
+    await db.commit()
+
+    return verification_results
+
+@router.delete("/tenants/{tenant_id}/domains/{domain_id}")
+async def remove_domain(
+    tenant_id: str,
+    domain_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Remove a domain from tenant"""
+    result = await db.execute(
+        select(Domain).where(
+            and_(
+                Domain.id == uuid.UUID(domain_id),
+                Domain.tenant_id == uuid.UUID(tenant_id)
+            )
+        )
+    )
+    domain = result.scalar_one_or_none()
+
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+
+    # Remove from Mailgun
+    if domain.mailgun_domain_id:
+        await mailgun_service.delete_domain(domain.domain)
+
+    domain.is_active = False
+    await db.commit()
+
+    return {"message": "Domain removed", "domain": domain.domain}
 
 # ==================== MAIL ADMIN ENDPOINTS ====================
 
-@router.get("/tenants/{tenant_id}/mail/domains")
-async def list_mail_domains(tenant_id: str):
-    """List mail domains for tenant"""
-    return [d for d in mail_domains_db.values() if d.get("tenant_id") == tenant_id]
-
-@router.post("/tenants/{tenant_id}/mail/domains")
-async def create_mail_domain(tenant_id: str, domain: MailDomainCreate):
-    """Add a mail domain"""
-    domain_data = {
-        "domain": domain.domain,
-        "tenant_id": tenant_id,
-        "active": True,
-        "max_mailboxes": domain.max_mailboxes,
-        "created_at": datetime.utcnow()
-    }
-    mail_domains_db[domain.domain] = domain_data
-    return domain_data
-
 @router.get("/tenants/{tenant_id}/mail/mailboxes")
-async def list_mailboxes(tenant_id: str, domain: Optional[str] = None):
-    """List mailboxes"""
-    results = [
-        MailboxResponse(
-            id=str(uuid.uuid4()),
-            email="admin@demo.bheem.cloud",
-            name="Admin",
-            active=True,
-            quota_mb=1024,
-            used_mb=156.5,
-            created_at=datetime.utcnow() - timedelta(days=30)
-        ),
-        MailboxResponse(
-            id=str(uuid.uuid4()),
-            email="john@demo.bheem.cloud",
-            name="John Smith",
-            active=True,
-            quota_mb=1024,
-            used_mb=423.2,
-            created_at=datetime.utcnow() - timedelta(days=25)
-        ),
-        MailboxResponse(
-            id=str(uuid.uuid4()),
-            email="sarah@demo.bheem.cloud",
-            name="Sarah Chen",
-            active=True,
-            quota_mb=1024,
-            used_mb=89.7,
-            created_at=datetime.utcnow() - timedelta(days=20)
-        )
-    ]
-    return results
+async def list_mailboxes(
+    tenant_id: str,
+    domain: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """List mailboxes via Mailcow"""
+    mailboxes = await mailcow_service.get_mailboxes()
+
+    if domain:
+        mailboxes = [m for m in mailboxes if m.get("domain") == domain]
+
+    return mailboxes
 
 @router.post("/tenants/{tenant_id}/mail/mailboxes")
-async def create_mailbox(tenant_id: str, mailbox: MailboxCreate):
-    """Create a new mailbox"""
-    email = f"{mailbox.local_part}@{mailbox.domain}"
-    return MailboxResponse(
-        id=str(uuid.uuid4()),
-        email=email,
+async def create_mailbox(
+    tenant_id: str,
+    mailbox: MailboxCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a mailbox via Mailcow"""
+    result = await mailcow_service.create_mailbox(
+        local_part=mailbox.local_part,
+        password=mailbox.password,
         name=mailbox.name,
-        active=True,
-        quota_mb=mailbox.quota_mb,
-        used_mb=0,
-        created_at=datetime.utcnow()
+        quota=mailbox.quota_mb
     )
 
+    email = f"{mailbox.local_part}@{mailbox.domain}"
+
+    await log_activity(
+        db,
+        action="mailbox_created",
+        tenant_id=tenant_id,
+        entity_type="mailbox",
+        description=f"Created mailbox: {email}"
+    )
+
+    return {
+        "email": email,
+        "name": mailbox.name,
+        "quota_mb": mailbox.quota_mb,
+        "result": result
+    }
+
 @router.delete("/tenants/{tenant_id}/mail/mailboxes/{email}")
-async def delete_mailbox(tenant_id: str, email: str):
+async def delete_mailbox(
+    tenant_id: str,
+    email: str,
+    db: AsyncSession = Depends(get_db)
+):
     """Delete a mailbox"""
+    await log_activity(
+        db,
+        action="mailbox_deleted",
+        tenant_id=tenant_id,
+        entity_type="mailbox",
+        description=f"Deleted mailbox: {email}"
+    )
+
     return {"message": "Mailbox deleted", "email": email}
 
 @router.get("/tenants/{tenant_id}/mail/stats")
-async def get_mail_stats(tenant_id: str):
+async def get_mail_stats(
+    tenant_id: str,
+    db: AsyncSession = Depends(get_db)
+):
     """Get mail usage statistics"""
+    tenant_result = await db.execute(
+        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+    )
+    tenant = tenant_result.scalar_one_or_none()
+
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    domains_result = await db.execute(
+        select(func.count(Domain.id)).where(
+            and_(
+                Domain.tenant_id == uuid.UUID(tenant_id),
+                Domain.domain_type == "email"
+            )
+        )
+    )
+    domain_count = domains_result.scalar() or 0
+
     return {
-        "total_mailboxes": 5,
-        "active_mailboxes": 5,
-        "total_storage_mb": 5120,
-        "used_storage_mb": 1234.5,
-        "emails_sent_today": 45,
-        "emails_received_today": 128,
-        "spam_blocked_today": 23
+        "domains": domain_count,
+        "storage_quota_mb": tenant.mail_quota_mb,
+        "storage_used_mb": float(tenant.mail_used_mb or 0),
+        "usage_percent": (float(tenant.mail_used_mb or 0) / tenant.mail_quota_mb * 100) if tenant.mail_quota_mb else 0
     }
-
-# ==================== DOCS ADMIN ENDPOINTS ====================
-
-@router.get("/tenants/{tenant_id}/docs/stats")
-async def get_docs_stats(tenant_id: str):
-    """Get document storage statistics"""
-    return {
-        "total_files": 1234,
-        "total_folders": 89,
-        "total_storage_mb": 102400,
-        "used_storage_mb": 45678,
-        "files_created_today": 12,
-        "files_shared": 234,
-        "active_collaborations": 8
-    }
-
-@router.get("/tenants/{tenant_id}/docs/users")
-async def list_docs_users(tenant_id: str):
-    """List users with docs access and their usage"""
-    return [
-        {"user_id": "1", "email": "admin@demo.bheem.cloud", "name": "Admin", "quota_mb": 10240, "used_mb": 4567, "files_count": 234},
-        {"user_id": "2", "email": "john@demo.bheem.cloud", "name": "John Smith", "quota_mb": 10240, "used_mb": 2345, "files_count": 123},
-        {"user_id": "3", "email": "sarah@demo.bheem.cloud", "name": "Sarah Chen", "quota_mb": 10240, "used_mb": 890, "files_count": 45}
-    ]
-
-@router.post("/tenants/{tenant_id}/docs/shared-folders")
-async def create_shared_folder(tenant_id: str, folder: SharedFolderCreate):
-    """Create a shared folder"""
-    return {
-        "id": str(uuid.uuid4()),
-        "name": folder.name,
-        "path": folder.path,
-        "allowed_users": folder.allowed_users,
-        "permissions": folder.permissions,
-        "created_at": datetime.utcnow()
-    }
-
-@router.patch("/tenants/{tenant_id}/docs/users/{user_id}/quota")
-async def update_user_storage_quota(tenant_id: str, user_id: str, quota: StorageQuotaUpdate):
-    """Update user storage quota"""
-    return {"message": "Quota updated", "user_id": user_id, "new_quota_mb": quota.quota_mb}
 
 # ==================== MEET ADMIN ENDPOINTS ====================
 
 @router.get("/tenants/{tenant_id}/meet/stats")
-async def get_meet_stats(tenant_id: str):
+async def get_meet_stats(
+    tenant_id: str,
+    db: AsyncSession = Depends(get_db)
+):
     """Get meeting statistics"""
+    tenant_result = await db.execute(
+        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+    )
+    tenant = tenant_result.scalar_one_or_none()
+
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
     return {
-        "meetings_today": 12,
-        "meetings_this_week": 45,
-        "meetings_this_month": 156,
-        "total_participants_today": 89,
-        "avg_duration_minutes": 34,
-        "hours_used_this_month": 87.5,
-        "hours_quota": 500,
-        "recordings_count": 23,
-        "recordings_storage_mb": 8192
+        "hours_quota": tenant.meet_quota_hours,
+        "hours_used": float(tenant.meet_used_hours or 0),
+        "usage_percent": (float(tenant.meet_used_hours or 0) / tenant.meet_quota_hours * 100) if tenant.meet_quota_hours else 0,
+        "recordings_quota_mb": tenant.recordings_quota_mb,
+        "recordings_used_mb": float(tenant.recordings_used_mb or 0)
     }
 
-@router.get("/tenants/{tenant_id}/meet/meetings")
-async def list_meetings_admin(
-    tenant_id: str,
-    status: Optional[str] = None,
-    start_date: Optional[datetime] = None,
-    end_date: Optional[datetime] = None
-):
-    """List all meetings (admin view)"""
-    return [
-        {
-            "id": str(uuid.uuid4()),
-            "title": "Team Standup",
-            "room_name": "team-standup-abc123",
-            "host": "admin@demo.bheem.cloud",
-            "status": "completed",
-            "participants_count": 5,
-            "duration_minutes": 15,
-            "started_at": datetime.utcnow() - timedelta(hours=2),
-            "ended_at": datetime.utcnow() - timedelta(hours=2) + timedelta(minutes=15),
-            "recorded": True
-        },
-        {
-            "id": str(uuid.uuid4()),
-            "title": "Client Presentation",
-            "room_name": "client-presentation-xyz789",
-            "host": "john@demo.bheem.cloud",
-            "status": "scheduled",
-            "participants_count": 0,
-            "duration_minutes": 60,
-            "scheduled_at": datetime.utcnow() + timedelta(hours=3),
-            "recorded": False
-        }
-    ]
-
 @router.get("/tenants/{tenant_id}/meet/settings")
-async def get_meeting_settings(tenant_id: str):
+async def get_meeting_settings(
+    tenant_id: str,
+    db: AsyncSession = Depends(get_db)
+):
     """Get tenant meeting settings"""
+    tenant_result = await db.execute(
+        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+    )
+    tenant = tenant_result.scalar_one_or_none()
+
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    settings = tenant.settings or {}
+    meet_settings = settings.get("meet", {})
+
     return MeetingSettingsUpdate(
-        max_participants=100,
-        max_duration_minutes=480,
-        enable_recording=True,
-        enable_waiting_room=True,
-        enable_chat=True,
-        enable_screen_share=True
+        max_participants=meet_settings.get("max_participants", 100),
+        max_duration_minutes=meet_settings.get("max_duration_minutes", 480),
+        enable_recording=meet_settings.get("enable_recording", True),
+        enable_waiting_room=meet_settings.get("enable_waiting_room", True),
+        enable_chat=meet_settings.get("enable_chat", True),
+        enable_screen_share=meet_settings.get("enable_screen_share", True)
     )
 
 @router.patch("/tenants/{tenant_id}/meet/settings")
-async def update_meeting_settings(tenant_id: str, settings: MeetingSettingsUpdate):
+async def update_meeting_settings(
+    tenant_id: str,
+    settings: MeetingSettingsUpdate,
+    db: AsyncSession = Depends(get_db)
+):
     """Update tenant meeting settings"""
-    return {"message": "Settings updated", **settings.dict()}
+    tenant_result = await db.execute(
+        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+    )
+    tenant = tenant_result.scalar_one_or_none()
 
-@router.get("/tenants/{tenant_id}/meet/recording-policy")
-async def get_recording_policy(tenant_id: str):
-    """Get recording policy"""
-    return RecordingPolicy(
-        auto_record=False,
-        retention_days=90,
-        drm_enabled=True,
-        watermark_enabled=True
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    current_settings = tenant.settings or {}
+    current_settings["meet"] = settings.model_dump()
+    tenant.settings = current_settings
+    tenant.updated_at = datetime.utcnow()
+
+    await db.commit()
+
+    return {"message": "Settings updated", **settings.model_dump()}
+
+# ==================== DOCS ADMIN ENDPOINTS ====================
+
+@router.get("/tenants/{tenant_id}/docs/stats")
+async def get_docs_stats(
+    tenant_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get document storage statistics"""
+    tenant_result = await db.execute(
+        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+    )
+    tenant = tenant_result.scalar_one_or_none()
+
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    return {
+        "storage_quota_mb": tenant.docs_quota_mb,
+        "storage_used_mb": float(tenant.docs_used_mb or 0),
+        "usage_percent": (float(tenant.docs_used_mb or 0) / tenant.docs_quota_mb * 100) if tenant.docs_quota_mb else 0
+    }
+
+# ==================== DEVELOPER ENDPOINTS ====================
+
+@router.get("/developers")
+async def list_developers(
+    db: AsyncSession = Depends(get_db),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100)
+):
+    """List all developers"""
+    result = await db.execute(
+        select(Developer)
+        .where(Developer.is_active == True)
+        .offset(skip)
+        .limit(limit)
+        .order_by(Developer.created_at.desc())
+    )
+    developers = result.scalars().all()
+
+    return [
+        {
+            "id": str(d.id),
+            "user_id": str(d.user_id),
+            "role": d.role,
+            "github_username": d.github_username,
+            "is_active": d.is_active,
+            "created_at": d.created_at
+        }
+        for d in developers
+    ]
+
+@router.post("/developers")
+async def create_developer(
+    developer: DeveloperCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Add a developer"""
+    new_dev = Developer(
+        user_id=uuid.UUID(developer.user_id),
+        role=developer.role,
+        ssh_public_key=developer.ssh_public_key,
+        github_username=developer.github_username
     )
 
-@router.patch("/tenants/{tenant_id}/meet/recording-policy")
-async def update_recording_policy(tenant_id: str, policy: RecordingPolicy):
-    """Update recording policy"""
-    return {"message": "Recording policy updated", **policy.dict()}
+    db.add(new_dev)
+    await db.commit()
+    await db.refresh(new_dev)
 
-# ==================== ANALYTICS ENDPOINTS ====================
+    await log_activity(
+        db,
+        action="developer_created",
+        user_id=developer.user_id,
+        entity_type="developer",
+        entity_id=str(new_dev.id),
+        description=f"Added developer with role: {developer.role}"
+    )
 
-@router.get("/tenants/{tenant_id}/analytics/usage")
-async def get_usage_analytics(
-    tenant_id: str,
-    service: Optional[ServiceType] = None,
-    period: str = Query("month", regex="^(day|week|month|year)$")
+    return {
+        "id": str(new_dev.id),
+        "user_id": str(new_dev.user_id),
+        "role": new_dev.role,
+        "created_at": new_dev.created_at
+    }
+
+@router.post("/developers/{developer_id}/projects")
+async def grant_project_access(
+    developer_id: str,
+    access: DeveloperProjectAccess,
+    db: AsyncSession = Depends(get_db)
 ):
-    """Get usage analytics"""
-    stats = []
-    
-    if service is None or service == ServiceType.MAIL:
-        stats.append(UsageStats(
-            service="mail",
-            period=period,
-            total_usage=512,
-            quota=5120,
-            usage_percent=10.0,
-            trend="up"
-        ))
-    
-    if service is None or service == ServiceType.DOCS:
-        stats.append(UsageStats(
-            service="docs",
-            period=period,
-            total_usage=2048,
-            quota=102400,
-            usage_percent=2.0,
-            trend="stable"
-        ))
-    
-    if service is None or service == ServiceType.MEET:
-        stats.append(UsageStats(
-            service="meet",
-            period=period,
-            total_usage=45.5,
-            quota=500,
-            usage_percent=9.1,
-            trend="up"
-        ))
-    
-    return stats
+    """Grant project access to developer"""
+    dev_result = await db.execute(
+        select(Developer).where(Developer.id == uuid.UUID(developer_id))
+    )
+    developer = dev_result.scalar_one_or_none()
 
-@router.get("/tenants/{tenant_id}/analytics/activity")
+    if not developer:
+        raise HTTPException(status_code=404, detail="Developer not found")
+
+    project_access = DeveloperProject(
+        developer_id=developer.id,
+        project_name=access.project_name,
+        access_level=access.access_level,
+        git_branch_pattern=access.git_branch_pattern,
+        can_push_to_main=access.can_push_to_main,
+        can_deploy_staging=access.can_deploy_staging,
+        can_deploy_production=access.can_deploy_production
+    )
+
+    db.add(project_access)
+    await db.commit()
+
+    return {
+        "message": "Project access granted",
+        "developer_id": developer_id,
+        "project": access.project_name,
+        "access_level": access.access_level
+    }
+
+# ==================== ACTIVITY LOG ENDPOINTS ====================
+
+@router.get("/tenants/{tenant_id}/activity", response_model=List[ActivityLogResponse])
 async def get_activity_log(
     tenant_id: str,
+    db: AsyncSession = Depends(get_db),
     user_id: Optional[str] = None,
-    service: Optional[ServiceType] = None,
+    action: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200)
 ):
-    """Get activity log"""
-    activities = [
-        ActivityLog(
-            id=str(uuid.uuid4()),
-            user_id="1",
-            user_email="admin@demo.bheem.cloud",
-            action="file_upload",
-            service="docs",
-            details={"filename": "Q4_Report.docx", "size_mb": 2.5},
-            ip_address="192.168.1.100",
-            timestamp=datetime.utcnow() - timedelta(minutes=5)
-        ),
-        ActivityLog(
-            id=str(uuid.uuid4()),
-            user_id="2",
-            user_email="john@demo.bheem.cloud",
-            action="meeting_started",
-            service="meet",
-            details={"room_name": "team-standup-abc123", "participants": 5},
-            ip_address="192.168.1.101",
-            timestamp=datetime.utcnow() - timedelta(minutes=30)
-        ),
-        ActivityLog(
-            id=str(uuid.uuid4()),
-            user_id="3",
-            user_email="sarah@demo.bheem.cloud",
-            action="email_sent",
-            service="mail",
-            details={"to": "client@example.com", "subject": "Project Update"},
-            ip_address="192.168.1.102",
-            timestamp=datetime.utcnow() - timedelta(hours=1)
-        )
-    ]
-    return activities[:limit]
+    """Get activity log for tenant"""
+    query = select(ActivityLogModel).where(
+        ActivityLogModel.tenant_id == uuid.UUID(tenant_id)
+    )
 
-# ==================== DASHBOARD ENDPOINTS ====================
+    if user_id:
+        query = query.where(ActivityLogModel.user_id == uuid.UUID(user_id))
+    if action:
+        query = query.where(ActivityLogModel.action == action)
+
+    query = query.order_by(ActivityLogModel.created_at.desc()).limit(limit)
+
+    result = await db.execute(query)
+    logs = result.scalars().all()
+
+    return [
+        ActivityLogResponse(
+            id=str(log.id),
+            tenant_id=str(log.tenant_id) if log.tenant_id else None,
+            user_id=str(log.user_id) if log.user_id else None,
+            action=log.action,
+            entity_type=log.entity_type,
+            entity_id=str(log.entity_id) if log.entity_id else None,
+            description=log.description,
+            ip_address=str(log.ip_address) if log.ip_address else None,
+            extra_data=log.extra_data,
+            created_at=log.created_at
+        )
+        for log in logs
+    ]
+
+# ==================== DASHBOARD ENDPOINT ====================
 
 @router.get("/tenants/{tenant_id}/dashboard")
-async def get_admin_dashboard(tenant_id: str):
+async def get_admin_dashboard(
+    tenant_id: str,
+    db: AsyncSession = Depends(get_db)
+):
     """Get complete admin dashboard data"""
-    tenant = tenants_db.get(tenant_id) or tenants_db.get(DEMO_TENANT_ID)
-    
+    tenant = await get_tenant(tenant_id, db)
+
+    # Get user stats
+    user_count_result = await db.execute(
+        select(func.count(TenantUser.id)).where(
+            TenantUser.tenant_id == uuid.UUID(tenant_id)
+        )
+    )
+    total_users = user_count_result.scalar() or 0
+
+    # Get users by role
+    role_counts = {}
+    for role in ["admin", "manager", "member"]:
+        count_result = await db.execute(
+            select(func.count(TenantUser.id)).where(
+                and_(
+                    TenantUser.tenant_id == uuid.UUID(tenant_id),
+                    TenantUser.role == role
+                )
+            )
+        )
+        role_counts[role] = count_result.scalar() or 0
+
+    # Get domain count
+    domain_count_result = await db.execute(
+        select(func.count(Domain.id)).where(
+            Domain.tenant_id == uuid.UUID(tenant_id)
+        )
+    )
+    domain_count = domain_count_result.scalar() or 0
+
+    # Get recent activity
+    recent_logs_result = await db.execute(
+        select(ActivityLogModel)
+        .where(ActivityLogModel.tenant_id == uuid.UUID(tenant_id))
+        .order_by(ActivityLogModel.created_at.desc())
+        .limit(10)
+    )
+    recent_logs = recent_logs_result.scalars().all()
+
     return {
-        "tenant": tenant,
+        "tenant": tenant.model_dump(),
         "users": {
-            "total": tenant["user_count"],
-            "active": tenant["user_count"],
-            "by_role": {"admin": 1, "manager": 1, "member": 3}
+            "total": total_users,
+            "max": tenant.max_users,
+            "by_role": role_counts
         },
+        "domains": domain_count,
         "mail": {
-            "domains": 1,
-            "mailboxes": 5,
-            "storage_used_mb": tenant["mail_used_mb"],
-            "storage_quota_mb": tenant["mail_quota_mb"],
-            "emails_today": 173
+            "storage_used_mb": tenant.mail_used_mb,
+            "storage_quota_mb": tenant.mail_quota_mb,
+            "usage_percent": (tenant.mail_used_mb / tenant.mail_quota_mb * 100) if tenant.mail_quota_mb else 0
         },
         "docs": {
-            "files": 1234,
-            "folders": 89,
-            "storage_used_mb": tenant["docs_used_mb"],
-            "storage_quota_mb": tenant["docs_quota_mb"],
-            "active_collaborations": 8
+            "storage_used_mb": tenant.docs_used_mb,
+            "storage_quota_mb": tenant.docs_quota_mb,
+            "usage_percent": (tenant.docs_used_mb / tenant.docs_quota_mb * 100) if tenant.docs_quota_mb else 0
         },
         "meet": {
-            "meetings_today": 12,
-            "hours_used": tenant["meet_used_hours"],
-            "hours_quota": tenant["meet_quota_hours"],
-            "recordings": 23,
-            "recordings_storage_mb": tenant["recordings_used_mb"]
+            "hours_used": tenant.meet_used_hours,
+            "hours_quota": tenant.meet_quota_hours,
+            "usage_percent": (tenant.meet_used_hours / tenant.meet_quota_hours * 100) if tenant.meet_quota_hours else 0,
+            "recordings_used_mb": tenant.recordings_used_mb,
+            "recordings_quota_mb": tenant.recordings_quota_mb
         },
         "recent_activity": [
-            {"user": "Sarah Chen", "action": "uploaded", "target": "Q4_Report.docx", "time": "5 min ago"},
-            {"user": "John Smith", "action": "started meeting", "target": "Team Standup", "time": "30 min ago"},
-            {"user": "Admin", "action": "sent email", "target": "to client@example.com", "time": "1 hour ago"}
+            {
+                "action": log.action,
+                "description": log.description,
+                "created_at": log.created_at.isoformat()
+            }
+            for log in recent_logs
         ]
     }

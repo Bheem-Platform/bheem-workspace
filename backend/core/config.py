@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     # Cloudflare
     CLOUDFLARE_API_TOKEN: Optional[str] = None
 
+    # Mailgun
+    MAILGUN_API_KEY: Optional[str] = None
+    MAILGUN_DOMAIN: str = "bheem.co.uk"
+    MAILGUN_FROM_NAME: str = "Bheem Platform"
+    MAILGUN_FROM_EMAIL: str = "noreply@bheem.co.uk"
+
     # AI Services
     ANTHROPIC_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
