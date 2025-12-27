@@ -8,9 +8,15 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str
     ERP_DATABASE_URL: Optional[str] = None
-    
-    # JWT
+
+    # Bheem Passport (Centralized Authentication)
+    BHEEM_PASSPORT_URL: str = "https://platform.bheem.co.uk"
+    USE_PASSPORT_AUTH: bool = True  # Set to False to use local auth
+
+    # JWT Configuration (MUST match Bheem Passport settings for SSO)
+    # This should be identical to Bheem Platform's SECRET_KEY for token validation
     SECRET_KEY: str
+    BHEEM_JWT_SECRET: Optional[str] = None  # Passport JWT secret for SSO validation
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
     

@@ -1,5 +1,6 @@
 """
 Bheem Workspace - Security & JWT Authentication
+Supports Bheem Passport token validation with local fallback
 """
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from .config import settings
 from .database import get_db
+import httpx
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -18,77 +20,177 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Bearer token scheme
 security = HTTPBearer()
 
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Verify password against hash"""
     return pwd_context.verify(plain_password, hashed_password)
+
 
 def get_password_hash(password: str) -> str:
     """Hash a password"""
     return pwd_context.hash(password)
 
+
 def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
-    """Create JWT access token"""
+    """Create JWT access token (for local auth fallback)"""
     to_encode = data.copy()
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
         expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    
+
     to_encode.update({"exp": expire, "iat": datetime.utcnow()})
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
     return encoded_jwt
 
+
 def decode_token(token: str) -> Optional[Dict[str, Any]]:
-    """Decode and validate JWT token"""
+    """
+    Decode JWT token - tries multiple secrets for SSO support
+    Order: 1) Bheem JWT Secret (Passport SSO), 2) Local workspace secret
+    """
+    # First try with Bheem Passport JWT secret (SSO - shared across all Bheem services)
+    if settings.BHEEM_JWT_SECRET:
+        try:
+            payload = jwt.decode(token, settings.BHEEM_JWT_SECRET, algorithms=[settings.ALGORITHM])
+            return payload
+        except JWTError:
+            pass
+
+    # Fallback to workspace local secret
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
         return payload
     except JWTError:
+        pass
+
+    # If local decode fails and Passport is enabled, the token might need API validation
+    # We'll validate it in get_current_user via Passport API
+    return None
+
+
+async def validate_token_via_passport(token: str) -> Optional[Dict[str, Any]]:
+    """
+    Validate token via Bheem Passport service
+    """
+    if not settings.USE_PASSPORT_AUTH:
         return None
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{settings.BHEEM_PASSPORT_URL}/api/v1/auth/validate",
+                json={"token": token}
+            )
+
+            if response.status_code == 200:
+                result = response.json()
+                if result.get("valid"):
+                    return result.get("payload")
+
+            return None
+
+    except Exception as e:
+        print(f"[Security] Passport validation error: {e}")
+        return None
+
+
+async def get_user_from_passport(token: str) -> Optional[Dict[str, Any]]:
+    """
+    Get user info from Bheem Passport /me endpoint
+    """
+    if not settings.USE_PASSPORT_AUTH:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{settings.BHEEM_PASSPORT_URL}/api/v1/auth/me",
+                headers={"Authorization": f"Bearer {token}"}
+            )
+
+            if response.status_code == 200:
+                return response.json()
+
+            return None
+
+    except Exception as e:
+        print(f"[Security] Passport get user error: {e}")
+        return None
+
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
-    """Get current authenticated user from token"""
+    """
+    Get current authenticated user from token
+    Validates via Bheem Passport first, then falls back to local validation
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
-    
+
     token = credentials.credentials
+
+    # Step 1: Try local decode first (faster)
     payload = decode_token(token)
-    
-    if payload is None:
-        raise credentials_exception
-    
-    user_id = payload.get("sub")
-    if user_id is None:
-        raise credentials_exception
-    
-    # Fetch user from ERP database
-    result = await db.execute(
-        text("""
-            SELECT id, username, email, role, company_id, person_id, is_active
-            FROM auth.users 
-            WHERE id = :user_id AND is_active = true AND is_deleted = false
-        """),
-        {"user_id": user_id}
-    )
-    user = result.fetchone()
-    
-    if user is None:
-        raise credentials_exception
-    
-    return {
-        "id": str(user.id),
-        "username": user.username,
-        "email": user.email,
-        "role": user.role,
-        "company_id": str(user.company_id) if user.company_id else None,
-        "person_id": str(user.person_id) if user.person_id else None
-    }
+
+    if payload is not None:
+        user_id = payload.get("sub") or payload.get("user_id")
+        if user_id:
+            # Token decoded successfully with local secret
+            return {
+                "id": user_id,
+                "user_id": user_id,
+                "username": payload.get("username"),
+                "email": payload.get("email"),
+                "role": payload.get("role"),
+                "company_id": payload.get("company_id"),
+                "company_code": payload.get("company_code"),
+                "person_id": payload.get("person_id")
+            }
+
+    # Step 2: Try Bheem Passport validation (for tokens issued by Passport)
+    if settings.USE_PASSPORT_AUTH:
+        passport_payload = await validate_token_via_passport(token)
+
+        if passport_payload is not None:
+            user_id = passport_payload.get("user_id") or passport_payload.get("sub")
+            return {
+                "id": user_id,
+                "user_id": user_id,
+                "username": passport_payload.get("username"),
+                "email": passport_payload.get("email"),
+                "role": passport_payload.get("role"),
+                "company_id": passport_payload.get("company_id"),
+                "company_code": passport_payload.get("company_code"),
+                "companies": passport_payload.get("companies", []),
+                "person_id": passport_payload.get("person_id")
+            }
+
+        # Step 3: Try /me endpoint as fallback
+        user_info = await get_user_from_passport(token)
+
+        if user_info is not None:
+            user_id = user_info.get("user_id") or user_info.get("sub")
+            return {
+                "id": user_id,
+                "user_id": user_id,
+                "username": user_info.get("username"),
+                "email": user_info.get("email"),
+                "role": user_info.get("role"),
+                "company_id": user_info.get("company_id"),
+                "company_code": user_info.get("company_code"),
+                "companies": user_info.get("companies", []),
+                "person_id": user_info.get("person_id")
+            }
+
+    # All validation methods failed
+    raise credentials_exception
+
 
 async def get_optional_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
@@ -97,8 +199,37 @@ async def get_optional_user(
     """Get current user if authenticated, else None"""
     if credentials is None:
         return None
-    
+
     try:
         return await get_current_user(credentials, db)
     except HTTPException:
         return None
+
+
+def require_role(allowed_roles: list):
+    """
+    Dependency to require specific roles
+    Usage: current_user: dict = Depends(require_role(["Admin", "SuperAdmin"]))
+    """
+    async def role_checker(
+        current_user: Dict[str, Any] = Depends(get_current_user)
+    ) -> Dict[str, Any]:
+        user_role = current_user.get("role")
+        if user_role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied. Required roles: {allowed_roles}"
+            )
+        return current_user
+
+    return role_checker
+
+
+def require_admin():
+    """Dependency to require Admin or SuperAdmin role"""
+    return require_role(["Admin", "SuperAdmin"])
+
+
+def require_superadmin():
+    """Dependency to require SuperAdmin role"""
+    return require_role(["SuperAdmin"])

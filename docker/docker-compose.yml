@@ -13,6 +13,12 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:${DB_PASSWORD}@${DB_HOST}:5432/bheem_workspace
       - SECRET_KEY=${SECRET_KEY}
+      # Bheem Passport SSO
+      - BHEEM_PASSPORT_URL=${BHEEM_PASSPORT_URL:-https://platform.bheem.co.uk}
+      - USE_PASSPORT_AUTH=${USE_PASSPORT_AUTH:-true}
+      - BHEEM_JWT_SECRET=${BHEEM_JWT_SECRET}
+      - ERP_DATABASE_URL=${ERP_DATABASE_URL}
+      - MAIL_DOMAIN=${MAIL_DOMAIN:-bheem.cloud}
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
       - LIVEKIT_URL=${LIVEKIT_URL}
