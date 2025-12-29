@@ -7,6 +7,7 @@ import StatusBadge from '@/components/admin/StatusBadge';
 import Modal, { ConfirmDialog } from '@/components/admin/Modal';
 import UserForm from '@/components/admin/forms/UserForm';
 import { useAdminStore } from '@/stores/adminStore';
+import { useCurrentTenantId } from '@/stores/authStore';
 import type { TenantUser, TenantUserCreate, TenantUserUpdate } from '@/types/admin';
 
 export default function UsersPage() {
@@ -19,8 +20,8 @@ export default function UsersPage() {
   const [selectedUser, setSelectedUser] = useState<TenantUser | null>(null);
   const [inviting, setInviting] = useState(false);
 
-  // In real app, get tenant ID from auth context
-  const tenantId = 'current-tenant-id';
+  // Get tenant ID from auth context
+  const tenantId = useCurrentTenantId();
 
   useEffect(() => {
     fetchUsers(tenantId);

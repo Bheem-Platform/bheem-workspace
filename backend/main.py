@@ -4,13 +4,17 @@ Meet | Docs | Mail | Admin
 """
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import os
+import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Next.js server URL for admin pages
+NEXTJS_URL = os.getenv("NEXTJS_URL", "http://localhost:3000")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -212,18 +216,84 @@ async def recordings_page():
             return HTMLResponse(content=f.read())
     return HTMLResponse(content="<h1>Recordings</h1>")
 
-# Admin
-@app.get("/admin", response_class=HTMLResponse)
-async def admin_page():
-    path = os.path.join(FRONTEND_PATH, "admin.html")
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return HTMLResponse(content=f.read())
-    path = os.path.join(FRONTEND_PATH, "dashboard.html")
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>Admin</h1>")
+# Admin - Proxy to Next.js server
+@app.api_route("/admin/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+@app.api_route("/admin", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def admin_proxy(request: Request, path: str = ""):
+    """Proxy admin routes to Next.js server"""
+    target_url = f"{NEXTJS_URL}/admin/{path}" if path else f"{NEXTJS_URL}/admin"
+
+    # Add query params
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            # Forward the request
+            response = await client.request(
+                method=request.method,
+                url=target_url,
+                headers={k: v for k, v in request.headers.items() if k.lower() not in ['host', 'content-length']},
+                content=await request.body() if request.method in ["POST", "PUT", "PATCH"] else None,
+                timeout=30.0
+            )
+
+            # Return the response
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Admin service unavailable</h1><p>{str(e)}</p>", status_code=503)
+
+# Proxy Next.js static files (_next)
+@app.api_route("/_next/{path:path}", methods=["GET"])
+async def nextjs_static_proxy(request: Request, path: str):
+    """Proxy Next.js static files"""
+    target_url = f"{NEXTJS_URL}/_next/{path}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type')
+            )
+        except httpx.RequestError:
+            return HTMLResponse(content="Static file not found", status_code=404)
+
+# Super Admin - Proxy to Next.js server
+@app.api_route("/super-admin/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+@app.api_route("/super-admin", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
+async def super_admin_proxy(request: Request, path: str = ""):
+    """Proxy super-admin routes to Next.js server"""
+    target_url = f"{NEXTJS_URL}/super-admin/{path}" if path else f"{NEXTJS_URL}/super-admin"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.request(
+                method=request.method,
+                url=target_url,
+                headers={k: v for k, v in request.headers.items() if k.lower() not in ['host', 'content-length']},
+                content=await request.body() if request.method in ["POST", "PUT", "PATCH"] else None,
+                timeout=30.0
+            )
+
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Admin service unavailable</h1><p>{str(e)}</p>", status_code=503)
 
 @app.get("/team", response_class=HTMLResponse)
 async def team_page():

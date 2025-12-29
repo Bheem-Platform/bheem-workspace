@@ -3,6 +3,7 @@ import { Activity, Filter, Download } from 'lucide-react';
 import AdminLayout from '@/components/admin/AdminLayout';
 import ActivityFeed from '@/components/admin/ActivityFeed';
 import { useAdminStore } from '@/stores/adminStore';
+import { useCurrentTenantId } from '@/stores/authStore';
 
 const ACTION_TYPES = [
   { value: '', label: 'All Actions' },
@@ -21,7 +22,8 @@ export default function TenantActivityPage() {
   const [actionFilter, setActionFilter] = useState('');
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
 
-  const tenantId = 'current-tenant-id';
+  // Get tenant ID from auth context
+  const tenantId = useCurrentTenantId();
 
   useEffect(() => {
     fetchActivityLogs(tenantId, {

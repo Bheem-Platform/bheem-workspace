@@ -4,6 +4,7 @@ import { ArrowLeft, Globe } from 'lucide-react';
 import AdminLayout from '@/components/admin/AdminLayout';
 import DomainForm from '@/components/admin/forms/DomainForm';
 import { useAdminStore } from '@/stores/adminStore';
+import { useCurrentTenantId } from '@/stores/authStore';
 import type { DomainCreate } from '@/types/admin';
 
 export default function AddDomainPage() {
@@ -11,7 +12,8 @@ export default function AddDomainPage() {
   const { addDomain } = useAdminStore();
   const [adding, setAdding] = useState(false);
 
-  const tenantId = 'current-tenant-id';
+  // Get tenant ID from auth context
+  const tenantId = useCurrentTenantId();
 
   const handleAddDomain = async (data: DomainCreate) => {
     setAdding(true);

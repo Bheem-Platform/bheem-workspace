@@ -7,6 +7,7 @@ import StatusBadge from '@/components/admin/StatusBadge';
 import Modal from '@/components/admin/Modal';
 import DomainForm from '@/components/admin/forms/DomainForm';
 import { useAdminStore } from '@/stores/adminStore';
+import { useCurrentTenantId } from '@/stores/authStore';
 import type { Domain, DomainCreate } from '@/types/admin';
 
 export default function DomainsPage() {
@@ -16,8 +17,8 @@ export default function DomainsPage() {
   const [adding, setAdding] = useState(false);
   const [verifying, setVerifying] = useState<string | null>(null);
 
-  // In real app, get tenant ID from auth context
-  const tenantId = 'current-tenant-id';
+  // Get tenant ID from auth context
+  const tenantId = useCurrentTenantId();
 
   useEffect(() => {
     fetchDomains(tenantId);

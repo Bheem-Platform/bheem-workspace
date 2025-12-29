@@ -3,6 +3,7 @@ import { Video, Users, Clock, Settings, Save } from 'lucide-react';
 import AdminLayout from '@/components/admin/AdminLayout';
 import StatsCard from '@/components/admin/StatsCard';
 import UsageProgressBar from '@/components/admin/UsageProgressBar';
+import { useCurrentTenantId } from '@/stores/authStore';
 import * as adminApi from '@/lib/adminApi';
 import type { MeetSettings } from '@/types/admin';
 
@@ -21,7 +22,8 @@ export default function MeetSettingsPage() {
     screen_share_enabled: true,
   });
 
-  const tenantId = 'current-tenant-id';
+  // Get tenant ID from auth context
+  const tenantId = useCurrentTenantId();
 
   useEffect(() => {
     loadSettings();

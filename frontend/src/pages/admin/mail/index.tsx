@@ -5,6 +5,7 @@ import DataTable from '@/components/admin/DataTable';
 import StatsCard from '@/components/admin/StatsCard';
 import Modal, { ConfirmDialog } from '@/components/admin/Modal';
 import { useAdminStore } from '@/stores/adminStore';
+import { useCurrentTenantId } from '@/stores/authStore';
 import * as adminApi from '@/lib/adminApi';
 import type { Mailbox } from '@/types/admin';
 
@@ -26,7 +27,8 @@ export default function MailSettingsPage() {
     password: '',
   });
 
-  const tenantId = 'current-tenant-id';
+  // Get tenant ID from auth context
+  const tenantId = useCurrentTenantId();
 
   useEffect(() => {
     fetchDomains(tenantId);

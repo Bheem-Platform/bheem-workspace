@@ -17,6 +17,7 @@ import AdminLayout from '@/components/admin/AdminLayout';
 import StatusBadge from '@/components/admin/StatusBadge';
 import { ConfirmDialog } from '@/components/admin/Modal';
 import { useAdminStore } from '@/stores/adminStore';
+import { useCurrentTenantId } from '@/stores/authStore';
 import * as adminApi from '@/lib/adminApi';
 import type { Domain, DNSRecord } from '@/types/admin';
 
@@ -32,7 +33,8 @@ export default function DomainDetailPage() {
   const [verifying, setVerifying] = useState(false);
   const [copiedRecord, setCopiedRecord] = useState<string | null>(null);
 
-  const tenantId = 'current-tenant-id';
+  // Get tenant ID from auth context
+  const tenantId = useCurrentTenantId();
 
   useEffect(() => {
     if (domains.length === 0) {

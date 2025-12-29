@@ -15,6 +15,7 @@ import StatsCard from '@/components/admin/StatsCard';
 import UsageProgressBar from '@/components/admin/UsageProgressBar';
 import ActivityFeed from '@/components/admin/ActivityFeed';
 import { useAdminStore } from '@/stores/adminStore';
+import { useCurrentTenantId } from '@/stores/authStore';
 import * as adminApi from '@/lib/adminApi';
 import type { TenantDashboard } from '@/types/admin';
 
@@ -23,8 +24,8 @@ export default function TenantAdminDashboard() {
   const { currentTenant, activityLogs, fetchTenant, fetchActivityLogs, loading } = useAdminStore();
   const [dashboard, setDashboard] = useState<TenantDashboard | null>(null);
 
-  // In a real app, get tenant ID from auth context
-  const tenantId = 'current-tenant-id';
+  // Get tenant ID from auth context
+  const tenantId = useCurrentTenantId();
 
   useEffect(() => {
     // Fetch tenant dashboard data
