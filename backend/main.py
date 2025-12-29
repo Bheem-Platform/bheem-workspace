@@ -147,15 +147,33 @@ async def homepage():
             return HTMLResponse(content=f.read())
     return HTMLResponse(content="<h1>Bheem Workspace</h1>")
 
-@app.get("/login", response_class=HTMLResponse)
-async def login_page():
-    path = os.path.join(FRONTEND_PATH, "login.html")
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return HTMLResponse(content=f.read())
-    # Redirect to Bheem Passport if no login page
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="https://platform.bheem.co.uk/login?redirect=https://workspace.bheem.cloud/dashboard")
+@app.api_route("/login", methods=["GET", "POST"])
+async def login_proxy(request: Request):
+    """Proxy login page to Next.js server"""
+    target_url = f"{NEXTJS_URL}/login"
+
+    # Add query params
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.request(
+                method=request.method,
+                url=target_url,
+                headers={k: v for k, v in request.headers.items() if k.lower() not in ['host', 'content-length']},
+                content=await request.body() if request.method == "POST" else None,
+                timeout=30.0
+            )
+
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Login service unavailable</h1><p>{str(e)}</p>", status_code=503)
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():

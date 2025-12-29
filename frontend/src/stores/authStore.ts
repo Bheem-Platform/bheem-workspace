@@ -119,3 +119,14 @@ export const useIsSuperAdmin = (): boolean => {
   const user = useAuthStore((state) => state.user);
   return user?.role === 'SuperAdmin';
 };
+
+// Hook to require authentication - redirects to login if not authenticated
+export const useRequireAuth = (redirectTo = '/login') => {
+  const { isAuthenticated, isLoading } = useAuthStore();
+
+  if (typeof window !== 'undefined' && !isLoading && !isAuthenticated) {
+    window.location.href = redirectTo;
+  }
+
+  return { isAuthenticated, isLoading };
+};

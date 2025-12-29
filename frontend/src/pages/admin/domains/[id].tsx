@@ -17,7 +17,7 @@ import AdminLayout from '@/components/admin/AdminLayout';
 import StatusBadge from '@/components/admin/StatusBadge';
 import { ConfirmDialog } from '@/components/admin/Modal';
 import { useAdminStore } from '@/stores/adminStore';
-import { useCurrentTenantId } from '@/stores/authStore';
+import { useCurrentTenantId, useRequireAuth } from '@/stores/authStore';
 import * as adminApi from '@/lib/adminApi';
 import type { Domain, DNSRecord } from '@/types/admin';
 
@@ -33,14 +33,18 @@ export default function DomainDetailPage() {
   const [verifying, setVerifying] = useState(false);
   const [copiedRecord, setCopiedRecord] = useState<string | null>(null);
 
+  // Require authentication
+  const { isAuthenticated, isLoading: authLoading } = useRequireAuth();
+
   // Get tenant ID from auth context
   const tenantId = useCurrentTenantId();
 
   useEffect(() => {
+    if (!isAuthenticated || authLoading) return;
     if (domains.length === 0) {
       fetchDomains(tenantId);
     }
-  }, [domains.length, fetchDomains, tenantId]);
+  }, [domains.length, fetchDomains, tenantId, isAuthenticated, authLoading]);
 
   useEffect(() => {
     if (id && typeof id === 'string' && domains.length > 0) {
@@ -48,6 +52,15 @@ export default function DomainDetailPage() {
       if (found) setDomain(found);
     }
   }, [id, domains]);
+
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
 
   useEffect(() => {
     const loadDnsRecords = async () => {

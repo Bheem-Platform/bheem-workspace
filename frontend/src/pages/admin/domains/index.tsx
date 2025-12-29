@@ -7,7 +7,7 @@ import StatusBadge from '@/components/admin/StatusBadge';
 import Modal from '@/components/admin/Modal';
 import DomainForm from '@/components/admin/forms/DomainForm';
 import { useAdminStore } from '@/stores/adminStore';
-import { useCurrentTenantId } from '@/stores/authStore';
+import { useCurrentTenantId, useRequireAuth } from '@/stores/authStore';
 import type { Domain, DomainCreate } from '@/types/admin';
 
 export default function DomainsPage() {
@@ -17,12 +17,16 @@ export default function DomainsPage() {
   const [adding, setAdding] = useState(false);
   const [verifying, setVerifying] = useState<string | null>(null);
 
+  // Require authentication
+  const { isAuthenticated, isLoading: authLoading } = useRequireAuth();
+
   // Get tenant ID from auth context
   const tenantId = useCurrentTenantId();
 
   useEffect(() => {
+    if (!isAuthenticated || authLoading) return;
     fetchDomains(tenantId);
-  }, [fetchDomains, tenantId]);
+  }, [fetchDomains, tenantId, isAuthenticated, authLoading]);
 
   const handleAddDomain = async (data: DomainCreate) => {
     setAdding(true);
@@ -39,6 +43,15 @@ export default function DomainsPage() {
     await verifyDomain(tenantId, domainId);
     setVerifying(null);
   };
+
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
 
   const getStatusIcon = (status: string) => {
     switch (status) {

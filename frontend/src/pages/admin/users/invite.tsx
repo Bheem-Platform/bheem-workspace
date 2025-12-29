@@ -4,7 +4,7 @@ import { ArrowLeft, UserPlus, Mail } from 'lucide-react';
 import AdminLayout from '@/components/admin/AdminLayout';
 import UserForm from '@/components/admin/forms/UserForm';
 import { useAdminStore } from '@/stores/adminStore';
-import { useCurrentTenantId } from '@/stores/authStore';
+import { useCurrentTenantId, useRequireAuth } from '@/stores/authStore';
 import type { TenantUserCreate } from '@/types/admin';
 
 export default function InviteUserPage() {
@@ -13,8 +13,20 @@ export default function InviteUserPage() {
   const [inviting, setInviting] = useState(false);
   const [success, setSuccess] = useState(false);
 
+  // Require authentication
+  const { isAuthenticated, isLoading: authLoading } = useRequireAuth();
+
   // Get tenant ID from auth context
   const tenantId = useCurrentTenantId();
+
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
 
   const handleInvite = async (data: TenantUserCreate) => {
     setInviting(true);

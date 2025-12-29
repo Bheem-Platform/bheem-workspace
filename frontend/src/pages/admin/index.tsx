@@ -15,7 +15,7 @@ import StatsCard from '@/components/admin/StatsCard';
 import UsageProgressBar from '@/components/admin/UsageProgressBar';
 import ActivityFeed from '@/components/admin/ActivityFeed';
 import { useAdminStore } from '@/stores/adminStore';
-import { useCurrentTenantId } from '@/stores/authStore';
+import { useCurrentTenantId, useRequireAuth } from '@/stores/authStore';
 import * as adminApi from '@/lib/adminApi';
 import type { TenantDashboard } from '@/types/admin';
 
@@ -24,10 +24,16 @@ export default function TenantAdminDashboard() {
   const { currentTenant, activityLogs, fetchTenant, fetchActivityLogs, loading } = useAdminStore();
   const [dashboard, setDashboard] = useState<TenantDashboard | null>(null);
 
+  // Require authentication - redirect to login if not authenticated
+  const { isAuthenticated, isLoading: authLoading } = useRequireAuth();
+
   // Get tenant ID from auth context
   const tenantId = useCurrentTenantId();
 
   useEffect(() => {
+    // Don't fetch if not authenticated or still loading auth
+    if (!isAuthenticated || authLoading) return;
+
     // Fetch tenant dashboard data
     const loadDashboard = async () => {
       try {
@@ -40,7 +46,16 @@ export default function TenantAdminDashboard() {
     };
     loadDashboard();
     fetchActivityLogs(tenantId, { limit: 10 });
-  }, [tenantId, fetchActivityLogs]);
+  }, [tenantId, fetchActivityLogs, isAuthenticated, authLoading]);
+
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
 
   return (
     <AdminLayout

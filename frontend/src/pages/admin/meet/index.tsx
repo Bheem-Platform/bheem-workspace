@@ -3,7 +3,7 @@ import { Video, Users, Clock, Settings, Save } from 'lucide-react';
 import AdminLayout from '@/components/admin/AdminLayout';
 import StatsCard from '@/components/admin/StatsCard';
 import UsageProgressBar from '@/components/admin/UsageProgressBar';
-import { useCurrentTenantId } from '@/stores/authStore';
+import { useCurrentTenantId, useRequireAuth } from '@/stores/authStore';
 import * as adminApi from '@/lib/adminApi';
 import type { MeetSettings } from '@/types/admin';
 
@@ -22,12 +22,25 @@ export default function MeetSettingsPage() {
     screen_share_enabled: true,
   });
 
+  // Require authentication
+  const { isAuthenticated, isLoading: authLoading } = useRequireAuth();
+
   // Get tenant ID from auth context
   const tenantId = useCurrentTenantId();
 
   useEffect(() => {
+    if (!isAuthenticated || authLoading) return;
     loadSettings();
-  }, []);
+  }, [isAuthenticated, authLoading]);
+
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
 
   const loadSettings = async () => {
     setLoading(true);

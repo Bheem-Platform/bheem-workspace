@@ -7,7 +7,7 @@ import StatusBadge from '@/components/admin/StatusBadge';
 import Modal, { ConfirmDialog } from '@/components/admin/Modal';
 import UserForm from '@/components/admin/forms/UserForm';
 import { useAdminStore } from '@/stores/adminStore';
-import { useCurrentTenantId } from '@/stores/authStore';
+import { useCurrentTenantId, useRequireAuth } from '@/stores/authStore';
 import type { TenantUser, TenantUserCreate, TenantUserUpdate } from '@/types/admin';
 
 export default function UsersPage() {
@@ -20,12 +20,16 @@ export default function UsersPage() {
   const [selectedUser, setSelectedUser] = useState<TenantUser | null>(null);
   const [inviting, setInviting] = useState(false);
 
+  // Require authentication
+  const { isAuthenticated, isLoading: authLoading } = useRequireAuth();
+
   // Get tenant ID from auth context
   const tenantId = useCurrentTenantId();
 
   useEffect(() => {
+    if (!isAuthenticated || authLoading) return;
     fetchUsers(tenantId);
-  }, [fetchUsers, tenantId]);
+  }, [fetchUsers, tenantId, isAuthenticated, authLoading]);
 
   const handleInviteUser = async (data: TenantUserCreate) => {
     setInviting(true);
@@ -63,6 +67,15 @@ export default function UsersPage() {
         return <User size={14} />;
     }
   };
+
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
 
   const columns = [
     {
