@@ -12,7 +12,7 @@ from core.database import get_db
 from core.security import get_current_user
 from services.user_workspace_service import user_workspace_service
 
-router = APIRouter(prefix="/workspace", tags=["User Workspace"])
+router = APIRouter(prefix="/user-workspace", tags=["User Workspace"])
 
 
 # ============== SCHEMAS ==============
