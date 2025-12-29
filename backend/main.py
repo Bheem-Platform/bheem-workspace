@@ -33,7 +33,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-FRONTEND_PATH = "/root/bheem-workspace/frontend/dist"
+FRONTEND_PATH = "/home/coder/bheem-workspace/frontend/dist"
 
 @app.get("/health")
 async def health():
