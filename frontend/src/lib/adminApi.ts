@@ -107,6 +107,104 @@ export const updateMeetSettings = (tenantId: string, data: Partial<MeetSettings>
 export const getDocsStats = (tenantId: string) =>
   api.get<DocsStats>(`/admin/tenants/${tenantId}/docs/stats`);
 
+// ==================== DOCS ADMIN (Phase 4) ====================
+
+export const listDocsUsers = (tenantId: string, params?: {
+  search?: string;
+  limit?: number;
+  offset?: number;
+}) => api.get(`/admin/tenants/${tenantId}/docs/users`, { params });
+
+export const getDocsUser = (tenantId: string, username: string) =>
+  api.get(`/admin/tenants/${tenantId}/docs/users/${username}`);
+
+export const setDocsUserQuota = (tenantId: string, username: string, quotaMb: number) =>
+  api.put(`/admin/tenants/${tenantId}/docs/users/${username}/quota`, { quota_mb: quotaMb });
+
+export const disableDocsUser = (tenantId: string, username: string) =>
+  api.post(`/admin/tenants/${tenantId}/docs/users/${username}/disable`);
+
+export const enableDocsUser = (tenantId: string, username: string) =>
+  api.post(`/admin/tenants/${tenantId}/docs/users/${username}/enable`);
+
+export const listDocsShares = (tenantId: string, path?: string) =>
+  api.get(`/admin/tenants/${tenantId}/docs/shares`, { params: { path } });
+
+export const getDocsShare = (tenantId: string, shareId: string) =>
+  api.get(`/admin/tenants/${tenantId}/docs/shares/${shareId}`);
+
+export const updateDocsShare = (tenantId: string, shareId: string, data: {
+  permissions?: number;
+  expiration?: string;
+  password?: string;
+}) => api.put(`/admin/tenants/${tenantId}/docs/shares/${shareId}`, data);
+
+export const deleteDocsShare = (tenantId: string, shareId: string) =>
+  api.delete(`/admin/tenants/${tenantId}/docs/shares/${shareId}`);
+
+export const listDocsGroups = (tenantId: string) =>
+  api.get(`/admin/tenants/${tenantId}/docs/groups`);
+
+export const createDocsGroup = (tenantId: string, name: string) =>
+  api.post(`/admin/tenants/${tenantId}/docs/groups`, { name });
+
+export const addUserToDocsGroup = (tenantId: string, username: string, groupName: string) =>
+  api.post(`/admin/tenants/${tenantId}/docs/users/${username}/groups`, { group_name: groupName });
+
+export const removeUserFromDocsGroup = (tenantId: string, username: string, groupName: string) =>
+  api.delete(`/admin/tenants/${tenantId}/docs/users/${username}/groups/${groupName}`);
+
+export const getDocsStorageStats = (tenantId: string) =>
+  api.get(`/admin/tenants/${tenantId}/docs/storage/stats`);
+
+export const getDocsStorageOverview = () =>
+  api.get(`/admin/docs/storage/overview`);
+
+// ==================== REPORTING (Phase 6) ====================
+
+export const getUsageReport = (tenantId: string, params?: {
+  period?: 'day' | 'week' | 'month' | 'year';
+}) => api.get(`/admin/tenants/${tenantId}/reports/usage`, { params });
+
+export const getActivityReport = (tenantId: string, params?: {
+  period?: 'day' | 'week' | 'month';
+  group_by?: 'hour' | 'day' | 'week';
+}) => api.get(`/admin/tenants/${tenantId}/reports/activity`, { params });
+
+export const getTenantsOverview = () =>
+  api.get(`/admin/reports/tenants/overview`);
+
+export const bulkUserOperation = (tenantId: string, data: {
+  action: 'enable' | 'disable' | 'delete' | 'set_quota';
+  user_ids: string[];
+  quota_mb?: number;
+}) => api.post(`/admin/tenants/${tenantId}/bulk/users`, data);
+
+export const bulkTenantOperation = (data: {
+  action: 'suspend' | 'activate' | 'update_plan';
+  tenant_ids: string[];
+  plan?: string;
+}) => api.post(`/admin/bulk/tenants`, data);
+
+export const exportUsers = (tenantId: string, format: 'json' | 'csv' = 'json') =>
+  api.get(`/admin/tenants/${tenantId}/export/users`, { params: { format } });
+
+export const exportActivity = (tenantId: string, params?: {
+  format?: 'json' | 'csv';
+  period?: 'day' | 'week' | 'month';
+}) => api.get(`/admin/tenants/${tenantId}/export/activity`, { params });
+
+// ==================== HEALTH CHECK ====================
+
+export const getHealthStatus = () =>
+  api.get(`/health`);
+
+export const getDetailedHealth = () =>
+  api.get(`/health/detailed`);
+
+export const getServiceHealth = (serviceName: string) =>
+  api.get(`/health/services/${serviceName}`);
+
 // ==================== DEVELOPERS ====================
 
 export const listDevelopers = (params?: { skip?: number; limit?: number }) =>

@@ -20,11 +20,17 @@ class MailcowService:
         self.api_url = settings.MAILCOW_URL
         self.api_key = settings.MAILCOW_API_KEY
         self.mail_domain = settings.MAIL_DOMAIN
-        # Direct IP since DNS points to workspace server, not mail server
-        self.imap_host = "135.181.25.62"
-        self.smtp_host = "135.181.25.62"
-        self.imap_port = 993
-        self.smtp_port = 465
+        # Mail server connection settings (from environment)
+        self.imap_host = settings.MAILCOW_IMAP_HOST
+        self.smtp_host = settings.MAILCOW_SMTP_HOST
+        self.imap_port = settings.MAILCOW_IMAP_PORT
+        self.smtp_port = settings.MAILCOW_SMTP_PORT
+        # SSH settings for direct sync fallback
+        self.ssh_host = settings.MAILCOW_SSH_HOST
+        self.ssh_user = settings.MAILCOW_SSH_USER
+        self.ssh_key_path = settings.MAILCOW_SSH_KEY_PATH
+        self.mysql_user = settings.MAILCOW_MYSQL_USER
+        self.mysql_password = settings.MAILCOW_MYSQL_PASSWORD
     
     async def _api_request(self, method: str, endpoint: str, data: dict = None) -> dict:
         """Make API request to Mailcow"""
@@ -59,7 +65,11 @@ class MailcowService:
     
     async def get_mailboxes(self) -> List[dict]:
         """Get all mailboxes"""
-        return await self._api_request("GET", "get/mailbox/all")
+        result = await self._api_request("GET", "get/mailbox/all")
+        # Ensure we always return a list, even if API fails or returns wrong type
+        if isinstance(result, list):
+            return result
+        return []
 
     async def update_mailbox_password(self, email: str, new_password: str) -> dict:
         """Update mailbox password - syncs with Bheem Core password"""
@@ -96,10 +106,15 @@ class MailcowService:
         import subprocess
         import shlex
 
+        # Check if SSH credentials are configured
+        if not self.ssh_host or not self.ssh_key_path or not self.mysql_password:
+            print("Direct password sync not configured - SSH credentials missing")
+            return False
+
         try:
             # Generate Dovecot-compatible password hash
             hash_cmd = f"docker exec mailcowdockerized-dovecot-mailcow-1 doveadm pw -s SSHA256 -p {shlex.quote(password)}"
-            ssh_cmd = f"ssh -i /root/.ssh/sundeep -o StrictHostKeyChecking=no root@{self.imap_host} {shlex.quote(hash_cmd)}"
+            ssh_cmd = f"ssh -i {shlex.quote(self.ssh_key_path)} -o StrictHostKeyChecking=no {self.ssh_user}@{self.ssh_host} {shlex.quote(hash_cmd)}"
 
             result = subprocess.run(ssh_cmd, shell=True, capture_output=True, text=True, timeout=30)
             if result.returncode != 0:
@@ -108,8 +123,8 @@ class MailcowService:
             password_hash = result.stdout.strip()
 
             # Update password in Mailcow database
-            update_cmd = f"docker exec mailcowdockerized-mysql-mailcow-1 mysql -uroot -pBheemMailRoot2024! mailcow -e \"UPDATE mailbox SET password = '{password_hash}' WHERE username = '{email}';\""
-            ssh_update = f"ssh -i /root/.ssh/sundeep -o StrictHostKeyChecking=no root@{self.imap_host} {shlex.quote(update_cmd)}"
+            update_cmd = f"docker exec mailcowdockerized-mysql-mailcow-1 mysql -u{self.mysql_user} -p{shlex.quote(self.mysql_password)} mailcow -e \"UPDATE mailbox SET password = '{password_hash}' WHERE username = '{email}';\""
+            ssh_update = f"ssh -i {shlex.quote(self.ssh_key_path)} -o StrictHostKeyChecking=no {self.ssh_user}@{self.ssh_host} {shlex.quote(update_cmd)}"
 
             result = subprocess.run(ssh_update, shell=True, capture_output=True, text=True, timeout=30)
             return result.returncode == 0

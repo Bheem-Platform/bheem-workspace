@@ -1,7 +1,8 @@
 """
 Bheem Workspace Admin API - Database-backed Administration Module
+With full authentication and RBAC
 """
-from fastapi import APIRouter, HTTPException, Depends, Query, Body
+from fastapi import APIRouter, HTTPException, Depends, Query, Body, Request
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
@@ -13,6 +14,13 @@ from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
+from core.security import (
+    get_current_user,
+    require_admin,
+    require_superadmin,
+    has_permission,
+    Permission
+)
 from models.admin_models import (
     Tenant, TenantUser, Domain, DomainDNSRecord,
     Developer, DeveloperProject, ActivityLog as ActivityLogModel
@@ -22,6 +30,7 @@ from services.cloudflare_service import cloudflare_service
 from services.mailcow_service import mailcow_service
 
 router = APIRouter()
+
 
 # ==================== ENUMS ====================
 
@@ -129,6 +138,9 @@ class DomainResponse(BaseModel):
     domain_type: str
     is_primary: bool
     is_active: bool
+    verification_status: str = "pending"
+    mail_enabled: bool = False
+    meet_enabled: bool = False
     spf_verified: bool
     dkim_verified: bool
     mx_verified: bool
@@ -225,6 +237,56 @@ class ActivityLogResponse(BaseModel):
 
 # ==================== HELPER FUNCTIONS ====================
 
+def is_valid_uuid(value: str) -> bool:
+    """Check if a string is a valid UUID"""
+    try:
+        uuid.UUID(value)
+        return True
+    except (ValueError, TypeError):
+        return False
+
+async def resolve_tenant_id(tenant_id: str, db: AsyncSession) -> uuid.UUID:
+    """
+    Resolve tenant_id which can be either a UUID or a slug/company_code.
+    Returns the actual UUID of the tenant.
+    """
+    # First check if it's a valid UUID
+    if is_valid_uuid(tenant_id):
+        return uuid.UUID(tenant_id)
+
+    # Otherwise, try to find tenant by slug (case-insensitive)
+    result = await db.execute(
+        select(Tenant).where(
+            or_(
+                func.lower(Tenant.slug) == tenant_id.lower(),
+                func.lower(Tenant.domain) == tenant_id.lower()
+            )
+        )
+    )
+    tenant = result.scalar_one_or_none()
+
+    if tenant:
+        return tenant.id
+
+    # Auto-create tenant for the company_code if it doesn't exist
+    quotas = get_plan_quotas("starter")
+    new_tenant = Tenant(
+        name=f"Organization {tenant_id}",
+        slug=tenant_id.lower(),
+        owner_email=f"admin@{tenant_id.lower()}.workspace",
+        plan="starter",
+        max_users=quotas["max_users"],
+        meet_quota_hours=quotas["meet"],
+        docs_quota_mb=quotas["docs"],
+        mail_quota_mb=quotas["mail"],
+        recordings_quota_mb=quotas["recordings"]
+    )
+    db.add(new_tenant)
+    await db.commit()
+    await db.refresh(new_tenant)
+
+    return new_tenant.id
+
 def get_plan_quotas(plan: str) -> dict:
     """Get quotas based on plan type"""
     quotas = {
@@ -265,13 +327,14 @@ async def log_activity(
 @router.get("/tenants", response_model=List[TenantResponse])
 async def list_tenants(
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_superadmin()),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     search: Optional[str] = None,
     plan: Optional[PlanType] = None,
     is_active: Optional[bool] = None
 ):
-    """List all tenants/organizations"""
+    """List all tenants/organizations (SuperAdmin only)"""
     query = select(Tenant)
 
     if search:
@@ -328,9 +391,10 @@ async def list_tenants(
 @router.post("/tenants", response_model=TenantResponse)
 async def create_tenant(
     tenant: TenantCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_superadmin())
 ):
-    """Create a new tenant/organization"""
+    """Create a new tenant/organization (SuperAdmin only)"""
     # Check if slug already exists
     existing = await db.execute(
         select(Tenant).where(Tenant.slug == tenant.slug)
@@ -392,11 +456,18 @@ async def create_tenant(
 @router.get("/tenants/{tenant_id}", response_model=TenantResponse)
 async def get_tenant(
     tenant_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Get tenant details"""
+    """Get tenant details (authenticated users can access their own tenant)"""
+    # Check access: SuperAdmin can access any, others only their own
+    if current_user.get("role") != "SuperAdmin":
+        user_company = current_user.get("company_code") or current_user.get("company_id")
+        if user_company and str(tenant_id).lower() != str(user_company).lower():
+            raise HTTPException(status_code=403, detail="Access denied to this tenant")
+    resolved_id = await resolve_tenant_id(tenant_id, db)
     result = await db.execute(
-        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+        select(Tenant).where(Tenant.id == resolved_id)
     )
     tenant = result.scalar_one_or_none()
 
@@ -435,11 +506,13 @@ async def get_tenant(
 async def update_tenant(
     tenant_id: str,
     update: TenantUpdate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin())
 ):
-    """Update tenant settings"""
+    """Update tenant settings (Admin or SuperAdmin)"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
     result = await db.execute(
-        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+        select(Tenant).where(Tenant.id == resolved_id)
     )
     tenant = result.scalar_one_or_none()
 
@@ -474,16 +547,45 @@ async def update_tenant(
         metadata=update_data
     )
 
-    return await get_tenant(tenant_id, db)
+    # Get user count for response
+    user_count_result = await db.execute(
+        select(func.count(TenantUser.id)).where(TenantUser.tenant_id == tenant.id)
+    )
+    user_count = user_count_result.scalar() or 0
+
+    return TenantResponse(
+        id=str(tenant.id),
+        name=tenant.name,
+        slug=tenant.slug,
+        domain=tenant.domain,
+        owner_email=tenant.owner_email,
+        plan=tenant.plan,
+        is_active=tenant.is_active,
+        is_suspended=tenant.is_suspended or False,
+        settings=tenant.settings or {},
+        max_users=tenant.max_users,
+        meet_quota_hours=tenant.meet_quota_hours,
+        docs_quota_mb=tenant.docs_quota_mb,
+        mail_quota_mb=tenant.mail_quota_mb,
+        recordings_quota_mb=tenant.recordings_quota_mb,
+        meet_used_hours=float(tenant.meet_used_hours or 0),
+        docs_used_mb=float(tenant.docs_used_mb or 0),
+        mail_used_mb=float(tenant.mail_used_mb or 0),
+        recordings_used_mb=float(tenant.recordings_used_mb or 0),
+        created_at=tenant.created_at,
+        user_count=user_count
+    )
 
 @router.delete("/tenants/{tenant_id}")
 async def delete_tenant(
     tenant_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_superadmin())
 ):
-    """Delete a tenant (soft delete)"""
+    """Delete a tenant (soft delete) - SuperAdmin only"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
     result = await db.execute(
-        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+        select(Tenant).where(Tenant.id == resolved_id)
     )
     tenant = result.scalar_one_or_none()
 
@@ -511,13 +613,15 @@ async def delete_tenant(
 async def list_tenant_users(
     tenant_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     role: Optional[UserRole] = None
 ):
-    """List users in a tenant"""
+    """List users in a tenant (requires authentication)"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
     query = select(TenantUser).where(
-        TenantUser.tenant_id == uuid.UUID(tenant_id)
+        TenantUser.tenant_id == resolved_id
     )
 
     if role:
@@ -547,12 +651,16 @@ async def list_tenant_users(
 async def add_tenant_user(
     tenant_id: str,
     user: UserCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin())
 ):
-    """Add a user to tenant"""
+    """Add a user to tenant (Admin or SuperAdmin)"""
+    # Resolve tenant ID (supports UUID or slug)
+    resolved_id = await resolve_tenant_id(tenant_id, db)
+
     # Check tenant exists
     tenant_result = await db.execute(
-        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+        select(Tenant).where(Tenant.id == resolved_id)
     )
     tenant = tenant_result.scalar_one_or_none()
     if not tenant:
@@ -561,7 +669,7 @@ async def add_tenant_user(
     # Check user limit
     user_count_result = await db.execute(
         select(func.count(TenantUser.id)).where(
-            TenantUser.tenant_id == uuid.UUID(tenant_id)
+            TenantUser.tenant_id == resolved_id
         )
     )
     user_count = user_count_result.scalar() or 0
@@ -576,7 +684,7 @@ async def add_tenant_user(
     existing = await db.execute(
         select(TenantUser).where(
             and_(
-                TenantUser.tenant_id == uuid.UUID(tenant_id),
+                TenantUser.tenant_id == resolved_id,
                 TenantUser.user_id == uuid.UUID(user.user_id)
             )
         )
@@ -585,7 +693,7 @@ async def add_tenant_user(
         raise HTTPException(status_code=400, detail="User already in tenant")
 
     new_user = TenantUser(
-        tenant_id=uuid.UUID(tenant_id),
+        tenant_id=resolved_id,
         user_id=uuid.UUID(user.user_id),
         role=user.role.value,
         invited_at=datetime.utcnow()
@@ -622,13 +730,15 @@ async def update_tenant_user(
     tenant_id: str,
     user_id: str,
     update: UserUpdate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin())
 ):
-    """Update user in tenant"""
+    """Update user in tenant (Admin or SuperAdmin)"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
     result = await db.execute(
         select(TenantUser).where(
             and_(
-                TenantUser.tenant_id == uuid.UUID(tenant_id),
+                TenantUser.tenant_id == resolved_id,
                 TenantUser.user_id == uuid.UUID(user_id)
             )
         )
@@ -665,13 +775,15 @@ async def update_tenant_user(
 async def remove_tenant_user(
     tenant_id: str,
     user_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin())
 ):
-    """Remove user from tenant"""
+    """Remove user from tenant (Admin or SuperAdmin)"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
     result = await db.execute(
         select(TenantUser).where(
             and_(
-                TenantUser.tenant_id == uuid.UUID(tenant_id),
+                TenantUser.tenant_id == resolved_id,
                 TenantUser.user_id == uuid.UUID(user_id)
             )
         )
@@ -692,13 +804,26 @@ async def remove_tenant_user(
 @router.get("/tenants/{tenant_id}/domains", response_model=List[DomainResponse])
 async def list_domains(
     tenant_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """List domains for tenant"""
+    """List domains for tenant (requires authentication)"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
+
     result = await db.execute(
-        select(Domain).where(Domain.tenant_id == uuid.UUID(tenant_id))
+        select(Domain).where(
+            and_(
+                Domain.tenant_id == resolved_id,
+                Domain.is_active == True
+            )
+        )
     )
     domains = result.scalars().all()
+
+    def get_verification_status(d):
+        if d.ownership_verified:
+            return "verified"
+        return "pending"
 
     return [
         DomainResponse(
@@ -708,6 +833,9 @@ async def list_domains(
             domain_type=d.domain_type,
             is_primary=d.is_primary,
             is_active=d.is_active,
+            verification_status=get_verification_status(d),
+            mail_enabled=d.mailgun_domain_id is not None,
+            meet_enabled=False,
             spf_verified=d.spf_verified or False,
             dkim_verified=d.dkim_verified or False,
             mx_verified=d.mx_verified or False,
@@ -724,12 +852,15 @@ async def list_domains(
 async def add_domain(
     tenant_id: str,
     domain_data: DomainCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin())
 ):
-    """Add a domain to tenant with Mailgun and Cloudflare setup"""
+    """Add a domain to tenant with Mailgun and Cloudflare setup (Admin or SuperAdmin)"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
+
     # Check tenant exists
     tenant_result = await db.execute(
-        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+        select(Tenant).where(Tenant.id == resolved_id)
     )
     tenant = tenant_result.scalar_one_or_none()
     if not tenant:
@@ -747,7 +878,7 @@ async def add_domain(
 
     # Create domain in database
     new_domain = Domain(
-        tenant_id=uuid.UUID(tenant_id),
+        tenant_id=resolved_id,
         domain=domain_data.domain,
         domain_type=domain_data.domain_type.value,
         is_primary=domain_data.is_primary,
@@ -758,43 +889,53 @@ async def add_domain(
     await db.commit()
     await db.refresh(new_domain)
 
-    # Add to Mailgun for email domains
-    if domain_data.domain_type == DomainType.EMAIL:
-        mailgun_result = await mailgun_service.add_domain(domain_data.domain)
-        if "error" not in mailgun_result:
-            new_domain.mailgun_domain_id = domain_data.domain
+    # Secondary operations - don't fail the request if these fail
+    try:
+        # Add to Mailgun for email domains
+        if domain_data.domain_type == DomainType.EMAIL:
+            mailgun_result = await mailgun_service.add_domain(domain_data.domain)
+            if "error" not in mailgun_result:
+                new_domain.mailgun_domain_id = domain_data.domain
 
-            # Get DNS records from Mailgun
-            dns_records = await mailgun_service.get_dns_records(domain_data.domain)
-            if "sending_dns_records" in dns_records:
-                for record in dns_records["sending_dns_records"]:
-                    dns_record = DomainDNSRecord(
-                        domain_id=new_domain.id,
-                        record_type=record.get("record_type", "TXT"),
-                        name=record.get("name", domain_data.domain),
-                        value=record.get("value", ""),
-                        priority=record.get("priority")
-                    )
-                    db.add(dns_record)
+                # Get DNS records from Mailgun
+                dns_records = await mailgun_service.get_dns_records(domain_data.domain)
+                if "sending_dns_records" in dns_records:
+                    for record in dns_records["sending_dns_records"]:
+                        dns_record = DomainDNSRecord(
+                            domain_id=new_domain.id,
+                            record_type=record.get("record_type", "TXT"),
+                            name=record.get("name", domain_data.domain),
+                            value=record.get("value", ""),
+                            priority=record.get("priority")
+                        )
+                        db.add(dns_record)
 
+                await db.commit()
+
+        # Check Cloudflare zone
+        zone = await cloudflare_service.get_zone_by_name(domain_data.domain)
+        if zone:
+            new_domain.cloudflare_zone_id = zone.get("id")
             await db.commit()
 
-    # Check Cloudflare zone
-    zone = await cloudflare_service.get_zone_by_name(domain_data.domain)
-    if zone:
-        new_domain.cloudflare_zone_id = zone.get("id")
-        await db.commit()
+        await db.refresh(new_domain)
 
-    await db.refresh(new_domain)
+        await log_activity(
+            db,
+            action="domain_added",
+            tenant_id=tenant_id,
+            entity_type="domain",
+            entity_id=str(new_domain.id),
+            description=f"Added domain: {domain_data.domain}"
+        )
+    except Exception as e:
+        # Log error but don't fail - domain was already added successfully
+        print(f"Warning: Secondary domain setup failed: {e}")
 
-    await log_activity(
-        db,
-        action="domain_added",
-        tenant_id=tenant_id,
-        entity_type="domain",
-        entity_id=str(new_domain.id),
-        description=f"Added domain: {domain_data.domain}"
-    )
+    # Determine verification status
+    verification_status = "pending"
+    if new_domain.ownership_verified:
+        verification_status = "verified"
 
     return DomainResponse(
         id=str(new_domain.id),
@@ -803,6 +944,9 @@ async def add_domain(
         domain_type=new_domain.domain_type,
         is_primary=new_domain.is_primary,
         is_active=new_domain.is_active,
+        verification_status=verification_status,
+        mail_enabled=new_domain.mailgun_domain_id is not None,
+        meet_enabled=False,
         spf_verified=new_domain.spf_verified or False,
         dkim_verified=new_domain.dkim_verified or False,
         mx_verified=new_domain.mx_verified or False,
@@ -817,14 +961,16 @@ async def add_domain(
 async def get_domain_dns_records(
     tenant_id: str,
     domain_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Get required DNS records for domain verification"""
+    """Get required DNS records for domain verification (requires authentication)"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
     result = await db.execute(
         select(Domain).where(
             and_(
                 Domain.id == uuid.UUID(domain_id),
-                Domain.tenant_id == uuid.UUID(tenant_id)
+                Domain.tenant_id == resolved_id
             )
         )
     )
@@ -867,14 +1013,16 @@ async def get_domain_dns_records(
 async def verify_domain(
     tenant_id: str,
     domain_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin())
 ):
-    """Verify domain DNS records"""
+    """Verify domain DNS records (Admin or SuperAdmin)"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
     result = await db.execute(
         select(Domain).where(
             and_(
                 Domain.id == uuid.UUID(domain_id),
-                Domain.tenant_id == uuid.UUID(tenant_id)
+                Domain.tenant_id == resolved_id
             )
         )
     )
@@ -932,14 +1080,16 @@ async def verify_domain(
 async def remove_domain(
     tenant_id: str,
     domain_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin())
 ):
-    """Remove a domain from tenant"""
+    """Remove a domain from tenant (Admin or SuperAdmin)"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
     result = await db.execute(
         select(Domain).where(
             and_(
                 Domain.id == uuid.UUID(domain_id),
-                Domain.tenant_id == uuid.UUID(tenant_id)
+                Domain.tenant_id == resolved_id
             )
         )
     )
@@ -963,9 +1113,10 @@ async def remove_domain(
 async def list_mailboxes(
     tenant_id: str,
     domain: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """List mailboxes via Mailcow"""
+    """List mailboxes via Mailcow (requires authentication)"""
     mailboxes = await mailcow_service.get_mailboxes()
 
     if domain:
@@ -977,9 +1128,10 @@ async def list_mailboxes(
 async def create_mailbox(
     tenant_id: str,
     mailbox: MailboxCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin())
 ):
-    """Create a mailbox via Mailcow"""
+    """Create a mailbox via Mailcow (Admin or SuperAdmin)"""
     result = await mailcow_service.create_mailbox(
         local_part=mailbox.local_part,
         password=mailbox.password,
@@ -1008,9 +1160,10 @@ async def create_mailbox(
 async def delete_mailbox(
     tenant_id: str,
     email: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin())
 ):
-    """Delete a mailbox"""
+    """Delete a mailbox (Admin or SuperAdmin)"""
     await log_activity(
         db,
         action="mailbox_deleted",
@@ -1024,11 +1177,13 @@ async def delete_mailbox(
 @router.get("/tenants/{tenant_id}/mail/stats")
 async def get_mail_stats(
     tenant_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Get mail usage statistics"""
+    """Get mail usage statistics (requires authentication)"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
     tenant_result = await db.execute(
-        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+        select(Tenant).where(Tenant.id == resolved_id)
     )
     tenant = tenant_result.scalar_one_or_none()
 
@@ -1038,7 +1193,7 @@ async def get_mail_stats(
     domains_result = await db.execute(
         select(func.count(Domain.id)).where(
             and_(
-                Domain.tenant_id == uuid.UUID(tenant_id),
+                Domain.tenant_id == resolved_id,
                 Domain.domain_type == "email"
             )
         )
@@ -1057,11 +1212,13 @@ async def get_mail_stats(
 @router.get("/tenants/{tenant_id}/meet/stats")
 async def get_meet_stats(
     tenant_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Get meeting statistics"""
+    """Get meeting statistics (requires authentication)"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
     tenant_result = await db.execute(
-        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+        select(Tenant).where(Tenant.id == resolved_id)
     )
     tenant = tenant_result.scalar_one_or_none()
 
@@ -1079,11 +1236,13 @@ async def get_meet_stats(
 @router.get("/tenants/{tenant_id}/meet/settings")
 async def get_meeting_settings(
     tenant_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Get tenant meeting settings"""
+    """Get tenant meeting settings (requires authentication)"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
     tenant_result = await db.execute(
-        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+        select(Tenant).where(Tenant.id == resolved_id)
     )
     tenant = tenant_result.scalar_one_or_none()
 
@@ -1106,11 +1265,13 @@ async def get_meeting_settings(
 async def update_meeting_settings(
     tenant_id: str,
     settings: MeetingSettingsUpdate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin())
 ):
-    """Update tenant meeting settings"""
+    """Update tenant meeting settings (Admin or SuperAdmin)"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
     tenant_result = await db.execute(
-        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+        select(Tenant).where(Tenant.id == resolved_id)
     )
     tenant = tenant_result.scalar_one_or_none()
 
@@ -1131,11 +1292,13 @@ async def update_meeting_settings(
 @router.get("/tenants/{tenant_id}/docs/stats")
 async def get_docs_stats(
     tenant_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Get document storage statistics"""
+    """Get document storage statistics (requires authentication)"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
     tenant_result = await db.execute(
-        select(Tenant).where(Tenant.id == uuid.UUID(tenant_id))
+        select(Tenant).where(Tenant.id == resolved_id)
     )
     tenant = tenant_result.scalar_one_or_none()
 
@@ -1153,10 +1316,11 @@ async def get_docs_stats(
 @router.get("/developers")
 async def list_developers(
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_superadmin()),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100)
 ):
-    """List all developers"""
+    """List all developers (SuperAdmin only)"""
     result = await db.execute(
         select(Developer)
         .where(Developer.is_active == True)
@@ -1181,9 +1345,10 @@ async def list_developers(
 @router.post("/developers")
 async def create_developer(
     developer: DeveloperCreate,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_superadmin())
 ):
-    """Add a developer"""
+    """Add a developer (SuperAdmin only)"""
     new_dev = Developer(
         user_id=uuid.UUID(developer.user_id),
         role=developer.role,
@@ -1215,9 +1380,10 @@ async def create_developer(
 async def grant_project_access(
     developer_id: str,
     access: DeveloperProjectAccess,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_superadmin())
 ):
-    """Grant project access to developer"""
+    """Grant project access to developer (SuperAdmin only)"""
     dev_result = await db.execute(
         select(Developer).where(Developer.id == uuid.UUID(developer_id))
     )
@@ -1252,13 +1418,15 @@ async def grant_project_access(
 async def get_activity_log(
     tenant_id: str,
     db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
     user_id: Optional[str] = None,
     action: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200)
 ):
-    """Get activity log for tenant"""
+    """Get activity log for tenant (requires authentication)"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
     query = select(ActivityLogModel).where(
-        ActivityLogModel.tenant_id == uuid.UUID(tenant_id)
+        ActivityLogModel.tenant_id == resolved_id
     )
 
     if user_id:
@@ -1292,15 +1460,30 @@ async def get_activity_log(
 @router.get("/tenants/{tenant_id}/dashboard")
 async def get_admin_dashboard(
     tenant_id: str,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
 ):
-    """Get complete admin dashboard data"""
-    tenant = await get_tenant(tenant_id, db)
+    """Get complete admin dashboard data (requires authentication)"""
+    # Check access: SuperAdmin can access any, others only their own
+    if current_user.get("role") != "SuperAdmin":
+        user_company = current_user.get("company_code") or current_user.get("company_id")
+        if user_company and str(tenant_id).lower() != str(user_company).lower():
+            raise HTTPException(status_code=403, detail="Access denied to this tenant")
+
+    resolved_id = await resolve_tenant_id(tenant_id, db)
+
+    # Get tenant directly
+    tenant_result = await db.execute(
+        select(Tenant).where(Tenant.id == resolved_id)
+    )
+    tenant_obj = tenant_result.scalar_one_or_none()
+    if not tenant_obj:
+        raise HTTPException(status_code=404, detail="Tenant not found")
 
     # Get user stats
     user_count_result = await db.execute(
         select(func.count(TenantUser.id)).where(
-            TenantUser.tenant_id == uuid.UUID(tenant_id)
+            TenantUser.tenant_id == resolved_id
         )
     )
     total_users = user_count_result.scalar() or 0
@@ -1311,7 +1494,7 @@ async def get_admin_dashboard(
         count_result = await db.execute(
             select(func.count(TenantUser.id)).where(
                 and_(
-                    TenantUser.tenant_id == uuid.UUID(tenant_id),
+                    TenantUser.tenant_id == resolved_id,
                     TenantUser.role == role
                 )
             )
@@ -1321,7 +1504,7 @@ async def get_admin_dashboard(
     # Get domain count
     domain_count_result = await db.execute(
         select(func.count(Domain.id)).where(
-            Domain.tenant_id == uuid.UUID(tenant_id)
+            Domain.tenant_id == resolved_id
         )
     )
     domain_count = domain_count_result.scalar() or 0
@@ -1329,36 +1512,47 @@ async def get_admin_dashboard(
     # Get recent activity
     recent_logs_result = await db.execute(
         select(ActivityLogModel)
-        .where(ActivityLogModel.tenant_id == uuid.UUID(tenant_id))
+        .where(ActivityLogModel.tenant_id == resolved_id)
         .order_by(ActivityLogModel.created_at.desc())
         .limit(10)
     )
     recent_logs = recent_logs_result.scalars().all()
 
     return {
-        "tenant": tenant.model_dump(),
+        "tenant": {
+            "id": str(tenant_obj.id),
+            "name": tenant_obj.name,
+            "slug": tenant_obj.slug,
+            "domain": tenant_obj.domain,
+            "owner_email": tenant_obj.owner_email,
+            "plan": tenant_obj.plan,
+            "is_active": tenant_obj.is_active,
+            "is_suspended": tenant_obj.is_suspended or False,
+            "max_users": tenant_obj.max_users,
+            "created_at": tenant_obj.created_at.isoformat() if tenant_obj.created_at else None
+        },
         "users": {
             "total": total_users,
-            "max": tenant.max_users,
+            "max": tenant_obj.max_users,
             "by_role": role_counts
         },
         "domains": domain_count,
         "mail": {
-            "storage_used_mb": tenant.mail_used_mb,
-            "storage_quota_mb": tenant.mail_quota_mb,
-            "usage_percent": (tenant.mail_used_mb / tenant.mail_quota_mb * 100) if tenant.mail_quota_mb else 0
+            "storage_used_mb": float(tenant_obj.mail_used_mb or 0),
+            "storage_quota_mb": tenant_obj.mail_quota_mb,
+            "usage_percent": (float(tenant_obj.mail_used_mb or 0) / tenant_obj.mail_quota_mb * 100) if tenant_obj.mail_quota_mb else 0
         },
         "docs": {
-            "storage_used_mb": tenant.docs_used_mb,
-            "storage_quota_mb": tenant.docs_quota_mb,
-            "usage_percent": (tenant.docs_used_mb / tenant.docs_quota_mb * 100) if tenant.docs_quota_mb else 0
+            "storage_used_mb": float(tenant_obj.docs_used_mb or 0),
+            "storage_quota_mb": tenant_obj.docs_quota_mb,
+            "usage_percent": (float(tenant_obj.docs_used_mb or 0) / tenant_obj.docs_quota_mb * 100) if tenant_obj.docs_quota_mb else 0
         },
         "meet": {
-            "hours_used": tenant.meet_used_hours,
-            "hours_quota": tenant.meet_quota_hours,
-            "usage_percent": (tenant.meet_used_hours / tenant.meet_quota_hours * 100) if tenant.meet_quota_hours else 0,
-            "recordings_used_mb": tenant.recordings_used_mb,
-            "recordings_quota_mb": tenant.recordings_quota_mb
+            "hours_used": float(tenant_obj.meet_used_hours or 0),
+            "hours_quota": tenant_obj.meet_quota_hours,
+            "usage_percent": (float(tenant_obj.meet_used_hours or 0) / tenant_obj.meet_quota_hours * 100) if tenant_obj.meet_quota_hours else 0,
+            "recordings_used_mb": float(tenant_obj.recordings_used_mb or 0),
+            "recordings_quota_mb": tenant_obj.recordings_quota_mb
         },
         "recent_activity": [
             {

@@ -110,8 +110,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 // Helper hook to get tenant ID from current user
 export const useCurrentTenantId = (): string => {
   const user = useAuthStore((state) => state.user);
-  // Use company_id as tenant ID, or company_code as fallback, or 'default'
-  return user?.company_id || user?.company_code || 'default';
+  // Use company_code (slug) as tenant ID - this maps to workspace tenant slug
+  // company_id is from Bheem Passport which is a different system
+  return user?.company_code?.toLowerCase() || 'default';
 };
 
 // Helper hook to check if user is super admin

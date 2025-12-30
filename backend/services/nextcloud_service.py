@@ -218,7 +218,7 @@ class NextcloudService:
     async def user_exists(self, username: str) -> bool:
         """Check if a user exists"""
         ocs_url = f"{self._get_ocs_url()}/cloud/users/{username}"
-        
+
         async with httpx.AsyncClient(verify=False) as client:
             response = await client.get(
                 url=ocs_url,
@@ -226,6 +226,359 @@ class NextcloudService:
                 headers={"OCS-APIREQUEST": "true"}
             )
             return response.status_code == 200
+
+    # ==================== ADMIN FUNCTIONS ====================
+
+    async def get_user_quota(self, username: str) -> Dict[str, Any]:
+        """Get user storage quota and usage via OCS API"""
+        ocs_url = f"{self._get_ocs_url()}/cloud/users/{username}"
+
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.get(
+                url=ocs_url,
+                auth=(self.admin_user, self.admin_pass),
+                headers={"OCS-APIREQUEST": "true", "Accept": "application/json"}
+            )
+
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    user_data = data.get("ocs", {}).get("data", {})
+                    quota = user_data.get("quota", {})
+                    return {
+                        "username": username,
+                        "quota_bytes": quota.get("quota", -1),  # -1 = unlimited
+                        "used_bytes": quota.get("used", 0),
+                        "free_bytes": quota.get("free", 0),
+                        "relative": quota.get("relative", 0),  # percentage used
+                        "display_name": user_data.get("displayname"),
+                        "email": user_data.get("email")
+                    }
+                except Exception as e:
+                    return {"error": str(e)}
+            return {"error": f"Failed to get quota: {response.status_code}"}
+
+    async def set_user_quota(self, username: str, quota_bytes: int) -> bool:
+        """Set user storage quota via OCS API"""
+        ocs_url = f"{self._get_ocs_url()}/cloud/users/{username}"
+
+        # Quota value: number of bytes, or 'none' for unlimited
+        quota_value = str(quota_bytes) if quota_bytes > 0 else "none"
+
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.put(
+                url=ocs_url,
+                auth=(self.admin_user, self.admin_pass),
+                headers={"OCS-APIREQUEST": "true"},
+                data={"key": "quota", "value": quota_value}
+            )
+            return response.status_code == 200
+
+    async def list_users(self, search: str = "", limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
+        """List all Nextcloud users via OCS API"""
+        ocs_url = f"{self._get_ocs_url()}/cloud/users"
+        params = {"limit": limit, "offset": offset}
+        if search:
+            params["search"] = search
+
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.get(
+                url=ocs_url,
+                auth=(self.admin_user, self.admin_pass),
+                headers={"OCS-APIREQUEST": "true", "Accept": "application/json"},
+                params=params
+            )
+
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    users = data.get("ocs", {}).get("data", {}).get("users", [])
+                    return [{"username": u} for u in users]
+                except:
+                    return []
+            return []
+
+    async def get_user_details(self, username: str) -> Dict[str, Any]:
+        """Get detailed user information"""
+        ocs_url = f"{self._get_ocs_url()}/cloud/users/{username}"
+
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.get(
+                url=ocs_url,
+                auth=(self.admin_user, self.admin_pass),
+                headers={"OCS-APIREQUEST": "true", "Accept": "application/json"}
+            )
+
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    user_data = data.get("ocs", {}).get("data", {})
+                    return {
+                        "username": user_data.get("id"),
+                        "display_name": user_data.get("displayname"),
+                        "email": user_data.get("email"),
+                        "enabled": user_data.get("enabled", True),
+                        "groups": user_data.get("groups", []),
+                        "quota": user_data.get("quota", {}),
+                        "language": user_data.get("language"),
+                        "last_login": user_data.get("lastLogin")
+                    }
+                except Exception as e:
+                    return {"error": str(e)}
+            return {"error": f"User not found: {response.status_code}"}
+
+    async def disable_user(self, username: str) -> bool:
+        """Disable a Nextcloud user"""
+        ocs_url = f"{self._get_ocs_url()}/cloud/users/{username}/disable"
+
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.put(
+                url=ocs_url,
+                auth=(self.admin_user, self.admin_pass),
+                headers={"OCS-APIREQUEST": "true"}
+            )
+            return response.status_code == 200
+
+    async def enable_user(self, username: str) -> bool:
+        """Enable a Nextcloud user"""
+        ocs_url = f"{self._get_ocs_url()}/cloud/users/{username}/enable"
+
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.put(
+                url=ocs_url,
+                auth=(self.admin_user, self.admin_pass),
+                headers={"OCS-APIREQUEST": "true"}
+            )
+            return response.status_code == 200
+
+    async def delete_user(self, username: str) -> bool:
+        """Delete a Nextcloud user"""
+        ocs_url = f"{self._get_ocs_url()}/cloud/users/{username}"
+
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.delete(
+                url=ocs_url,
+                auth=(self.admin_user, self.admin_pass),
+                headers={"OCS-APIREQUEST": "true"}
+            )
+            return response.status_code == 200
+
+    # ==================== SHARE ADMINISTRATION ====================
+
+    async def list_shares(self, path: str = None, shared_with_me: bool = False) -> List[Dict[str, Any]]:
+        """List all shares via OCS API"""
+        ocs_url = f"{self._get_ocs_url()}/apps/files_sharing/api/v1/shares"
+        params = {}
+        if path:
+            params["path"] = path
+        if shared_with_me:
+            params["shared_with_me"] = "true"
+
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.get(
+                url=ocs_url,
+                auth=(self.admin_user, self.admin_pass),
+                headers={"OCS-APIREQUEST": "true", "Accept": "application/json"},
+                params=params
+            )
+
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    shares = data.get("ocs", {}).get("data", [])
+                    return [{
+                        "id": s.get("id"),
+                        "share_type": s.get("share_type"),
+                        "share_type_name": self._get_share_type_name(s.get("share_type")),
+                        "path": s.get("path"),
+                        "file_target": s.get("file_target"),
+                        "permissions": s.get("permissions"),
+                        "uid_owner": s.get("uid_owner"),
+                        "displayname_owner": s.get("displayname_owner"),
+                        "share_with": s.get("share_with"),
+                        "share_with_displayname": s.get("share_with_displayname"),
+                        "token": s.get("token"),
+                        "url": s.get("url"),
+                        "expiration": s.get("expiration"),
+                        "stime": s.get("stime")
+                    } for s in shares]
+                except:
+                    return []
+            return []
+
+    def _get_share_type_name(self, share_type: int) -> str:
+        """Convert share type number to name"""
+        types = {
+            0: "user",
+            1: "group",
+            3: "public_link",
+            4: "email",
+            6: "federated",
+            7: "circle",
+            10: "room"
+        }
+        return types.get(share_type, "unknown")
+
+    async def get_share(self, share_id: str) -> Dict[str, Any]:
+        """Get details of a specific share"""
+        ocs_url = f"{self._get_ocs_url()}/apps/files_sharing/api/v1/shares/{share_id}"
+
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.get(
+                url=ocs_url,
+                auth=(self.admin_user, self.admin_pass),
+                headers={"OCS-APIREQUEST": "true", "Accept": "application/json"}
+            )
+
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    share = data.get("ocs", {}).get("data", [{}])[0]
+                    return {
+                        "id": share.get("id"),
+                        "share_type": share.get("share_type"),
+                        "path": share.get("path"),
+                        "permissions": share.get("permissions"),
+                        "uid_owner": share.get("uid_owner"),
+                        "share_with": share.get("share_with"),
+                        "token": share.get("token"),
+                        "url": share.get("url"),
+                        "expiration": share.get("expiration")
+                    }
+                except:
+                    return {}
+            return {}
+
+    async def delete_share(self, share_id: str) -> bool:
+        """Delete a share"""
+        ocs_url = f"{self._get_ocs_url()}/apps/files_sharing/api/v1/shares/{share_id}"
+
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.delete(
+                url=ocs_url,
+                auth=(self.admin_user, self.admin_pass),
+                headers={"OCS-APIREQUEST": "true"}
+            )
+            return response.status_code == 200
+
+    async def update_share(self, share_id: str, permissions: int = None,
+                          expiration: str = None, password: str = None) -> bool:
+        """Update share settings"""
+        ocs_url = f"{self._get_ocs_url()}/apps/files_sharing/api/v1/shares/{share_id}"
+        data = {}
+        if permissions is not None:
+            data["permissions"] = permissions
+        if expiration:
+            data["expireDate"] = expiration
+        if password:
+            data["password"] = password
+
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.put(
+                url=ocs_url,
+                auth=(self.admin_user, self.admin_pass),
+                headers={"OCS-APIREQUEST": "true"},
+                data=data
+            )
+            return response.status_code == 200
+
+    # ==================== GROUP MANAGEMENT ====================
+
+    async def list_groups(self) -> List[str]:
+        """List all groups"""
+        ocs_url = f"{self._get_ocs_url()}/cloud/groups"
+
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.get(
+                url=ocs_url,
+                auth=(self.admin_user, self.admin_pass),
+                headers={"OCS-APIREQUEST": "true", "Accept": "application/json"}
+            )
+
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    return data.get("ocs", {}).get("data", {}).get("groups", [])
+                except:
+                    return []
+            return []
+
+    async def create_group(self, group_name: str) -> bool:
+        """Create a new group"""
+        ocs_url = f"{self._get_ocs_url()}/cloud/groups"
+
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.post(
+                url=ocs_url,
+                auth=(self.admin_user, self.admin_pass),
+                headers={"OCS-APIREQUEST": "true"},
+                data={"groupid": group_name}
+            )
+            return response.status_code == 200
+
+    async def add_user_to_group(self, username: str, group_name: str) -> bool:
+        """Add user to a group"""
+        ocs_url = f"{self._get_ocs_url()}/cloud/users/{username}/groups"
+
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.post(
+                url=ocs_url,
+                auth=(self.admin_user, self.admin_pass),
+                headers={"OCS-APIREQUEST": "true"},
+                data={"groupid": group_name}
+            )
+            return response.status_code == 200
+
+    async def remove_user_from_group(self, username: str, group_name: str) -> bool:
+        """Remove user from a group"""
+        ocs_url = f"{self._get_ocs_url()}/cloud/users/{username}/groups"
+
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.delete(
+                url=ocs_url,
+                auth=(self.admin_user, self.admin_pass),
+                headers={"OCS-APIREQUEST": "true"},
+                data={"groupid": group_name}
+            )
+            return response.status_code == 200
+
+    # ==================== STORAGE STATISTICS ====================
+
+    async def get_storage_stats(self) -> Dict[str, Any]:
+        """Get overall storage statistics (admin)"""
+        # Get all users and aggregate their usage
+        users = await self.list_users(limit=1000)
+        total_used = 0
+        total_quota = 0
+        user_stats = []
+
+        for user in users:
+            quota_info = await self.get_user_quota(user["username"])
+            if "error" not in quota_info:
+                used = quota_info.get("used_bytes", 0)
+                quota = quota_info.get("quota_bytes", -1)
+                total_used += used
+                if quota > 0:
+                    total_quota += quota
+                user_stats.append({
+                    "username": user["username"],
+                    "used_bytes": used,
+                    "quota_bytes": quota,
+                    "usage_percent": quota_info.get("relative", 0)
+                })
+
+        # Sort by usage
+        user_stats.sort(key=lambda x: x["used_bytes"], reverse=True)
+
+        return {
+            "total_users": len(users),
+            "total_used_bytes": total_used,
+            "total_used_mb": round(total_used / (1024 * 1024), 2),
+            "total_used_gb": round(total_used / (1024 * 1024 * 1024), 2),
+            "total_quota_bytes": total_quota if total_quota > 0 else None,
+            "top_users": user_stats[:10]
+        }
+
 
 # Singleton instance
 nextcloud_service = NextcloudService()

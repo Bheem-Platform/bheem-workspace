@@ -8,19 +8,30 @@ from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import os
+import time
 import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Setup structured logging
+from core.logging import setup_logging, get_logger, log_request
+
+setup_logging(
+    level=os.getenv("LOG_LEVEL", "INFO"),
+    json_format=os.getenv("LOG_FORMAT", "json") == "json"
+)
+
+logger = get_logger("bheem.workspace.main")
 
 # Next.js server URL for admin pages
 NEXTJS_URL = os.getenv("NEXTJS_URL", "http://localhost:3000")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("Bheem Workspace starting...")
+    logger.info("Bheem Workspace starting...", action="app_startup")
     yield
-    print("Bheem Workspace shutting down...")
+    logger.info("Bheem Workspace shutting down...", action="app_shutdown")
 
 app = FastAPI(
     title="Bheem Workspace",
@@ -36,6 +47,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Request logging middleware
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+
+    # Skip logging for static files and health checks
+    if request.url.path.startswith("/_next") or request.url.path == "/health":
+        return await call_next(request)
+
+    response = await call_next(request)
+
+    duration_ms = (time.time() - start_time) * 1000
+
+    # Log API requests
+    if request.url.path.startswith("/api/"):
+        await log_request(
+            request=request,
+            response_status=response.status_code,
+            duration_ms=duration_ms
+        )
+
+    return response
 
 FRONTEND_PATH = "/home/coder/bheem-workspace/frontend/dist"
 
@@ -137,6 +171,24 @@ try:
     app.include_router(admin_router, prefix="/api/v1/admin", tags=["Admin"])
 except Exception as e:
     print(f"Could not load admin router: {e}")
+
+try:
+    from api.health import router as health_router
+    app.include_router(health_router, prefix="/api/v1", tags=["Health"])
+except Exception as e:
+    print(f"Could not load health router: {e}")
+
+try:
+    from api.docs_admin import router as docs_admin_router
+    app.include_router(docs_admin_router, prefix="/api/v1/admin", tags=["Docs Admin"])
+except Exception as e:
+    print(f"Could not load docs_admin router: {e}")
+
+try:
+    from api.reporting import router as reporting_router
+    app.include_router(reporting_router, prefix="/api/v1/admin", tags=["Reporting"])
+except Exception as e:
+    print(f"Could not load reporting router: {e}")
 
 # Frontend routes
 @app.get("/", response_class=HTMLResponse)

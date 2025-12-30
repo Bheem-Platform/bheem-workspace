@@ -251,7 +251,26 @@ export const useAdminStore = create<AdminState>((set, get) => ({
       set((state) => ({ domains: [response.data, ...state.domains] }));
       return response.data;
     } catch (error: any) {
-      set({ error: error.response?.data?.detail || 'Failed to add domain' });
+      const errorDetail = error.response?.data?.detail || '';
+
+      // Handle "domain already registered" - it was likely added on a previous attempt
+      if (errorDetail.toLowerCase().includes('already registered') ||
+          errorDetail.toLowerCase().includes('already exists')) {
+        // Refresh domains list to get the existing domain
+        await get().fetchDomains(tenantId);
+        // Find the domain that was just added
+        const existingDomain = get().domains.find(
+          (d) => d.domain.toLowerCase() === data.domain.toLowerCase()
+        );
+        if (existingDomain) {
+          // Domain exists, return it so UI can redirect
+          set({ error: null });
+          return existingDomain;
+        }
+        set({ error: 'This domain was already added. Please refresh to see it.' });
+      } else {
+        set({ error: errorDetail || 'Failed to add domain' });
+      }
       return null;
     }
   },

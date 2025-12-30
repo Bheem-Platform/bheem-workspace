@@ -34,6 +34,17 @@ class Settings(BaseSettings):
     MAILCOW_URL: str
     MAILCOW_API_KEY: str
     MAIL_DOMAIN: str = "bheem.cloud"
+    MAILCOW_IMAP_HOST: str = "mail.bheem.cloud"
+    MAILCOW_SMTP_HOST: str = "mail.bheem.cloud"
+    MAILCOW_IMAP_PORT: int = 993
+    MAILCOW_SMTP_PORT: int = 465
+
+    # Mailcow SSH (for direct password sync fallback)
+    MAILCOW_SSH_HOST: Optional[str] = None
+    MAILCOW_SSH_USER: str = "root"
+    MAILCOW_SSH_KEY_PATH: Optional[str] = None
+    MAILCOW_MYSQL_USER: str = "root"
+    MAILCOW_MYSQL_PASSWORD: Optional[str] = None
     
     # S3
     S3_ENDPOINT: str

@@ -24,7 +24,7 @@ import type { Domain, DNSRecord } from '@/types/admin';
 export default function DomainDetailPage() {
   const router = useRouter();
   const { id } = router.query;
-  const { domains, fetchDomains, verifyDomain, loading } = useAdminStore();
+  const { domains, fetchDomains, verifyDomain, removeDomain, loading } = useAdminStore();
 
   const [domain, setDomain] = useState<Domain | null>(null);
   const [dnsRecords, setDnsRecords] = useState<DNSRecord[]>([]);
@@ -53,15 +53,6 @@ export default function DomainDetailPage() {
     }
   }, [id, domains]);
 
-  // Show loading while checking auth
-  if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
-
   useEffect(() => {
     const loadDnsRecords = async () => {
       if (!id || typeof id !== 'string') return;
@@ -79,6 +70,15 @@ export default function DomainDetailPage() {
     }
   }, [domain, id, tenantId]);
 
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      </div>
+    );
+  }
+
   const handleVerify = async () => {
     if (!id || typeof id !== 'string') return;
     setVerifying(true);
@@ -87,9 +87,12 @@ export default function DomainDetailPage() {
   };
 
   const handleDelete = async () => {
-    // API would delete domain here
+    if (!id || typeof id !== 'string') return;
+    const success = await removeDomain(tenantId, id);
     setShowDeleteDialog(false);
-    router.push('/admin/domains');
+    if (success) {
+      router.push('/admin/domains');
+    }
   };
 
   const handleCopyRecord = (value: string, recordId: string) => {

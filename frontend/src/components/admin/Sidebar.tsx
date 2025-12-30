@@ -14,6 +14,8 @@ import {
   CreditCard,
   X,
   ChevronLeft,
+  HardDrive,
+  BarChart3,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -27,6 +29,7 @@ const superAdminNavigation = [
   { name: 'Dashboard', href: '/super-admin', icon: LayoutDashboard },
   { name: 'Tenants', href: '/super-admin/tenants', icon: Building2 },
   { name: 'Developers', href: '/super-admin/developers', icon: Code2 },
+  { name: 'Reports', href: '/super-admin/reports', icon: BarChart3 },
   { name: 'Activity', href: '/super-admin/activity', icon: Activity },
   { name: 'Settings', href: '/super-admin/settings', icon: Settings },
 ];
@@ -37,6 +40,8 @@ const tenantAdminNavigation = [
   { name: 'Domains', href: '/admin/domains', icon: Globe },
   { name: 'Mail', href: '/admin/mail', icon: Mail },
   { name: 'Meet', href: '/admin/meet', icon: Video },
+  { name: 'Docs', href: '/admin/docs', icon: HardDrive },
+  { name: 'Reports', href: '/admin/reports', icon: BarChart3 },
   { name: 'Activity', href: '/admin/activity', icon: Activity },
   { name: 'Billing', href: '/admin/billing', icon: CreditCard },
 ];

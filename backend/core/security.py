@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 from jose import JWTError, jwt
 from passlib.context import CryptContext
-from fastapi import HTTPException, status, Depends
+from fastapi import HTTPException, status, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -233,3 +233,155 @@ def require_admin():
 def require_superadmin():
     """Dependency to require SuperAdmin role"""
     return require_role(["SuperAdmin"])
+
+
+def require_tenant_access(tenant_id_param: str = "tenant_id"):
+    """
+    Dependency to check user has access to the specified tenant.
+    SuperAdmin can access all tenants.
+    Other users can only access their own company's tenant.
+
+    Usage: current_user: dict = Depends(require_tenant_access("tenant_id"))
+    """
+    async def tenant_checker(
+        request,
+        current_user: Dict[str, Any] = Depends(get_current_user)
+    ) -> Dict[str, Any]:
+        # SuperAdmin can access everything
+        if current_user.get("role") == "SuperAdmin":
+            return current_user
+
+        # Get tenant_id from path parameters
+        tenant_id = request.path_params.get(tenant_id_param)
+        if not tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tenant ID required"
+            )
+
+        # Check if user's company matches the tenant
+        user_company = current_user.get("company_code") or current_user.get("company_id")
+
+        if not user_company:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User not associated with any company"
+            )
+
+        # Allow access if tenant_id matches user's company (case-insensitive)
+        if str(tenant_id).lower() == str(user_company).lower():
+            return current_user
+
+        # Check if user has Admin role for their company
+        if current_user.get("role") in ["Admin", "Manager"]:
+            return current_user
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied to this tenant"
+        )
+
+    return tenant_checker
+
+
+class Permission:
+    """Permission constants for RBAC"""
+    # Tenant permissions
+    TENANT_READ = "tenant:read"
+    TENANT_WRITE = "tenant:write"
+    TENANT_DELETE = "tenant:delete"
+
+    # User permissions
+    USER_READ = "user:read"
+    USER_INVITE = "user:invite"
+    USER_MANAGE = "user:manage"
+
+    # Domain permissions
+    DOMAIN_READ = "domain:read"
+    DOMAIN_ADD = "domain:add"
+    DOMAIN_VERIFY = "domain:verify"
+    DOMAIN_DELETE = "domain:delete"
+
+    # Mail permissions
+    MAIL_READ = "mail:read"
+    MAIL_MANAGE = "mail:manage"
+
+    # Meet permissions
+    MEET_READ = "meet:read"
+    MEET_MANAGE = "meet:manage"
+
+    # Docs permissions
+    DOCS_READ = "docs:read"
+    DOCS_MANAGE = "docs:manage"
+
+    # Developer permissions (SuperAdmin only)
+    DEVELOPER_READ = "developer:read"
+    DEVELOPER_MANAGE = "developer:manage"
+
+
+# Role-based permissions mapping
+ROLE_PERMISSIONS = {
+    "SuperAdmin": ["*"],  # All permissions
+    "Admin": [
+        Permission.TENANT_READ,
+        Permission.TENANT_WRITE,
+        Permission.USER_READ,
+        Permission.USER_INVITE,
+        Permission.USER_MANAGE,
+        Permission.DOMAIN_READ,
+        Permission.DOMAIN_ADD,
+        Permission.DOMAIN_VERIFY,
+        Permission.DOMAIN_DELETE,
+        Permission.MAIL_READ,
+        Permission.MAIL_MANAGE,
+        Permission.MEET_READ,
+        Permission.MEET_MANAGE,
+        Permission.DOCS_READ,
+        Permission.DOCS_MANAGE,
+    ],
+    "Manager": [
+        Permission.TENANT_READ,
+        Permission.USER_READ,
+        Permission.USER_INVITE,
+        Permission.DOMAIN_READ,
+        Permission.MAIL_READ,
+        Permission.MEET_READ,
+        Permission.DOCS_READ,
+    ],
+    "Member": [
+        Permission.TENANT_READ,
+        Permission.MAIL_READ,
+        Permission.MEET_READ,
+        Permission.DOCS_READ,
+    ],
+}
+
+
+def has_permission(user: Dict[str, Any], permission: str) -> bool:
+    """Check if user has a specific permission"""
+    role = user.get("role", "Member")
+    role_perms = ROLE_PERMISSIONS.get(role, ROLE_PERMISSIONS["Member"])
+
+    # SuperAdmin has all permissions
+    if "*" in role_perms:
+        return True
+
+    return permission in role_perms
+
+
+def require_permission(permission: str):
+    """
+    Dependency to require a specific permission.
+    Usage: current_user: dict = Depends(require_permission(Permission.USER_MANAGE))
+    """
+    async def permission_checker(
+        current_user: Dict[str, Any] = Depends(get_current_user)
+    ) -> Dict[str, Any]:
+        if not has_permission(current_user, permission):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission denied: {permission} required"
+            )
+        return current_user
+
+    return permission_checker
