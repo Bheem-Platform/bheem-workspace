@@ -204,8 +204,8 @@ export interface Mailbox {
 
 export interface MailboxCreate {
   local_part: string;
-  domain_id: string;
-  display_name: string;
+  domain: string;
+  name: string;
   password: string;
   quota_mb?: number;
 }

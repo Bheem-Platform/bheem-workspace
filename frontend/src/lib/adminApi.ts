@@ -191,7 +191,7 @@ export const exportUsers = (tenantId: string, format: 'json' | 'csv' = 'json') =
 
 export const exportActivity = (tenantId: string, params?: {
   format?: 'json' | 'csv';
-  period?: 'day' | 'week' | 'month';
+  period?: 'day' | 'week' | 'month' | 'year';
 }) => api.get(`/admin/tenants/${tenantId}/export/activity`, { params });
 
 // ==================== HEALTH CHECK ====================

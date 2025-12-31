@@ -894,16 +894,41 @@ async def add_domain(
         # Add to Mailgun for email domains
         if domain_data.domain_type == DomainType.EMAIL:
             mailgun_result = await mailgun_service.add_domain(domain_data.domain)
+
+            # Check if domain was added successfully OR already exists in Mailgun
+            domain_in_mailgun = False
             if "error" not in mailgun_result:
+                domain_in_mailgun = True
+            elif "already exists" in str(mailgun_result.get("error", "")).lower() or \
+                 "already been taken" in str(mailgun_result.get("error", "")).lower():
+                # Domain already exists in Mailgun - that's fine, we can still use it
+                domain_in_mailgun = True
+                print(f"Domain {domain_data.domain} already exists in Mailgun, using existing")
+
+            if domain_in_mailgun:
                 new_domain.mailgun_domain_id = domain_data.domain
 
                 # Get DNS records from Mailgun
                 dns_records = await mailgun_service.get_dns_records(domain_data.domain)
+
+                # Save sending DNS records (SPF, DKIM)
                 if "sending_dns_records" in dns_records:
                     for record in dns_records["sending_dns_records"]:
                         dns_record = DomainDNSRecord(
                             domain_id=new_domain.id,
                             record_type=record.get("record_type", "TXT"),
+                            name=record.get("name", domain_data.domain),
+                            value=record.get("value", ""),
+                            priority=record.get("priority")
+                        )
+                        db.add(dns_record)
+
+                # Save receiving DNS records (MX)
+                if "receiving_dns_records" in dns_records:
+                    for record in dns_records["receiving_dns_records"]:
+                        dns_record = DomainDNSRecord(
+                            domain_id=new_domain.id,
+                            record_type=record.get("record_type", "MX"),
                             name=record.get("name", domain_data.domain),
                             value=record.get("value", ""),
                             priority=record.get("priority")
@@ -930,7 +955,9 @@ async def add_domain(
         )
     except Exception as e:
         # Log error but don't fail - domain was already added successfully
+        import traceback
         print(f"Warning: Secondary domain setup failed: {e}")
+        print(traceback.format_exc())
 
     # Determine verification status
     verification_status = "pending"
@@ -993,6 +1020,19 @@ async def get_domain_dns_records(
         "purpose": "ownership_verification"
     }
 
+    def get_record_purpose(record):
+        """Determine the purpose of a DNS record"""
+        if "domainkey" in record.name.lower():
+            return "DKIM (Email Authentication)"
+        elif "spf" in record.value.lower():
+            return "SPF (Email Authentication)"
+        elif record.record_type == "MX":
+            return "Mail Exchange"
+        elif record.record_type == "CNAME":
+            return "Email Tracking"
+        else:
+            return "Email Configuration"
+
     return {
         "domain": domain.domain,
         "verification_record": verification_record,
@@ -1003,6 +1043,7 @@ async def get_domain_dns_records(
                 "name": r.name,
                 "value": r.value,
                 "priority": r.priority,
+                "purpose": get_record_purpose(r),
                 "is_verified": r.is_verified
             }
             for r in records
@@ -1013,6 +1054,7 @@ async def get_domain_dns_records(
 async def verify_domain(
     tenant_id: str,
     domain_id: str,
+    auto_setup: bool = True,  # Auto-add missing DNS records via Cloudflare
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin())
 ):
@@ -1036,23 +1078,102 @@ async def verify_domain(
         "ownership_verified": False,
         "spf_verified": False,
         "dkim_verified": False,
-        "mx_verified": False
+        "mx_verified": False,
+        "dns_records_added": []
     }
+
+    # Auto-setup DNS records in Cloudflare if zone is managed
+    if auto_setup and domain.cloudflare_zone_id:
+        try:
+            # Add ownership verification TXT record
+            existing_records = await cloudflare_service.list_dns_records(
+                zone_id=domain.cloudflare_zone_id,
+                record_type="TXT",
+                name=domain.domain
+            )
+            has_verification_token = any(
+                domain.verification_token in r.get("content", "")
+                for r in existing_records
+            )
+
+            if not has_verification_token and domain.verification_token:
+                result = await cloudflare_service.create_dns_record(
+                    zone_id=domain.cloudflare_zone_id,
+                    record_type="TXT",
+                    name=domain.domain,
+                    content=domain.verification_token,
+                    ttl=3600,
+                    proxied=False
+                )
+                if result.get("success"):
+                    verification_results["dns_records_added"].append("Ownership verification TXT")
+
+            # Get Mailgun DNS records and add missing ones
+            if domain.mailgun_domain_id:
+                mailgun_dns = await mailgun_service.get_dns_records(domain.domain)
+
+                # Add DKIM record if missing
+                for record in mailgun_dns.get("sending_dns_records", []):
+                    if "_domainkey" in record.get("name", "") and record.get("record_type") == "TXT":
+                        dkim_name = record.get("name")
+                        dkim_value = record.get("value")
+
+                        # Check if DKIM exists
+                        existing_dkim = await cloudflare_service.list_dns_records(
+                            zone_id=domain.cloudflare_zone_id,
+                            record_type="TXT",
+                            name=dkim_name
+                        )
+
+                        if not existing_dkim:
+                            result = await cloudflare_service.create_dns_record(
+                                zone_id=domain.cloudflare_zone_id,
+                                record_type="TXT",
+                                name=dkim_name,
+                                content=dkim_value,
+                                ttl=3600,
+                                proxied=False
+                            )
+                            if result.get("success"):
+                                verification_results["dns_records_added"].append(f"DKIM TXT ({dkim_name})")
+
+        except Exception as e:
+            print(f"Auto-setup DNS failed: {e}")
 
     # Verify with Mailgun
     if domain.mailgun_domain_id:
         mailgun_result = await mailgun_service.verify_domain(domain.domain)
         if "error" not in mailgun_result:
-            domain_info = mailgun_result.get("domain", {})
-            verification_results["spf_verified"] = domain_info.get("spf", False)
-            verification_results["dkim_verified"] = domain_info.get("dkim", False)
-            verification_results["mx_verified"] = domain_info.get("mx", False)
+            # Parse sending_dns_records for SPF and DKIM
+            spf_valid = False
+            dkim_valid = False
+            for record in mailgun_result.get("sending_dns_records", []):
+                # SPF record check
+                if record.get("record_type") == "TXT" and "spf" in record.get("value", "").lower():
+                    spf_valid = record.get("valid") == "valid"
+                # DKIM record check
+                if "_domainkey" in record.get("name", "") and record.get("record_type") == "TXT":
+                    dkim_valid = record.get("valid") == "valid"
 
-            domain.spf_verified = verification_results["spf_verified"]
-            domain.dkim_verified = verification_results["dkim_verified"]
-            domain.mx_verified = verification_results["mx_verified"]
+            # Parse receiving_dns_records for MX
+            mx_valid = False
+            for record in mailgun_result.get("receiving_dns_records", []):
+                if record.get("record_type") == "MX":
+                    cached = record.get("cached", [])
+                    for c in cached:
+                        if "mailgun" in c.lower():
+                            mx_valid = True
+                            break
 
-    # Check ownership via Cloudflare
+            verification_results["spf_verified"] = spf_valid
+            verification_results["dkim_verified"] = dkim_valid
+            verification_results["mx_verified"] = mx_valid
+
+            domain.spf_verified = spf_valid
+            domain.dkim_verified = dkim_valid
+            domain.mx_verified = mx_valid
+
+    # Check ownership via Cloudflare (if configured)
     if domain.cloudflare_zone_id:
         ownership_check = await cloudflare_service.verify_dns_record(
             zone_id=domain.cloudflare_zone_id,
@@ -1062,6 +1183,20 @@ async def verify_domain(
         )
         verification_results["ownership_verified"] = ownership_check
         domain.ownership_verified = ownership_check
+    else:
+        # Fallback: Direct DNS lookup for ownership verification
+        import dns.resolver
+        try:
+            answers = dns.resolver.resolve(domain.domain, 'TXT')
+            for rdata in answers:
+                txt_value = str(rdata).strip('"')
+                if domain.verification_token and domain.verification_token in txt_value:
+                    verification_results["ownership_verified"] = True
+                    domain.ownership_verified = True
+                    break
+        except Exception:
+            # DNS lookup failed, ownership not verified
+            pass
 
     # Update verified_at if all checks pass
     if all([
@@ -1132,6 +1267,9 @@ async def create_mailbox(
     current_user: dict = Depends(require_admin())
 ):
     """Create a mailbox via Mailcow (Admin or SuperAdmin)"""
+    # Resolve tenant_id (supports UUID or slug)
+    resolved_id = await resolve_tenant_id(tenant_id, db)
+
     result = await mailcow_service.create_mailbox(
         local_part=mailbox.local_part,
         password=mailbox.password,
@@ -1144,7 +1282,7 @@ async def create_mailbox(
     await log_activity(
         db,
         action="mailbox_created",
-        tenant_id=tenant_id,
+        tenant_id=str(resolved_id),
         entity_type="mailbox",
         description=f"Created mailbox: {email}"
     )
@@ -1164,10 +1302,13 @@ async def delete_mailbox(
     current_user: dict = Depends(require_admin())
 ):
     """Delete a mailbox (Admin or SuperAdmin)"""
+    # Resolve tenant_id (supports UUID or slug)
+    resolved_id = await resolve_tenant_id(tenant_id, db)
+
     await log_activity(
         db,
         action="mailbox_deleted",
-        tenant_id=tenant_id,
+        tenant_id=str(resolved_id),
         entity_type="mailbox",
         description=f"Deleted mailbox: {email}"
     )

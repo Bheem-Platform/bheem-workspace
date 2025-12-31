@@ -22,9 +22,10 @@ export default function MailSettingsPage() {
 
   const [newMailbox, setNewMailbox] = useState({
     local_part: '',
-    domain_id: '',
-    display_name: '',
+    domain: '',
+    name: '',
     password: '',
+    quota_mb: 1024,
   });
 
   // Require authentication
@@ -70,7 +71,7 @@ export default function MailSettingsPage() {
       await adminApi.createMailbox(tenantId, newMailbox);
       await loadMailData();
       setShowCreateModal(false);
-      setNewMailbox({ local_part: '', domain_id: '', display_name: '', password: '' });
+      setNewMailbox({ local_part: '', domain: '', name: '', password: '', quota_mb: 1024 });
     } catch (err) {
       console.error('Failed to create mailbox:', err);
     }
@@ -247,9 +248,9 @@ export default function MailSettingsPage() {
               </label>
               <input
                 type="text"
-                value={newMailbox.display_name}
+                value={newMailbox.name}
                 onChange={(e) =>
-                  setNewMailbox({ ...newMailbox, display_name: e.target.value })
+                  setNewMailbox({ ...newMailbox, name: e.target.value })
                 }
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
                 placeholder="John Doe"
@@ -275,16 +276,16 @@ export default function MailSettingsPage() {
                   @
                 </span>
                 <select
-                  value={newMailbox.domain_id}
+                  value={newMailbox.domain}
                   onChange={(e) =>
-                    setNewMailbox({ ...newMailbox, domain_id: e.target.value })
+                    setNewMailbox({ ...newMailbox, domain: e.target.value })
                   }
                   className="px-4 py-2 border border-l-0 border-gray-300 rounded-r-lg focus:ring-2 focus:ring-purple-500"
                   required
                 >
                   <option value="">Select domain</option>
                   {verifiedDomains.map((d) => (
-                    <option key={d.id} value={d.id}>
+                    <option key={d.id} value={d.domain}>
                       {d.domain}
                     </option>
                   ))}

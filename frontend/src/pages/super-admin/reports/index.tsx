@@ -320,7 +320,7 @@ export default function SuperAdminReportsPage() {
                           </div>
                         </div>
                         <div className="text-right">
-                          <StatusBadge status={tenant.plan} />
+                          <StatusBadge status={tenant.plan as any} />
                           <p className="text-xs text-gray-500 mt-1">
                             {new Date(tenant.created_at).toLocaleDateString()}
                           </p>
@@ -369,7 +369,7 @@ export default function SuperAdminReportsPage() {
                           </div>
                         </div>
                         <div className="text-right">
-                          <StatusBadge status={service.status} />
+                          <StatusBadge status={service.status as any} />
                           {service.latency_ms && (
                             <p className="text-xs text-gray-500 mt-1">{service.latency_ms.toFixed(0)}ms</p>
                           )}
