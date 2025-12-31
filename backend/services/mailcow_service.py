@@ -47,11 +47,11 @@ class MailcowService:
             
             return response.json() if response.status_code == 200 else {}
     
-    async def create_mailbox(self, local_part: str, password: str, name: str, quota: int = 1024) -> dict:
+    async def create_mailbox(self, local_part: str, password: str, name: str, domain: str = None, quota: int = 1024) -> dict:
         """Create a new mailbox"""
         data = {
             "local_part": local_part,
-            "domain": self.mail_domain,
+            "domain": domain or self.mail_domain,
             "password": password,
             "password2": password,
             "name": name,
@@ -66,6 +66,14 @@ class MailcowService:
     async def get_mailboxes(self) -> List[dict]:
         """Get all mailboxes"""
         result = await self._api_request("GET", "get/mailbox/all")
+        # Ensure we always return a list, even if API fails or returns wrong type
+        if isinstance(result, list):
+            return result
+        return []
+
+    async def get_domains(self) -> List[dict]:
+        """Get all domains from Mailcow"""
+        result = await self._api_request("GET", "get/domain/all")
         # Ensure we always return a list, even if API fails or returns wrong type
         if isinstance(result, list):
             return result

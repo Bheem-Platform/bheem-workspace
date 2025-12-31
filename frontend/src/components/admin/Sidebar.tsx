@@ -16,6 +16,7 @@ import {
   ChevronLeft,
   HardDrive,
   BarChart3,
+  RefreshCw,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -23,6 +24,7 @@ interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
   tenantName?: string;
+  isInternalMode?: boolean;
 }
 
 const superAdminNavigation = [
@@ -34,21 +36,30 @@ const superAdminNavigation = [
   { name: 'Settings', href: '/super-admin/settings', icon: Settings },
 ];
 
-const tenantAdminNavigation = [
-  { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
-  { name: 'Users', href: '/admin/users', icon: Users },
-  { name: 'Domains', href: '/admin/domains', icon: Globe },
-  { name: 'Mail', href: '/admin/mail', icon: Mail },
-  { name: 'Meet', href: '/admin/meet', icon: Video },
-  { name: 'Docs', href: '/admin/docs', icon: HardDrive },
-  { name: 'Reports', href: '/admin/reports', icon: BarChart3 },
-  { name: 'Activity', href: '/admin/activity', icon: Activity },
-  { name: 'Billing', href: '/admin/billing', icon: CreditCard },
-];
+const getTenantAdminNavigation = (isInternalMode: boolean) => {
+  const baseNavigation = [
+    { name: 'Dashboard', href: '/admin', icon: LayoutDashboard },
+    { name: 'Users', href: '/admin/users', icon: Users },
+    { name: 'Domains', href: '/admin/domains', icon: Globe },
+    { name: 'Mail', href: '/admin/mail', icon: Mail },
+    { name: 'Meet', href: '/admin/meet', icon: Video },
+    { name: 'Docs', href: '/admin/docs', icon: HardDrive },
+    { name: 'Reports', href: '/admin/reports', icon: BarChart3 },
+    { name: 'Activity', href: '/admin/activity', icon: Activity },
+  ];
 
-export default function Sidebar({ role, isOpen, onClose, tenantName }: SidebarProps) {
+  // Add ERP Sync for internal mode, or Billing for external mode
+  if (isInternalMode) {
+    baseNavigation.push({ name: 'ERP Sync', href: '/admin/erp-sync', icon: RefreshCw });
+  }
+  baseNavigation.push({ name: 'Billing', href: '/admin/billing', icon: CreditCard });
+
+  return baseNavigation;
+};
+
+export default function Sidebar({ role, isOpen, onClose, tenantName, isInternalMode = false }: SidebarProps) {
   const router = useRouter();
-  const navigation = role === 'super_admin' ? superAdminNavigation : tenantAdminNavigation;
+  const navigation = role === 'super_admin' ? superAdminNavigation : getTenantAdminNavigation(isInternalMode);
   const isSuperAdmin = role === 'super_admin';
 
   return (

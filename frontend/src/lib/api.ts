@@ -1,7 +1,8 @@
 import axios from 'axios';
 
-// Use environment variable or fallback to relative URL
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api/v1';
+// Always use relative URL for client-side requests
+// This ensures API calls go through the same origin and get proxied correctly
+const API_BASE = '/api/v1';
 
 export const api = axios.create({
   baseURL: API_BASE,

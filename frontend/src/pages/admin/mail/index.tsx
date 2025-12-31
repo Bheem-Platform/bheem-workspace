@@ -4,13 +4,22 @@ import AdminLayout from '@/components/admin/AdminLayout';
 import DataTable from '@/components/admin/DataTable';
 import StatsCard from '@/components/admin/StatsCard';
 import Modal, { ConfirmDialog } from '@/components/admin/Modal';
-import { useAdminStore } from '@/stores/adminStore';
 import { useCurrentTenantId, useRequireAuth } from '@/stores/authStore';
 import * as adminApi from '@/lib/adminApi';
 import type { Mailbox } from '@/types/admin';
 
+interface MailDomain {
+  id: string;
+  domain: string;
+  is_active: boolean;
+  mailboxes: number;
+  max_mailboxes: number;
+  quota_mb: number;
+  used_quota_mb: number;
+}
+
 export default function MailSettingsPage() {
-  const { domains, fetchDomains, loading } = useAdminStore();
+  const [mailDomains, setMailDomains] = useState<MailDomain[]>([]);
   const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [mailStats, setMailStats] = useState<any>(null);
   const [loadingMailboxes, setLoadingMailboxes] = useState(true);
@@ -36,9 +45,8 @@ export default function MailSettingsPage() {
 
   useEffect(() => {
     if (!isAuthenticated || authLoading) return;
-    fetchDomains(tenantId);
     loadMailData();
-  }, [fetchDomains, tenantId, isAuthenticated, authLoading]);
+  }, [tenantId, isAuthenticated, authLoading]);
 
   // Show loading while checking auth
   if (authLoading) {
@@ -52,12 +60,14 @@ export default function MailSettingsPage() {
   const loadMailData = async () => {
     setLoadingMailboxes(true);
     try {
-      const [boxesResponse, statsResponse] = await Promise.all([
+      const [boxesResponse, statsResponse, domainsResponse] = await Promise.all([
         adminApi.listMailboxes(tenantId),
         adminApi.getMailStats(tenantId),
+        adminApi.listMailDomains(tenantId),
       ]);
       setMailboxes(boxesResponse.data || []);
       setMailStats(statsResponse.data);
+      setMailDomains(domainsResponse.data || []);
     } catch (err) {
       console.error('Failed to load mail data:', err);
     }
@@ -85,12 +95,13 @@ export default function MailSettingsPage() {
     await loadMailData();
   };
 
-  const verifiedDomains = domains.filter((d) => d.verification_status === 'verified');
+  // Use active mail domains from Mailcow
+  const activeDomains = mailDomains.filter((d) => d.is_active);
 
   const filteredMailboxes = mailboxes.filter(
     (m) =>
-      m.email.toLowerCase().includes(search.toLowerCase()) ||
-      m.display_name.toLowerCase().includes(search.toLowerCase())
+      (m.email?.toLowerCase() || '').includes(search.toLowerCase()) ||
+      (m.display_name?.toLowerCase() || '').includes(search.toLowerCase())
   );
 
   const columns = [
@@ -166,7 +177,7 @@ export default function MailSettingsPage() {
           </div>
           <button
             onClick={() => setShowCreateModal(true)}
-            disabled={verifiedDomains.length === 0}
+            disabled={activeDomains.length === 0}
             className="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus size={20} className="mr-2" />
@@ -174,15 +185,12 @@ export default function MailSettingsPage() {
           </button>
         </div>
 
-        {/* No verified domains warning */}
-        {verifiedDomains.length === 0 && (
+        {/* No mail domains warning */}
+        {activeDomains.length === 0 && !loadingMailboxes && (
           <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
             <p className="text-sm text-yellow-800">
-              <strong>No verified domains.</strong> You need at least one verified domain to
-              create email accounts.{' '}
-              <a href="/admin/domains" className="underline hover:no-underline">
-                Add a domain
-              </a>
+              <strong>No mail domains available.</strong> Please contact your administrator to
+              configure mail domains in Mailcow.
             </p>
           </div>
         )}
@@ -284,7 +292,7 @@ export default function MailSettingsPage() {
                   required
                 >
                   <option value="">Select domain</option>
-                  {verifiedDomains.map((d) => (
+                  {activeDomains.map((d) => (
                     <option key={d.id} value={d.domain}>
                       {d.domain}
                     </option>

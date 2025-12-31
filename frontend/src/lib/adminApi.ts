@@ -19,6 +19,15 @@ import type {
   MeetStats,
   DocsStats,
   AdminDashboard,
+  // ERP Integration Types
+  SubscriptionPlan,
+  SubscriptionStatus,
+  CheckoutSession,
+  CheckoutRequest,
+  ERPSyncStatus,
+  ERPSyncResult,
+  Invoice,
+  BillingCycle,
 } from '@/types/admin';
 
 // ==================== TENANTS ====================
@@ -78,6 +87,9 @@ export const removeDomain = (tenantId: string, domainId: string) =>
   api.delete(`/admin/tenants/${tenantId}/domains/${domainId}`);
 
 // ==================== MAIL ====================
+
+export const listMailDomains = (tenantId: string) =>
+  api.get(`/admin/tenants/${tenantId}/mail/domains`);
 
 export const listMailboxes = (tenantId: string, domain?: string) =>
   api.get(`/admin/tenants/${tenantId}/mail/mailboxes`, { params: { domain } });
@@ -228,6 +240,59 @@ export const getActivityLog = (tenantId: string, params?: {
 
 export const getAdminDashboard = (tenantId: string) =>
   api.get<AdminDashboard>(`/admin/tenants/${tenantId}/dashboard`);
+
+// ==================== BILLING & SUBSCRIPTION (ERP Integration) ====================
+
+export const getSubscriptionPlans = () =>
+  api.get<{ plans: SubscriptionPlan[]; source: string }>('/billing/plans');
+
+export const getSubscriptionStatus = (tenantId: string) =>
+  api.get<SubscriptionStatus>(`/billing/subscription`, { params: { tenant_id: tenantId } });
+
+export const createCheckoutSession = (tenantId: string, data: CheckoutRequest) =>
+  api.post<CheckoutSession>('/billing/checkout', { ...data, tenant_id: tenantId });
+
+export const getCheckoutStatus = (orderId: string) =>
+  api.get<{ status: string; subscription_id?: string }>(`/billing/checkout/${orderId}/status`);
+
+export const cancelSubscription = (tenantId: string, reason?: string) =>
+  api.post('/billing/subscription/cancel', { tenant_id: tenantId, reason });
+
+export const getInvoices = (tenantId: string, params?: { limit?: number; offset?: number }) =>
+  api.get<Invoice[]>('/billing/invoices', { params: { tenant_id: tenantId, ...params } });
+
+export const downloadInvoice = (invoiceId: string) =>
+  api.get<{ url: string }>(`/billing/invoices/${invoiceId}/download`);
+
+export const updateBillingCycle = (tenantId: string, billingCycle: BillingCycle) =>
+  api.patch('/billing/subscription/cycle', { tenant_id: tenantId, billing_cycle: billingCycle });
+
+// ==================== ERP SYNC (Internal Mode) ====================
+
+export const getERPSyncStatus = (tenantId: string) =>
+  api.get<ERPSyncStatus>('/erp-sync/status', { params: { tenant_id: tenantId } });
+
+export const syncEmployees = (tenantId: string) =>
+  api.post<ERPSyncResult>('/erp-sync/employees', { tenant_id: tenantId });
+
+export const syncProjects = (tenantId: string) =>
+  api.post<ERPSyncResult>('/erp-sync/projects', { tenant_id: tenantId });
+
+export const provisionInternalTenant = (companyCode: string) =>
+  api.post<{ tenant_id: string; name: string; slug: string }>('/erp-sync/provision', { company_code: companyCode });
+
+export const listBheemverseCompanies = () =>
+  api.get<{ companies: { company_code: string; company_name: string; company_id: string }[] }>('/erp-sync/companies');
+
+// ==================== ERP INTEGRATION STATUS ====================
+
+export const getERPIntegrationStatus = () =>
+  api.get<{
+    erp_connected: boolean;
+    bheempay_connected: boolean;
+    erp_url: string;
+    bheempay_url: string;
+  }>('/health/erp-integration');
 
 // ==================== HELPER FUNCTIONS ====================
 

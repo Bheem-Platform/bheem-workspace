@@ -1244,6 +1244,32 @@ async def remove_domain(
 
 # ==================== MAIL ADMIN ENDPOINTS ====================
 
+@router.get("/tenants/{tenant_id}/mail/domains")
+async def list_mail_domains(
+    tenant_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """List mail domains from Mailcow (requires authentication)"""
+    raw_domains = await mailcow_service.get_domains()
+
+    # Transform Mailcow response to frontend expected format
+    domains = []
+    for d in raw_domains:
+        domain_name = d.get("domain_name", "")
+        if domain_name:
+            domains.append({
+                "id": domain_name,
+                "domain": domain_name,
+                "is_active": d.get("active", 0) == 1,
+                "mailboxes": d.get("mboxes_in_domain", 0),
+                "max_mailboxes": d.get("max_num_mboxes_for_domain", 0),
+                "quota_mb": (d.get("max_quota_for_domain", 0) or 0) / (1024 * 1024),
+                "used_quota_mb": (d.get("bytes_total", 0) or 0) / (1024 * 1024),
+            })
+
+    return domains
+
 @router.get("/tenants/{tenant_id}/mail/mailboxes")
 async def list_mailboxes(
     tenant_id: str,
@@ -1252,10 +1278,25 @@ async def list_mailboxes(
     current_user: dict = Depends(get_current_user)
 ):
     """List mailboxes via Mailcow (requires authentication)"""
-    mailboxes = await mailcow_service.get_mailboxes()
+    raw_mailboxes = await mailcow_service.get_mailboxes()
 
     if domain:
-        mailboxes = [m for m in mailboxes if m.get("domain") == domain]
+        raw_mailboxes = [m for m in raw_mailboxes if m.get("domain") == domain]
+
+    # Transform Mailcow response to frontend expected format
+    mailboxes = []
+    for m in raw_mailboxes:
+        mailboxes.append({
+            "id": m.get("username", ""),
+            "email": m.get("username", ""),
+            "display_name": m.get("name", ""),
+            "is_active": m.get("active", 0) == 1,
+            "storage_quota_mb": (m.get("quota", 0) or 0) / (1024 * 1024),
+            "storage_used_mb": (m.get("quota_used", 0) or 0) / (1024 * 1024),
+            "created_at": m.get("created", ""),
+            "domain": m.get("domain", ""),
+            "messages": m.get("messages", 0),
+        })
 
     return mailboxes
 
@@ -1274,6 +1315,7 @@ async def create_mailbox(
         local_part=mailbox.local_part,
         password=mailbox.password,
         name=mailbox.name,
+        domain=mailbox.domain,
         quota=mailbox.quota_mb
     )
 
@@ -1341,11 +1383,24 @@ async def get_mail_stats(
     )
     domain_count = domains_result.scalar() or 0
 
+    # Get mailbox stats from Mailcow
+    try:
+        raw_mailboxes = await mailcow_service.get_mailboxes()
+        total_mailboxes = len(raw_mailboxes)
+        total_storage_used_mb = sum((m.get("quota_used", 0) or 0) / (1024 * 1024) for m in raw_mailboxes)
+    except Exception:
+        total_mailboxes = 0
+        total_storage_used_mb = 0
+
     return {
         "domains": domain_count,
+        "total_mailboxes": total_mailboxes,
+        "total_storage_used_mb": total_storage_used_mb,
         "storage_quota_mb": tenant.mail_quota_mb,
         "storage_used_mb": float(tenant.mail_used_mb or 0),
-        "usage_percent": (float(tenant.mail_used_mb or 0) / tenant.mail_quota_mb * 100) if tenant.mail_quota_mb else 0
+        "usage_percent": (float(tenant.mail_used_mb or 0) / tenant.mail_quota_mb * 100) if tenant.mail_quota_mb else 0,
+        "emails_sent_today": 0,  # Would need Mailcow stats API
+        "emails_received_today": 0,  # Would need Mailcow stats API
     }
 
 # ==================== MEET ADMIN ENDPOINTS ====================

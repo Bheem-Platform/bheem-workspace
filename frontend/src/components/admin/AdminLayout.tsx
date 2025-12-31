@@ -10,9 +10,10 @@ interface AdminLayoutProps {
   title?: string;
   breadcrumbs?: { label: string; href?: string }[];
   isSuperAdmin?: boolean;
+  isInternalMode?: boolean;
 }
 
-export default function AdminLayout({ children, title, breadcrumbs, isSuperAdmin: isSuperAdminProp }: AdminLayoutProps) {
+export default function AdminLayout({ children, title, breadcrumbs, isSuperAdmin: isSuperAdminProp, isInternalMode = false }: AdminLayoutProps) {
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const { currentTenant, userRole, setUserRole } = useAdminStore();
@@ -34,6 +35,7 @@ export default function AdminLayout({ children, title, breadcrumbs, isSuperAdmin
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         tenantName={currentTenant?.name}
+        isInternalMode={isInternalMode}
       />
 
       {/* Main content */}

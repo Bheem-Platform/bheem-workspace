@@ -95,7 +95,9 @@ async def api_info():
             "workspace": "/api/v1/workspace",
             "tenants": "/api/v1/tenants",
             "recordings": "/api/v1/recordings",
-            "admin": "/api/v1/admin"
+            "admin": "/api/v1/admin",
+            "billing": "/api/v1/billing",
+            "erp_sync": "/api/v1/erp-sync"
         }
     }
 
@@ -189,6 +191,19 @@ try:
     app.include_router(reporting_router, prefix="/api/v1/admin", tags=["Reporting"])
 except Exception as e:
     print(f"Could not load reporting router: {e}")
+
+# ERP Integration routes
+try:
+    from api.billing import router as billing_router
+    app.include_router(billing_router, prefix="/api/v1", tags=["Billing"])
+except Exception as e:
+    print(f"Could not load billing router: {e}")
+
+try:
+    from api.erp_sync import router as erp_sync_router
+    app.include_router(erp_sync_router, prefix="/api/v1", tags=["ERP Sync"])
+except Exception as e:
+    print(f"Could not load erp_sync router: {e}")
 
 # Frontend routes
 @app.get("/", response_class=HTMLResponse)

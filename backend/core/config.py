@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     # This should be identical to Bheem Platform's SECRET_KEY for token validation
     SECRET_KEY: str
     BHEEM_JWT_SECRET: Optional[str] = None  # Passport JWT secret for SSO validation
+    BHEEM_JWT_ALGORITHM: str = "HS256"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
     
@@ -78,6 +79,26 @@ class Settings(BaseSettings):
     MSG91_AUTH_KEY: Optional[str] = None
     MSG91_SENDER_EMAIL: str = "noreply@bheem.co.uk"
     MSG91_SENDER_NAME: str = "Bheem-Tele"
+
+    # ============================================
+    # ERP INTEGRATION CONFIGURATION
+    # ============================================
+
+    # Bheem Core ERP API
+    ERP_SERVICE_URL: str = "http://localhost:8000"
+    ERP_API_KEY: Optional[str] = None
+
+    # BheemPay Payment Gateway Service
+    BHEEMPAY_URL: str = "http://bheem-pay:8006"
+    BHEEMPAY_API_KEY: Optional[str] = None
+    BHEEMPAY_WEBHOOK_SECRET: Optional[str] = None
+
+    # Bheemverse Company Codes (internal mode tenants)
+    BHEEMVERSE_COMPANY_CODES: str = "BHM001,BHM002,BHM003,BHM004,BHM005,BHM006,BHM007,BHM008"
+
+    # BHM001 - Bheemverse Innovation (Parent company - all external revenue goes here)
+    BHEEMVERSE_PARENT_COMPANY_ID: str = "79f70aef-17eb-48a8-b599-2879721e8796"
+    BHEEMVERSE_PARENT_COMPANY_CODE: str = "BHM001"
 
     class Config:
         env_file = ".env"

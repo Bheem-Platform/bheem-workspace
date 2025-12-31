@@ -16,6 +16,9 @@ class Tenant(Base):
     __table_args__ = (
         Index('idx_tenants_slug', 'slug'),
         Index('idx_tenants_owner', 'owner_email'),
+        Index('idx_tenants_mode', 'tenant_mode'),
+        Index('idx_tenants_erp_company', 'erp_company_code'),
+        Index('idx_tenants_subscription', 'erp_subscription_id'),
         {"schema": "workspace"}
     )
 
@@ -24,6 +27,18 @@ class Tenant(Base):
     slug = Column(String(100), nullable=False, unique=True)
     domain = Column(String(255))
     owner_email = Column(String(320), nullable=False)
+
+    # ERP Integration - Mode & Company Linkage
+    tenant_mode = Column(String(20), default='external')  # 'internal' = Bheemverse subsidiary, 'external' = commercial customer
+    erp_company_code = Column(String(20))  # BHM001-BHM008 for internal mode
+    erp_company_id = Column(UUID(as_uuid=True))  # Reference to ERP public.companies.id
+    erp_customer_id = Column(UUID(as_uuid=True))  # Reference to ERP crm.contacts.id (for external customers)
+
+    # ERP Integration - Subscription
+    erp_subscription_id = Column(UUID(as_uuid=True))  # Reference to ERP public.subscriptions.id
+    subscription_status = Column(String(20))  # active, cancelled, suspended, pending
+    subscription_plan = Column(String(100))  # Plan name from ERP SKU
+    subscription_period_end = Column(DateTime)  # Current billing period end
 
     # Plan & Billing
     plan = Column(String(50), nullable=False, default='free')
@@ -73,6 +88,7 @@ class TenantUser(Base):
     __table_args__ = (
         Index('idx_tenant_users_tenant', 'tenant_id'),
         Index('idx_tenant_users_user', 'user_id'),
+        Index('idx_tenant_users_erp_employee', 'erp_employee_id'),
         {"schema": "workspace"}
     )
 
@@ -80,8 +96,19 @@ class TenantUser(Base):
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tenants.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(UUID(as_uuid=True), nullable=False)
 
+    # User info (for display)
+    email = Column(String(320))
+    name = Column(String(255))
+
     # Role within tenant
     role = Column(String(50), nullable=False, default='member')  # admin, manager, member
+
+    # ERP Integration - Employee Linkage (for internal mode)
+    erp_employee_id = Column(UUID(as_uuid=True))  # Reference to ERP hr.employees.id
+    erp_user_id = Column(UUID(as_uuid=True))  # Reference to ERP auth.users.id
+    department = Column(String(100))  # Synced from ERP HR
+    job_title = Column(String(100))  # Synced from ERP HR
+    provisioned_by = Column(String(20), default='self')  # 'self' = self-registered, 'erp_hr' = synced from HR, 'admin' = manually added
 
     # Status
     is_active = Column(Boolean, default=True)

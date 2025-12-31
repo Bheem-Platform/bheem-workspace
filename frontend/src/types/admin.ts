@@ -5,6 +5,9 @@ export type UserRole = 'admin' | 'manager' | 'member' | 'guest';
 export type PlanType = 'free' | 'starter' | 'business' | 'enterprise';
 export type DomainType = 'email' | 'workspace' | 'custom';
 export type ServiceType = 'mail' | 'docs' | 'meet';
+export type TenantMode = 'internal' | 'external';
+export type SubscriptionStatusType = 'active' | 'pending' | 'cancelled' | 'suspended' | 'expired' | 'trial';
+export type BillingCycle = 'monthly' | 'annual';
 
 // Tenant
 export interface Tenant {
@@ -28,6 +31,15 @@ export interface Tenant {
   recordings_used_mb: number;
   created_at: string;
   user_count: number;
+  // ERP Integration Fields
+  tenant_mode?: TenantMode;
+  erp_company_code?: string;
+  erp_company_id?: string;
+  erp_customer_id?: string;
+  erp_subscription_id?: string;
+  subscription_status?: SubscriptionStatusType;
+  subscription_plan?: string;
+  subscription_period_end?: string;
 }
 
 export interface TenantCreate {
@@ -334,4 +346,128 @@ export interface PaginatedResponse<T> {
 export interface ApiError {
   detail: string;
   status_code?: number;
+}
+
+// ============================================
+// ERP INTEGRATION TYPES
+// ============================================
+
+// Subscription Plans (from ERP SKU)
+export interface SubscriptionPlan {
+  sku_id: string;
+  name: string;
+  description: string;
+  base_price: number;
+  offer_price?: number;
+  billing_cycle: BillingCycle;
+  features: string[];
+  max_users?: number;
+  max_storage_gb?: number;
+  max_meet_hours?: number;
+  is_featured?: boolean;
+}
+
+// Subscription Status
+export interface SubscriptionStatus {
+  subscription_id: string | null;
+  status: SubscriptionStatusType;
+  payment_status?: string;
+  plan: string | null;
+  price: number | null;
+  billing_cycle?: BillingCycle;
+  next_billing_date: string | null;
+  period_end: string | null;
+  cancel_at_period_end?: boolean;
+}
+
+// Checkout Session (for Razorpay)
+export interface CheckoutSession {
+  checkout_id: string;
+  order_id: string;
+  amount: number;
+  currency: string;
+  plan_name: string;
+  key_id: string;  // Razorpay public key
+  gateway_response?: any;
+}
+
+export interface CheckoutRequest {
+  plan_id: string;
+  billing_cycle: BillingCycle;
+}
+
+// ERP Sync Types (Internal Mode)
+export interface ERPSyncStatus {
+  last_employee_sync?: string;
+  last_project_sync?: string;
+  employees_synced?: number;
+  projects_synced?: number;
+  sync_errors?: string[];
+}
+
+export interface ERPSyncResult {
+  status: 'completed' | 'in_progress' | 'failed';
+  synced: number;
+  errors: { id: string; error: string }[];
+  total: number;
+}
+
+export interface ERPEmployee {
+  id: string;
+  first_name: string;
+  last_name: string;
+  work_email: string;
+  department?: string;
+  job_title?: string;
+  is_synced: boolean;
+}
+
+export interface ERPProject {
+  id: string;
+  name: string;
+  description?: string;
+  status: string;
+  team_count: number;
+  is_synced: boolean;
+}
+
+// Bheemverse Company (for Internal Mode)
+export interface BheemverseCompany {
+  company_code: string;
+  company_id: string;
+  company_name: string;
+  description?: string;
+  is_active: boolean;
+}
+
+// Invoice (from ERP Sales)
+export interface Invoice {
+  id: string;
+  invoice_number: string;
+  invoice_date: string;
+  due_date: string;
+  total_amount: number;
+  currency: string;
+  status: 'draft' | 'sent' | 'paid' | 'overdue' | 'cancelled';
+  pdf_url?: string;
+}
+
+// Payment Record
+export interface PaymentRecord {
+  id: string;
+  amount: number;
+  currency: string;
+  payment_method: string;
+  status: 'pending' | 'completed' | 'failed' | 'refunded';
+  gateway_payment_id?: string;
+  paid_at?: string;
+}
+
+// ERP Integration Status (for dashboard)
+export interface ERPIntegrationStatus {
+  erp_connected: boolean;
+  bheempay_connected: boolean;
+  last_sync?: string;
+  subscription_active: boolean;
+  features_enabled: string[];
 }
