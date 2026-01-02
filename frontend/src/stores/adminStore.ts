@@ -197,10 +197,19 @@ export const useAdminStore = create<AdminState>((set, get) => ({
   addUser: async (tenantId, data) => {
     try {
       const response = await adminApi.addTenantUser(tenantId, data);
-      set((state) => ({ tenantUsers: [response.data, ...state.tenantUsers] }));
+      set((state) => ({ tenantUsers: [response.data, ...state.tenantUsers], error: null }));
       return response.data;
     } catch (error: any) {
-      set({ error: error.response?.data?.detail || 'Failed to add user' });
+      let errorMsg = 'Failed to add user';
+      const detail = error.response?.data?.detail;
+      if (typeof detail === 'string') {
+        errorMsg = detail;
+      } else if (Array.isArray(detail)) {
+        errorMsg = detail.map((e: any) => e.msg || JSON.stringify(e)).join(', ');
+      } else if (detail && typeof detail === 'object') {
+        errorMsg = detail.msg || JSON.stringify(detail);
+      }
+      set({ error: errorMsg });
       return null;
     }
   },

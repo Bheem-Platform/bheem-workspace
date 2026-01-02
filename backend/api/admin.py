@@ -659,6 +659,10 @@ async def add_tenant_user(
     current_user: dict = Depends(require_admin())
 ):
     """Add a user to tenant (Admin or SuperAdmin)"""
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"Adding user: email={user.email}, name={user.name}, role={user.role}")
+
     # Resolve tenant ID (supports UUID or slug)
     resolved_id = await resolve_tenant_id(tenant_id, db)
 
@@ -704,8 +708,10 @@ async def add_tenant_user(
             )
         )
     )
-    if existing.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="User with this email already in tenant")
+    existing_user = existing.scalar_one_or_none()
+    if existing_user:
+        logger.warning(f"User {user.email} already exists in tenant")
+        raise HTTPException(status_code=400, detail=f"User with email {user.email} already exists in this workspace")
 
     new_user = TenantUser(
         tenant_id=resolved_id,
