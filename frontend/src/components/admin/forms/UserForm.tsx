@@ -7,6 +7,7 @@ interface UserFormProps {
   onCancel: () => void;
   isEdit?: boolean;
   loading?: boolean;
+  error?: string | null;
 }
 
 const ROLES: { value: UserRole; label: string; description: string }[] = [
@@ -21,6 +22,7 @@ export default function UserForm({
   onCancel,
   isEdit = false,
   loading = false,
+  error = null,
 }: UserFormProps) {
   const [formData, setFormData] = useState({
     email: initialData?.email || '',
@@ -60,6 +62,13 @@ export default function UserForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
+      {/* API Error */}
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+          <p className="text-sm text-red-800">{error}</p>
+        </div>
+      )}
+
       {/* Email */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">

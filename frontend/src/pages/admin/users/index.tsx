@@ -12,7 +12,7 @@ import type { TenantUser, TenantUserCreate, TenantUserUpdate } from '@/types/adm
 
 export default function UsersPage() {
   const router = useRouter();
-  const { users, fetchUsers, addUser, removeUser, loading, error } = useAdminStore();
+  const { users, fetchUsers, addUser, removeUser, loading, error, clearError } = useAdminStore();
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -160,7 +160,10 @@ export default function UsersPage() {
             <p className="text-gray-500">Manage workspace members and their permissions</p>
           </div>
           <button
-            onClick={() => setShowInviteModal(true)}
+            onClick={() => {
+              clearError();
+              setShowInviteModal(true);
+            }}
             className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
           >
             <UserPlus size={20} className="mr-2" />
@@ -237,13 +240,20 @@ export default function UsersPage() {
         {/* Invite Modal */}
         <Modal
           isOpen={showInviteModal}
-          onClose={() => setShowInviteModal(false)}
+          onClose={() => {
+            setShowInviteModal(false);
+            clearError();
+          }}
           title="Invite New User"
         >
           <UserForm
             onSubmit={handleInviteUser}
-            onCancel={() => setShowInviteModal(false)}
+            onCancel={() => {
+              setShowInviteModal(false);
+              clearError();
+            }}
             loading={inviting}
+            error={error}
           />
         </Modal>
 
