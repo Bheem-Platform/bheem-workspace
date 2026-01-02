@@ -1253,19 +1253,28 @@ async def list_mail_domains(
     """List mail domains from Mailcow (requires authentication)"""
     raw_domains = await mailcow_service.get_domains()
 
+    def safe_int(val, default=0):
+        """Safely convert value to int"""
+        try:
+            return int(val) if val else default
+        except (ValueError, TypeError):
+            return default
+
     # Transform Mailcow response to frontend expected format
     domains = []
     for d in raw_domains:
         domain_name = d.get("domain_name", "")
         if domain_name:
+            max_quota = safe_int(d.get("max_quota_for_domain", 0))
+            bytes_total = safe_int(d.get("bytes_total", 0))
             domains.append({
                 "id": domain_name,
                 "domain": domain_name,
-                "is_active": d.get("active", 0) == 1,
-                "mailboxes": d.get("mboxes_in_domain", 0),
-                "max_mailboxes": d.get("max_num_mboxes_for_domain", 0),
-                "quota_mb": (d.get("max_quota_for_domain", 0) or 0) / (1024 * 1024),
-                "used_quota_mb": (d.get("bytes_total", 0) or 0) / (1024 * 1024),
+                "is_active": d.get("active", 0) == 1 or d.get("active") == "1",
+                "mailboxes": safe_int(d.get("mboxes_in_domain", 0)),
+                "max_mailboxes": safe_int(d.get("max_num_mboxes_for_domain", 0)),
+                "quota_mb": max_quota / (1024 * 1024) if max_quota else 0,
+                "used_quota_mb": bytes_total / (1024 * 1024) if bytes_total else 0,
             })
 
     return domains
