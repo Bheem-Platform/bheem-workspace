@@ -27,6 +27,7 @@ export default function MailSettingsPage() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [selectedMailbox, setSelectedMailbox] = useState<Mailbox | null>(null);
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
 
   const [newMailbox, setNewMailbox] = useState({
@@ -77,13 +78,16 @@ export default function MailSettingsPage() {
   const handleCreateMailbox = async (e: React.FormEvent) => {
     e.preventDefault();
     setCreating(true);
+    setCreateError(null);
     try {
       await adminApi.createMailbox(tenantId, newMailbox);
       await loadMailData();
       setShowCreateModal(false);
       setNewMailbox({ local_part: '', domain: '', name: '', password: '', quota_mb: 1024 });
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to create mailbox:', err);
+      const errorMsg = err.response?.data?.detail || err.message || 'Failed to create mailbox';
+      setCreateError(errorMsg);
     }
     setCreating(false);
   };
@@ -246,10 +250,18 @@ export default function MailSettingsPage() {
         {/* Create Modal */}
         <Modal
           isOpen={showCreateModal}
-          onClose={() => setShowCreateModal(false)}
+          onClose={() => {
+            setShowCreateModal(false);
+            setCreateError(null);
+          }}
           title="Create Mailbox"
         >
           <form onSubmit={handleCreateMailbox} className="space-y-4">
+            {createError && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                <p className="text-sm text-red-800">{createError}</p>
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Display Name

@@ -1317,8 +1317,14 @@ async def create_mailbox(
     current_user: dict = Depends(require_admin())
 ):
     """Create a mailbox via Mailcow (Admin or SuperAdmin)"""
+    import logging
+    logger = logging.getLogger(__name__)
+
     # Resolve tenant_id (supports UUID or slug)
     resolved_id = await resolve_tenant_id(tenant_id, db)
+
+    email = f"{mailbox.local_part}@{mailbox.domain}"
+    logger.info(f"Creating mailbox: {email}")
 
     result = await mailcow_service.create_mailbox(
         local_part=mailbox.local_part,
@@ -1328,7 +1334,16 @@ async def create_mailbox(
         quota=mailbox.quota_mb
     )
 
-    email = f"{mailbox.local_part}@{mailbox.domain}"
+    logger.info(f"Mailcow response: {result}")
+
+    # Check for errors in result
+    if isinstance(result, list):
+        for item in result:
+            if item.get("type") == "error":
+                error_msg = item.get("msg", ["Unknown error"])
+                raise HTTPException(status_code=400, detail=f"Mailcow error: {error_msg}")
+    elif isinstance(result, dict) and result.get("type") == "error":
+        raise HTTPException(status_code=400, detail=f"Mailcow error: {result.get('msg')}")
 
     await log_activity(
         db,
