@@ -685,27 +685,27 @@ async def add_tenant_user(
         )
 
     # Get or generate user_id
-    if user.user_id:
-        target_user_id = uuid.UUID(user.user_id)
+    if user.user_id and user.user_id.strip():
+        try:
+            target_user_id = uuid.UUID(user.user_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid user_id format")
     else:
         # For invitations, generate a placeholder UUID
         # In production, this would lookup/create user in Passport
         target_user_id = uuid.uuid4()
 
-    # Check if user already in tenant (by user_id or email)
+    # Check if user already in tenant by email
     existing = await db.execute(
         select(TenantUser).where(
             and_(
                 TenantUser.tenant_id == resolved_id,
-                or_(
-                    TenantUser.user_id == target_user_id,
-                    TenantUser.email == user.email
-                )
+                TenantUser.email == user.email
             )
         )
     )
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=400, detail="User already in tenant")
+        raise HTTPException(status_code=400, detail="User with this email already in tenant")
 
     new_user = TenantUser(
         tenant_id=resolved_id,
