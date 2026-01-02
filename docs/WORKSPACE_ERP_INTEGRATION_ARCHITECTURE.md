@@ -1570,6 +1570,768 @@ WORKSPACE_URL=https://workspace.bheem.cloud
 
 ---
 
-*Document Version: 2.1*
-*Last Updated: December 31, 2025*
+## Bheem Notify Integration
+
+### Overview
+
+Bheem Notify is the centralized notification service for all Bheem platform services. Workspace integrates with Bheem Notify to provide multi-channel notifications across Email, SMS, WhatsApp, Push, and In-App channels.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────┐
+│                         BHEEM WORKSPACE NOTIFICATION ARCHITECTURE                        │
+├─────────────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                          │
+│   ┌──────────────────────────────────────────────────────────────────────────────────┐  │
+│   │                         BHEEM WORKSPACE (Port 8500)                               │  │
+│   ├──────────────────────────────────────────────────────────────────────────────────┤  │
+│   │                                                                                   │  │
+│   │  NOTIFICATION TRIGGERS                                                            │  │
+│   │  ═══════════════════════                                                          │  │
+│   │                                                                                   │  │
+│   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │  │
+│   │  │    USER      │  │   MEETING    │  │   DOCUMENT   │  │   BILLING    │          │  │
+│   │  │   EVENTS     │  │    EVENTS    │  │    EVENTS    │  │    EVENTS    │          │  │
+│   │  ├──────────────┤  ├──────────────┤  ├──────────────┤  ├──────────────┤          │  │
+│   │  │ • Register   │  │ • Invite     │  │ • Shared     │  │ • Payment    │          │  │
+│   │  │ • Login      │  │ • Reminder   │  │ • Comment    │  │ • Invoice    │          │  │
+│   │  │ • Pwd Reset  │  │ • Started    │  │ • Mentioned  │  │ • Renewal    │          │  │
+│   │  │ • Welcome    │  │ • Ended      │  │ • Updated    │  │ • Failed     │          │  │
+│   │  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘          │  │
+│   │                                                                                   │  │
+│   │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │  │
+│   │  │   CALENDAR   │  │    MAIL      │  │  ERP SYNC    │  │    TEAM      │          │  │
+│   │  │   EVENTS     │  │   EVENTS     │  │   EVENTS     │  │   EVENTS     │          │  │
+│   │  ├──────────────┤  ├──────────────┤  ├──────────────┤  ├──────────────┤          │  │
+│   │  │ • Reminder   │  │ • New Mail   │  │ • Employee   │  │ • Invited    │          │  │
+│   │  │ • Updated    │  │ • Mention    │  │   Synced     │  │ • Role Chg   │          │  │
+│   │  │ • Cancelled  │  │              │  │ • Project    │  │ • Removed    │          │  │
+│   │  │              │  │              │  │   Updated    │  │              │          │  │
+│   │  └──────────────┘  └──────────────┘  └──────────────┘  └──────────────┘          │  │
+│   │                                                                                   │  │
+│   │                            │                                                      │  │
+│   │                            ▼                                                      │  │
+│   │              ┌─────────────────────────────────┐                                  │  │
+│   │              │      NotifyClient               │                                  │  │
+│   │              │  (services/notify_client.py)    │                                  │  │
+│   │              │  ────────────────────────────   │                                  │  │
+│   │              │  • Event-based notifications    │                                  │  │
+│   │              │  • Direct channel methods       │                                  │  │
+│   │              │  • Template support             │                                  │  │
+│   │              │  • Multi-channel dispatch       │                                  │  │
+│   │              └─────────────┬───────────────────┘                                  │  │
+│   │                            │                                                      │  │
+│   └────────────────────────────┼──────────────────────────────────────────────────────┘  │
+│                                │ HTTP/REST                                               │
+│                                ▼                                                         │
+│   ┌──────────────────────────────────────────────────────────────────────────────────┐  │
+│   │                         BHEEM NOTIFY SERVICE (Port 8005)                          │  │
+│   ├──────────────────────────────────────────────────────────────────────────────────┤  │
+│   │                                                                                   │  │
+│   │  ┌─────────────────────────────────────────────────────────────────────────────┐ │  │
+│   │  │                    EVENT ROUTER & TEMPLATE MAPPER                           │ │  │
+│   │  │   company_event_template_mapping → Routes events to correct channels         │ │  │
+│   │  └─────────────────────────────────────────────────────────────────────────────┘ │  │
+│   │                                                                                   │  │
+│   │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐ │  │
+│   │  │   EMAIL    │  │    SMS     │  │  WHATSAPP  │  │    PUSH    │  │   VOICE    │ │  │
+│   │  │  (Mailgun) │  │  (MSG91)   │  │   (Meta)   │  │ (Firebase) │  │  (MSG91)   │ │  │
+│   │  └────────────┘  └────────────┘  └────────────┘  └────────────┘  └────────────┘ │  │
+│   │                                                                                   │  │
+│   │  FEATURES:                                                                        │  │
+│   │  • Exponential backoff retry (max 5 retries)                                      │  │
+│   │  • Dead letter queue for failed notifications                                     │  │
+│   │  • Rate limiting per channel/company                                              │  │
+│   │  • Delivery status webhooks                                                       │  │
+│   │  • Template management                                                            │  │
+│   │  • Multi-tenant isolation                                                         │  │
+│   │                                                                                   │  │
+│   └──────────────────────────────────────────────────────────────────────────────────┘  │
+│                                                                                          │
+└─────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Workspace Notification Event Types
+
+| Event Type | Description | Channels | Template |
+|------------|-------------|----------|----------|
+| **User Events** | | | |
+| `WORKSPACE_USER_REGISTERED` | New user registration | Email, SMS | WORKSPACE_WELCOME |
+| `WORKSPACE_USER_VERIFIED` | Email verified | Email | WORKSPACE_VERIFIED |
+| `WORKSPACE_PASSWORD_RESET` | Password reset request | Email | WORKSPACE_PASSWORD_RESET |
+| `WORKSPACE_LOGIN_ALERT` | New device login | Email, SMS | WORKSPACE_LOGIN_ALERT |
+| **Meeting Events** | | | |
+| `WORKSPACE_MEETING_INVITE` | Meeting invitation | Email, WhatsApp | WORKSPACE_MEETING_INVITE |
+| `WORKSPACE_MEETING_REMINDER` | Meeting reminder (15min/1hr) | Email, SMS, Push | WORKSPACE_MEETING_REMINDER |
+| `WORKSPACE_MEETING_STARTED` | Meeting has started | Push, SMS | WORKSPACE_MEETING_STARTED |
+| `WORKSPACE_MEETING_ENDED` | Meeting ended with summary | Email | WORKSPACE_MEETING_SUMMARY |
+| `WORKSPACE_MEETING_RECORDING` | Recording available | Email | WORKSPACE_RECORDING_READY |
+| **Document Events** | | | |
+| `WORKSPACE_DOCUMENT_SHARED` | Document shared with user | Email, Push | WORKSPACE_DOC_SHARED |
+| `WORKSPACE_DOCUMENT_COMMENT` | New comment on document | Email, Push | WORKSPACE_DOC_COMMENT |
+| `WORKSPACE_DOCUMENT_MENTIONED` | User mentioned in document | Email, Push | WORKSPACE_DOC_MENTION |
+| **Billing Events** | | | |
+| `WORKSPACE_PAYMENT_SUCCESS` | Payment completed | Email | WORKSPACE_PAYMENT_RECEIPT |
+| `WORKSPACE_PAYMENT_FAILED` | Payment failed | Email, SMS | WORKSPACE_PAYMENT_FAILED |
+| `WORKSPACE_INVOICE_GENERATED` | New invoice generated | Email | WORKSPACE_INVOICE |
+| `WORKSPACE_SUBSCRIPTION_RENEWAL` | Subscription renewing soon | Email | WORKSPACE_RENEWAL_REMINDER |
+| `WORKSPACE_SUBSCRIPTION_CANCELLED` | Subscription cancelled | Email | WORKSPACE_SUBSCRIPTION_CANCELLED |
+| **Team Events** | | | |
+| `WORKSPACE_TEAM_INVITE` | Invited to workspace | Email | WORKSPACE_TEAM_INVITE |
+| `WORKSPACE_ROLE_CHANGED` | Role changed in workspace | Email | WORKSPACE_ROLE_CHANGED |
+| **Calendar Events** | | | |
+| `WORKSPACE_CALENDAR_REMINDER` | Event reminder | Email, SMS, Push | WORKSPACE_CALENDAR_REMINDER |
+| `WORKSPACE_CALENDAR_UPDATED` | Event updated | Email, Push | WORKSPACE_CALENDAR_UPDATED |
+| **ERP Sync Events** | | | |
+| `WORKSPACE_EMPLOYEE_SYNCED` | Employee provisioned from ERP | Email | WORKSPACE_EMPLOYEE_WELCOME |
+| `WORKSPACE_PROJECT_SYNCED` | Project synced from ERP | Email | WORKSPACE_PROJECT_ASSIGNED |
+
+### Event-Template Mapping Configuration
+
+Configure event-to-template mappings via Bheem Notify API:
+
+```bash
+# Create event mapping for Workspace (BHM001 or specific tenant company)
+POST http://bheem-notify:8005/api/v1/company/{company_id}/notify/mappings
+Content-Type: application/json
+X-API-Key: your-api-key
+
+{
+  "event_type": "WORKSPACE_MEETING_INVITE",
+  "channel": "EMAIL",
+  "template_name": "workspace_meeting_invite",
+  "variable_mapping": {
+    "meeting_name": "meeting_name",
+    "host_name": "host_name",
+    "meeting_url": "meeting_url",
+    "scheduled_time": "scheduled_time",
+    "recipient_name": "recipient.name"
+  },
+  "default_variables": {
+    "app_name": "Bheem Workspace",
+    "support_email": "support@bheem.cloud"
+  },
+  "description": "Meeting invitation email for Workspace",
+  "is_enabled": true
+}
+```
+
+### Multi-Channel Notification Configuration
+
+```sql
+-- Company notification config for Workspace tenants
+INSERT INTO public.company_notification_config (
+    company_id, company_code, channel, provider,
+    sender_email, sender_phone, is_enabled, is_default, priority
+) VALUES
+-- BHM001 (Bheemverse - sells external workspace)
+('79f70aef-17eb-48a8-b599-2879721e8796', 'BHM001', 'EMAIL', 'mailgun',
+ 'workspace@bheem.cloud', NULL, true, true, 1),
+('79f70aef-17eb-48a8-b599-2879721e8796', 'BHM001', 'SMS', 'bheem_tele',
+ NULL, '+44XXXXXXXXXX', true, true, 1),
+('79f70aef-17eb-48a8-b599-2879721e8796', 'BHM001', 'WHATSAPP', 'meta',
+ NULL, '+44XXXXXXXXXX', true, true, 1),
+('79f70aef-17eb-48a8-b599-2879721e8796', 'BHM001', 'PUSH', 'firebase',
+ NULL, NULL, true, false, 2);
+```
+
+### NotifyClient Integration in Workspace
+
+**Current Location**: `/bheem-workspace/backend/services/notify_client.py`
+
+**Usage Examples**:
+
+```python
+# Import the client
+from services.notify_client import notify_client
+
+# ═══════════════════════════════════════════════════════════════════
+# EVENT-BASED NOTIFICATIONS (Recommended)
+# ═══════════════════════════════════════════════════════════════════
+
+async def send_event_notification(
+    company_id: str,
+    event_type: str,
+    recipient: dict,
+    data: dict
+) -> dict:
+    """
+    Trigger event-based notification via Bheem Notify.
+    Routes to configured channels based on company_event_template_mapping.
+    """
+    import httpx
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f"http://bheem-notify:8005/api/v1/company/{company_id}/notify/event",
+            headers={"X-API-Key": settings.NOTIFY_API_KEY},
+            json={
+                "event_type": event_type,
+                "recipient": recipient,  # {"email": "...", "phone": "...", "name": "..."}
+                "data": data  # Event-specific data mapped to template variables
+            }
+        )
+        return response.json()
+
+
+# Example: Meeting Invitation
+async def send_meeting_invitation(meeting_data: dict):
+    await send_event_notification(
+        company_id="BHM001",  # Or tenant's erp_company_id
+        event_type="WORKSPACE_MEETING_INVITE",
+        recipient={
+            "email": "attendee@example.com",
+            "phone": "919876543210",
+            "name": "John Doe"
+        },
+        data={
+            "meeting_name": meeting_data["name"],
+            "host_name": meeting_data["host"],
+            "meeting_url": f"https://meet.bheem.cloud/{meeting_data['room_id']}",
+            "scheduled_time": meeting_data["scheduled_at"].isoformat()
+        }
+    )
+
+
+# Example: Payment Success
+async def send_payment_confirmation(payment_data: dict, tenant: dict):
+    await send_event_notification(
+        company_id=tenant["erp_company_id"] or "BHM001",
+        event_type="WORKSPACE_PAYMENT_SUCCESS",
+        recipient={
+            "email": tenant["billing_email"],
+            "name": tenant["name"]
+        },
+        data={
+            "invoice_number": payment_data["invoice_number"],
+            "amount": payment_data["amount"],
+            "currency": payment_data["currency"],
+            "plan_name": payment_data["plan_name"],
+            "receipt_url": payment_data["receipt_url"]
+        }
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════
+# DIRECT CHANNEL METHODS (For custom flows)
+# ═══════════════════════════════════════════════════════════════════
+
+# Send direct email
+await notify_client.send_email(
+    to="user@example.com",
+    subject="Document Shared",
+    body="<h1>A document has been shared with you</h1>",
+    is_html=True
+)
+
+# Send OTP
+result = await notify_client.send_otp(phone="919876543210")
+request_id = result.get("request_id")
+
+# Verify OTP
+verified = await notify_client.verify_otp(phone="919876543210", otp="123456")
+
+# Send WhatsApp template
+await notify_client.send_whatsapp_template(
+    to="919876543210",
+    template_name="workspace_meeting_reminder",
+    template_params=["Team Standup", "10:00 AM", "https://meet.bheem.cloud/abc"]
+)
+
+# ═══════════════════════════════════════════════════════════════════
+# WORKSPACE-SPECIFIC CONVENIENCE METHODS
+# ═══════════════════════════════════════════════════════════════════
+
+# Welcome email for new users
+await notify_client.send_welcome_email(
+    to="newuser@example.com",
+    username="John"
+)
+
+# Meeting invitation (multi-recipient)
+await notify_client.send_meeting_invite(
+    to=["user1@example.com", "user2@example.com"],
+    meeting_name="Weekly Sync",
+    host_name="Jane Smith",
+    meeting_url="https://meet.bheem.cloud/abc123",
+    scheduled_time="2025-01-15T10:00:00Z"
+)
+
+# Document shared notification
+await notify_client.send_document_shared_notification(
+    to="user@example.com",
+    document_name="Q4 Report.pdf",
+    shared_by="Jane Smith",
+    document_url="https://docs.bheem.cloud/share/xyz"
+)
+```
+
+### Integration Points in Workspace
+
+#### 1. User Registration & Authentication
+
+```python
+# File: /bheem-workspace/backend/api/auth.py
+
+from services.notify_client import notify_client
+
+@router.post("/register")
+async def register_user(request: RegisterRequest, db: AsyncSession = Depends(get_db)):
+    # ... create user logic ...
+
+    # Send welcome notification
+    await notify_client.send_welcome_email(
+        to=request.email,
+        username=request.name
+    )
+
+    # If phone provided, send OTP for verification
+    if request.phone:
+        await notify_client.send_otp(phone=request.phone)
+
+    return {"message": "Registration successful"}
+
+
+@router.post("/password-reset/request")
+async def request_password_reset(request: PasswordResetRequest, db: AsyncSession = Depends(get_db)):
+    # ... generate reset token ...
+
+    await notify_client.send_email(
+        to=request.email,
+        subject="Reset Your Bheem Workspace Password",
+        body=f"""
+        <h2>Password Reset</h2>
+        <p>Click the link below to reset your password:</p>
+        <a href="{settings.WORKSPACE_URL}/reset-password?token={reset_token}">
+            Reset Password
+        </a>
+        <p>This link expires in 1 hour.</p>
+        """,
+        is_html=True
+    )
+```
+
+#### 2. Meeting Notifications
+
+```python
+# File: /bheem-workspace/backend/api/meet.py
+
+@router.post("/rooms/{room_id}/invite")
+async def invite_to_meeting(
+    room_id: str,
+    request: InviteRequest,
+    current_user: User = Depends(get_current_user)
+):
+    room = await get_room(room_id)
+
+    # Send meeting invitation via event notification
+    for invitee in request.invitees:
+        await send_event_notification(
+            company_id=current_user.company_id or "BHM001",
+            event_type="WORKSPACE_MEETING_INVITE",
+            recipient={
+                "email": invitee.email,
+                "phone": invitee.phone,
+                "name": invitee.name
+            },
+            data={
+                "meeting_name": room.name,
+                "host_name": current_user.name,
+                "meeting_url": f"https://meet.bheem.cloud/{room_id}",
+                "scheduled_time": room.scheduled_at.isoformat() if room.scheduled_at else "Now"
+            }
+        )
+
+    return {"message": f"Invitations sent to {len(request.invitees)} participants"}
+```
+
+#### 3. Billing & Subscription Notifications
+
+```python
+# File: /bheem-workspace/backend/api/billing.py
+
+@router.post("/webhook")
+async def handle_bheempay_webhook(request: Request, db: AsyncSession = Depends(get_db)):
+    payload = await request.json()
+    event_type = payload.get("event")
+    data = payload.get("payload", {})
+
+    tenant_id = data.get("metadata", {}).get("tenant_id")
+    tenant = await get_tenant(db, tenant_id)
+
+    if event_type == "payment.captured":
+        # Send payment success notification
+        await send_event_notification(
+            company_id="BHM001",  # Revenue recorded under Bheemverse
+            event_type="WORKSPACE_PAYMENT_SUCCESS",
+            recipient={
+                "email": tenant.billing_email,
+                "name": tenant.name
+            },
+            data={
+                "invoice_number": data.get("invoice_number"),
+                "amount": data.get("amount"),
+                "currency": data.get("currency", "INR"),
+                "plan_name": data.get("plan_name"),
+                "receipt_url": f"{settings.WORKSPACE_URL}/billing/receipt/{data.get('payment_id')}"
+            }
+        )
+
+    elif event_type == "payment.failed":
+        # Send payment failed notification
+        await send_event_notification(
+            company_id="BHM001",
+            event_type="WORKSPACE_PAYMENT_FAILED",
+            recipient={
+                "email": tenant.billing_email,
+                "phone": tenant.billing_phone,
+                "name": tenant.name
+            },
+            data={
+                "plan_name": data.get("plan_name"),
+                "amount": data.get("amount"),
+                "retry_url": f"{settings.WORKSPACE_URL}/billing/retry"
+            }
+        )
+
+    elif event_type == "subscription.cancelled":
+        await send_event_notification(
+            company_id="BHM001",
+            event_type="WORKSPACE_SUBSCRIPTION_CANCELLED",
+            recipient={
+                "email": tenant.billing_email,
+                "name": tenant.name
+            },
+            data={
+                "plan_name": data.get("plan_name"),
+                "end_date": data.get("period_end"),
+                "reactivate_url": f"{settings.WORKSPACE_URL}/billing/plans"
+            }
+        )
+
+    return {"status": "processed"}
+```
+
+#### 4. ERP Sync Notifications
+
+```python
+# File: /bheem-workspace/backend/services/internal_workspace_service.py
+
+async def sync_employees(self, company_code: str) -> dict:
+    """Sync employees from ERP and send welcome notifications"""
+    company_id = self.get_company_id(company_code)
+    employees = await self._erp_request("GET", "/hr/employees", params={"company_id": company_id})
+
+    synced = 0
+    for emp in employees.get("items", []):
+        # Upsert user
+        await self._upsert_workspace_user(...)
+
+        # Send welcome notification for new employees
+        if emp.get("is_new"):
+            await send_event_notification(
+                company_id=company_id,
+                event_type="WORKSPACE_EMPLOYEE_SYNCED",
+                recipient={
+                    "email": emp["work_email"],
+                    "name": f"{emp['first_name']} {emp['last_name']}"
+                },
+                data={
+                    "company_name": company_code,
+                    "workspace_url": f"{settings.WORKSPACE_URL}/login",
+                    "department": emp.get("department", {}).get("name"),
+                    "manager_name": emp.get("manager", {}).get("name")
+                }
+            )
+        synced += 1
+
+    return {"synced": synced}
+```
+
+### WhatsApp Templates for Workspace
+
+Register these templates with Meta WhatsApp Business:
+
+| Template Name | Category | Variables | Message |
+|---------------|----------|-----------|---------|
+| `workspace_meeting_invite` | UTILITY | meeting_name, host_name, meeting_url | "You're invited to {{1}} by {{2}}. Join here: {{3}}" |
+| `workspace_meeting_reminder` | UTILITY | meeting_name, time, url | "Reminder: {{1}} starts in {{2}}. Join: {{3}}" |
+| `workspace_document_shared` | UTILITY | doc_name, shared_by, url | "{{2}} shared '{{1}}' with you. View: {{3}}" |
+| `workspace_payment_reminder` | UTILITY | amount, due_date, url | "Payment of {{1}} is due on {{2}}. Pay now: {{3}}" |
+| `workspace_otp` | AUTHENTICATION | otp_code | "Your Bheem Workspace code is {{1}}. Valid for 10 minutes." |
+
+### Real-Time In-App Notifications (Future Enhancement)
+
+For real-time notifications within the Workspace UI:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    REAL-TIME NOTIFICATION FLOW                   │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  Workspace Backend ──────────▶ Redis Pub/Sub ──────────▶ WebSocket Server
+│                                    │                              │
+│                                    │                              │
+│                                    ▼                              ▼
+│                            Bheem Notify              Frontend Clients
+│                            (stores history)          (real-time updates)
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Implementation Plan**:
+
+1. Add WebSocket endpoint in Workspace backend
+2. Publish notifications to Redis channel on events
+3. Frontend connects via WebSocket to receive real-time updates
+4. Store notification history in database for notification center
+
+```python
+# Proposed: /bheem-workspace/backend/api/notifications_ws.py
+
+from fastapi import WebSocket, WebSocketDisconnect
+import aioredis
+
+class NotificationManager:
+    def __init__(self):
+        self.connections: Dict[str, WebSocket] = {}
+        self.redis = None
+
+    async def connect(self, user_id: str, websocket: WebSocket):
+        await websocket.accept()
+        self.connections[user_id] = websocket
+        await self._subscribe_to_user_channel(user_id)
+
+    async def send_notification(self, user_id: str, notification: dict):
+        if user_id in self.connections:
+            await self.connections[user_id].send_json(notification)
+
+    async def broadcast_to_tenant(self, tenant_id: str, notification: dict):
+        # Get all users in tenant and send notification
+        pass
+
+
+@router.websocket("/ws/notifications")
+async def notification_websocket(
+    websocket: WebSocket,
+    token: str = Query(...),
+    manager: NotificationManager = Depends()
+):
+    user = await verify_token(token)
+    await manager.connect(user.id, websocket)
+
+    try:
+        while True:
+            # Keep connection alive, receive acknowledgments
+            data = await websocket.receive_json()
+            if data.get("type") == "ack":
+                await mark_notification_read(data["notification_id"])
+    except WebSocketDisconnect:
+        manager.disconnect(user.id)
+```
+
+### Environment Configuration
+
+Add to `/bheem-workspace/backend/.env`:
+
+```bash
+# ═══════════════════════════════════════════════════════════════════
+# BHEEM NOTIFY CONFIGURATION
+# ═══════════════════════════════════════════════════════════════════
+
+# Notify Service URLs
+NOTIFY_SERVICE_URL=http://bheem-notify:8005
+NOTIFY_PUBLIC_URL=https://bheem.co.uk:8005
+
+# API Key for Notify Service
+NOTIFY_API_KEY=your-workspace-notify-api-key
+
+# Company ID for External Customers (BHM001)
+WORKSPACE_NOTIFY_COMPANY_ID=79f70aef-17eb-48a8-b599-2879721e8796
+
+# Default sender configuration
+NOTIFY_FROM_EMAIL=workspace@bheem.cloud
+NOTIFY_FROM_NAME=Bheem Workspace
+NOTIFY_SMS_SENDER_ID=BHEEM
+NOTIFY_WHATSAPP_NUMBER=+44XXXXXXXXXX
+
+# Real-time notifications (future)
+REDIS_URL=redis://redis:6379
+NOTIFICATION_WS_ENABLED=false
+```
+
+### Notification Service Setup Script
+
+```python
+# File: /bheem-workspace/backend/scripts/setup_notifications.py
+
+"""
+Setup notification templates and event mappings for Bheem Workspace.
+Run once during initial deployment or when adding new notification types.
+"""
+
+import asyncio
+import httpx
+
+NOTIFY_URL = "http://bheem-notify:8005/api/v1"
+API_KEY = "your-api-key"
+WORKSPACE_COMPANY_ID = "79f70aef-17eb-48a8-b599-2879721e8796"  # BHM001
+
+# Event-Template Mappings
+WORKSPACE_MAPPINGS = [
+    {
+        "event_type": "WORKSPACE_USER_REGISTERED",
+        "channel": "EMAIL",
+        "template_name": "workspace_welcome",
+        "variable_mapping": {
+            "username": "recipient.name",
+            "dashboard_url": "data.dashboard_url"
+        }
+    },
+    {
+        "event_type": "WORKSPACE_MEETING_INVITE",
+        "channel": "EMAIL",
+        "template_name": "workspace_meeting_invite",
+        "variable_mapping": {
+            "meeting_name": "data.meeting_name",
+            "host_name": "data.host_name",
+            "meeting_url": "data.meeting_url",
+            "scheduled_time": "data.scheduled_time"
+        }
+    },
+    {
+        "event_type": "WORKSPACE_MEETING_INVITE",
+        "channel": "WHATSAPP",
+        "template_name": "workspace_meeting_invite",
+        "variable_mapping": {
+            "1": "data.meeting_name",
+            "2": "data.host_name",
+            "3": "data.meeting_url"
+        }
+    },
+    {
+        "event_type": "WORKSPACE_PAYMENT_SUCCESS",
+        "channel": "EMAIL",
+        "template_name": "workspace_payment_receipt",
+        "variable_mapping": {
+            "invoice_number": "data.invoice_number",
+            "amount": "data.amount",
+            "plan_name": "data.plan_name",
+            "receipt_url": "data.receipt_url"
+        }
+    },
+    {
+        "event_type": "WORKSPACE_DOCUMENT_SHARED",
+        "channel": "EMAIL",
+        "template_name": "workspace_doc_shared",
+        "variable_mapping": {
+            "document_name": "data.document_name",
+            "shared_by": "data.shared_by",
+            "document_url": "data.document_url"
+        }
+    },
+    {
+        "event_type": "WORKSPACE_DOCUMENT_SHARED",
+        "channel": "WHATSAPP",
+        "template_name": "workspace_document_shared",
+        "variable_mapping": {
+            "1": "data.document_name",
+            "2": "data.shared_by",
+            "3": "data.document_url"
+        }
+    }
+]
+
+
+async def setup_mappings():
+    async with httpx.AsyncClient() as client:
+        headers = {"X-API-Key": API_KEY, "Content-Type": "application/json"}
+
+        for mapping in WORKSPACE_MAPPINGS:
+            response = await client.post(
+                f"{NOTIFY_URL}/company/{WORKSPACE_COMPANY_ID}/notify/mappings",
+                headers=headers,
+                json=mapping
+            )
+
+            if response.status_code in (200, 201):
+                print(f"✓ Created: {mapping['event_type']} -> {mapping['channel']}")
+            elif response.status_code == 409:
+                print(f"⊘ Exists: {mapping['event_type']} -> {mapping['channel']}")
+            else:
+                print(f"✗ Failed: {mapping['event_type']} -> {response.text}")
+
+
+if __name__ == "__main__":
+    asyncio.run(setup_mappings())
+```
+
+### Implementation Checklist - Bheem Notify Integration
+
+- [ ] Verify notify_client.py is properly configured
+- [ ] Add event notification helper function
+- [ ] Update auth.py with welcome/OTP notifications
+- [ ] Update meet.py with meeting invitation notifications
+- [ ] Update billing.py webhook handler with payment notifications
+- [ ] Update internal_workspace_service.py with ERP sync notifications
+- [ ] Update docs.py with document sharing notifications
+- [ ] Run setup_notifications.py to create event mappings
+- [ ] Configure environment variables
+- [ ] Register WhatsApp templates with Meta
+- [ ] Test all notification flows end-to-end
+- [ ] (Future) Implement WebSocket real-time notifications
+- [ ] (Future) Add notification preferences per user
+
+---
+
+## Summary
+
+### Key Points
+
+1. **Bheemverse Innovation (BHM001) is the seller**: All external customers are tracked under BHM001
+2. **Full ERP Integration for Both Modes**:
+   - **Internal Mode**: HR, PM, CRM access for subsidiaries
+   - **External Mode**: CRM, Sales, Accounting for revenue tracking
+3. **Subscriptions are in ERP**: Use `public.sku`, `public.sku_subscriptions`, `public.subscriptions` tables
+4. **BheemPay handles checkout + ERP sync**: Creates orders, invoices, journal entries
+5. **Workspace links via tenant fields**: `erp_subscription_id`, `erp_customer_id`, `erp_company_code`
+6. **No duplicate models**: Workspace references ERP data, doesn't duplicate it
+7. **Bheem Notify for all notifications**: Centralized multi-channel notification via event-based system
+
+### ERP Records Created for External Customers
+
+| Action | ERP Module | Table | Company |
+|--------|------------|-------|---------|
+| Customer signup | CRM | `crm.contacts` | BHM001 |
+| Plan purchase | Inventory | `public.subscriptions` | BHM001 |
+| Payment received | Sales | `sales.customer_payments` | BHM001 |
+| Invoice generated | Sales | `sales.invoices` | BHM001 |
+| Revenue recorded | Accounting | `accounting.journal_entries` | BHM001 |
+| Credits allocated | Credits | `user_credit_balances` | - |
+
+### Implementation Checklist
+
+- [ ] Run database migrations for tenant table updates
+- [ ] Create BheemPayClient service
+- [ ] Create ERPClient service (with CRM, Sales, Accounting methods)
+- [ ] Create InternalWorkspaceService
+- [ ] Create ExternalWorkspaceService
+- [ ] Add billing API routes
+- [ ] Add ERP sync API routes
+- [ ] **Setup chart of accounts** for Workspace subscription revenue in BHM001
+- [ ] **Create SKU plans** in ERP (WORKSPACE-STARTER, WORKSPACE-PRO, etc.)
+- [ ] Provision internal tenants for BHM001-BHM008
+- [ ] Configure environment variables
+- [ ] Test checkout flow end-to-end (verify invoice + journal created)
+- [ ] Test employee sync for internal mode
+- [ ] Verify revenue appears in BHM001 financial reports
+- [ ] **Setup Bheem Notify event mappings for Workspace**
+- [ ] **Configure notification channels (Email, SMS, WhatsApp)**
+- [ ] **Register WhatsApp templates with Meta**
+- [ ] **Integrate notifications in all Workspace API endpoints**
+- [ ] **Test notification delivery across all channels**
+
+---
+
+*Document Version: 3.0*
+*Last Updated: January 2, 2026*
 *Author: Bheem Development Team*
