@@ -86,7 +86,18 @@ export default function MailSettingsPage() {
       setNewMailbox({ local_part: '', domain: '', name: '', password: '', quota_mb: 1024 });
     } catch (err: any) {
       console.error('Failed to create mailbox:', err);
-      const errorMsg = err.response?.data?.detail || err.message || 'Failed to create mailbox';
+      let errorMsg = 'Failed to create mailbox';
+      const detail = err.response?.data?.detail;
+      if (typeof detail === 'string') {
+        errorMsg = detail;
+      } else if (Array.isArray(detail)) {
+        // Pydantic validation errors
+        errorMsg = detail.map((e: any) => e.msg || JSON.stringify(e)).join(', ');
+      } else if (detail && typeof detail === 'object') {
+        errorMsg = detail.msg || JSON.stringify(detail);
+      } else if (err.message) {
+        errorMsg = err.message;
+      }
       setCreateError(errorMsg);
     }
     setCreating(false);
