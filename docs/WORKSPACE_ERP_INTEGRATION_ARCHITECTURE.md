@@ -1736,157 +1736,303 @@ INSERT INTO public.company_notification_config (
 
 ### NotifyClient Integration in Workspace
 
-**Current Location**: `/bheem-workspace/backend/services/notify_client.py`
+**Reference Implementation**: Bheem Core uses a unified notify client at:
+`/bheem-core/apps/backend/app/integrations/notify/notify_client.py`
 
-**Usage Examples**:
+**Workspace should follow the same pattern** for consistency across the Bheem ecosystem.
+
+### Bheem Core NotifyClient Pattern (To Adopt in Workspace)
 
 ```python
-# Import the client
-from services.notify_client import notify_client
-
 # ═══════════════════════════════════════════════════════════════════
-# EVENT-BASED NOTIFICATIONS (Recommended)
+# BHEEM CORE PATTERN - USE THIS IN WORKSPACE
 # ═══════════════════════════════════════════════════════════════════
+# Reference: /bheem-core/apps/backend/app/integrations/notify/notify_client.py
 
-async def send_event_notification(
-    company_id: str,
-    event_type: str,
-    recipient: dict,
-    data: dict
-) -> dict:
-    """
-    Trigger event-based notification via Bheem Notify.
-    Routes to configured channels based on company_event_template_mapping.
-    """
-    import httpx
+from app.integrations.notify.notify_client import notify_client
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"http://bheem-notify:8005/api/v1/company/{company_id}/notify/event",
-            headers={"X-API-Key": settings.NOTIFY_API_KEY},
-            json={
-                "event_type": event_type,
-                "recipient": recipient,  # {"email": "...", "phone": "...", "name": "..."}
-                "data": data  # Event-specific data mapped to template variables
-            }
-        )
-        return response.json()
+# ─────────────────────────────────────────────────────────────────
+# 1. TEMPLATE EMAILS (Primary method for transactional emails)
+# ─────────────────────────────────────────────────────────────────
+# Used in: HR (leave_calendar_service), CRM (meeting_calendar_service),
+#          Accounting (ar_service), PM (task_calendar_service)
 
-
-# Example: Meeting Invitation
-async def send_meeting_invitation(meeting_data: dict):
-    await send_event_notification(
-        company_id="BHM001",  # Or tenant's erp_company_id
-        event_type="WORKSPACE_MEETING_INVITE",
-        recipient={
-            "email": "attendee@example.com",
-            "phone": "919876543210",
-            "name": "John Doe"
-        },
-        data={
-            "meeting_name": meeting_data["name"],
-            "host_name": meeting_data["host"],
-            "meeting_url": f"https://meet.bheem.cloud/{meeting_data['room_id']}",
-            "scheduled_time": meeting_data["scheduled_at"].isoformat()
-        }
-    )
-
-
-# Example: Payment Success
-async def send_payment_confirmation(payment_data: dict, tenant: dict):
-    await send_event_notification(
-        company_id=tenant["erp_company_id"] or "BHM001",
-        event_type="WORKSPACE_PAYMENT_SUCCESS",
-        recipient={
-            "email": tenant["billing_email"],
-            "name": tenant["name"]
-        },
-        data={
-            "invoice_number": payment_data["invoice_number"],
-            "amount": payment_data["amount"],
-            "currency": payment_data["currency"],
-            "plan_name": payment_data["plan_name"],
-            "receipt_url": payment_data["receipt_url"]
-        }
-    )
-
-
-# ═══════════════════════════════════════════════════════════════════
-# DIRECT CHANNEL METHODS (For custom flows)
-# ═══════════════════════════════════════════════════════════════════
-
-# Send direct email
-await notify_client.send_email(
-    to="user@example.com",
-    subject="Document Shared",
-    body="<h1>A document has been shared with you</h1>",
-    is_html=True
+await notify_client.send_template_email(
+    to="customer@example.com",
+    template_name="leave_approved",  # Template registered in bheem-notify
+    template_vars={
+        "employee_name": "John Doe",
+        "leave_type": "Annual Leave",
+        "start_date": "January 15, 2026",
+        "end_date": "January 20, 2026",
+        "approver_name": "Jane Smith",
+        "days": 6
+    }
 )
 
+# ─────────────────────────────────────────────────────────────────
+# 2. MEETING INVITATIONS (Built-in method)
+# ─────────────────────────────────────────────────────────────────
+# Used in: CRM (meeting_calendar_service.py:162)
+
+await notify_client.send_meeting_invite(
+    to="attendee@example.com",
+    meeting_title="Sales Discovery Call",
+    meeting_time="January 15, 2026 at 10:00 AM",
+    meeting_url="https://meet.bheem.cloud/room123",
+    host_name="John Doe"
+)
+
+# ─────────────────────────────────────────────────────────────────
+# 3. SMS NOTIFICATIONS
+# ─────────────────────────────────────────────────────────────────
+# Used in: HR (leave_calendar_service.py:317), CRM (meeting_calendar_service.py:189)
+
+await notify_client.send_sms(
+    to="919876543210",
+    message="Your Annual Leave from 15 Jan to 20 Jan has been approved by Jane Smith."
+)
+
+# ─────────────────────────────────────────────────────────────────
+# 4. WHATSAPP MESSAGES
+# ─────────────────────────────────────────────────────────────────
+# Used in: PM (task_calendar_service.py:326)
+
+# Template message (for proactive notifications)
+await notify_client.send_whatsapp_template(
+    to="919876543210",
+    template_name="task_reminder",
+    template_variables={"task_name": "Review PR", "due_date": "Today 5 PM"}
+)
+
+# Text message (within 24h session window)
+await notify_client.send_whatsapp_text(
+    to="919876543210",
+    message="Your task 'Review PR' is due today at 5 PM"
+)
+
+# ─────────────────────────────────────────────────────────────────
+# 5. OTP VERIFICATION
+# ─────────────────────────────────────────────────────────────────
+
 # Send OTP
-result = await notify_client.send_otp(phone="919876543210")
+result = await notify_client.send_otp(to="919876543210", otp_length=6)
 request_id = result.get("request_id")
 
 # Verify OTP
-verified = await notify_client.verify_otp(phone="919876543210", otp="123456")
+verified = await notify_client.verify_otp(to="919876543210", otp="123456")
 
-# Send WhatsApp template
-await notify_client.send_whatsapp_template(
-    to="919876543210",
-    template_name="workspace_meeting_reminder",
-    template_params=["Team Standup", "10:00 AM", "https://meet.bheem.cloud/abc"]
-)
+# ─────────────────────────────────────────────────────────────────
+# 6. WELCOME EMAIL
+# ─────────────────────────────────────────────────────────────────
 
-# ═══════════════════════════════════════════════════════════════════
-# WORKSPACE-SPECIFIC CONVENIENCE METHODS
-# ═══════════════════════════════════════════════════════════════════
-
-# Welcome email for new users
 await notify_client.send_welcome_email(
     to="newuser@example.com",
-    username="John"
+    name="John Doe",
+    company_name="Bheem Workspace"
 )
 
-# Meeting invitation (multi-recipient)
-await notify_client.send_meeting_invite(
-    to=["user1@example.com", "user2@example.com"],
-    meeting_name="Weekly Sync",
-    host_name="Jane Smith",
-    meeting_url="https://meet.bheem.cloud/abc123",
-    scheduled_time="2025-01-15T10:00:00Z"
-)
+# ─────────────────────────────────────────────────────────────────
+# 7. MULTI-CHANNEL PATTERN (Email + SMS)
+# ─────────────────────────────────────────────────────────────────
+# Pattern from: HR leave_calendar_service.py
 
-# Document shared notification
-await notify_client.send_document_shared_notification(
-    to="user@example.com",
-    document_name="Q4 Report.pdf",
-    shared_by="Jane Smith",
-    document_url="https://docs.bheem.cloud/share/xyz"
-)
+async def send_leave_approved_notification(
+    employee_email: str,
+    employee_phone: Optional[str],
+    employee_name: str,
+    leave_type: str,
+    start_date: date,
+    end_date: date,
+    approver_name: str
+) -> Dict[str, Any]:
+    """Multi-channel notification pattern from bheem-core"""
+    results = {"email": None, "sms": None}
+
+    # Email notification
+    try:
+        results["email"] = await notify_client.send_template_email(
+            to=employee_email,
+            template_name="leave_approved",
+            template_vars={
+                "employee_name": employee_name,
+                "leave_type": leave_type,
+                "start_date": start_date.strftime("%B %d, %Y"),
+                "end_date": end_date.strftime("%B %d, %Y"),
+                "approver_name": approver_name,
+                "days": (end_date - start_date).days + 1
+            }
+        )
+    except Exception as e:
+        logger.error(f"Email notification failed: {e}")
+        results["email"] = {"error": str(e)}
+
+    # SMS notification (if phone provided)
+    if employee_phone:
+        try:
+            results["sms"] = await notify_client.send_sms(
+                to=employee_phone,
+                message=f"Your {leave_type} from {start_date.strftime('%d %b')} to {end_date.strftime('%d %b')} has been approved by {approver_name}."
+            )
+        except Exception as e:
+            logger.error(f"SMS notification failed: {e}")
+            results["sms"] = {"error": str(e)}
+
+    return {"notifications_sent": True, "channels": results}
 ```
 
-### Integration Points in Workspace
+### Workspace NotifyClient Alignment
+
+The current workspace `notify_client.py` should be updated to match bheem-core's implementation:
+
+| Feature | Bheem Core | Workspace (Current) | Action Needed |
+|---------|------------|---------------------|---------------|
+| Location | `app/integrations/notify/` | `services/` | Move to integrations folder |
+| Auth Header | `X-API-Key` | `Bearer` token | Update to X-API-Key |
+| Email Endpoint | `/api/v1/email/send` | `/bheem-tele/email/send` | Update endpoints |
+| Template Email | `send_template_email(to, template_name, template_vars)` | `send_template_email(to, template_code, variables)` | Align signature |
+| Meeting Invite | `send_meeting_invite(to, title, time, url, host)` | Custom implementation | Use built-in method |
+
+### Recommended Workspace NotifyClient Update
+
+```python
+# File: /bheem-workspace/backend/integrations/notify/notify_client.py
+# Copy from: /bheem-core/apps/backend/app/integrations/notify/notify_client.py
+
+"""
+Notify Client for Bheem Notify Service
+=======================================
+Client for centralized notification service.
+Aligned with bheem-core implementation.
+"""
+
+import os
+import httpx
+import logging
+from typing import Dict, Any, List, Optional
+
+logger = logging.getLogger(__name__)
+
+
+class NotifyClient:
+    """Client for Bheem Notify Service (Port 8005)"""
+
+    def __init__(self):
+        self.notify_url = os.getenv("NOTIFY_SERVICE_URL", "http://bheem-notify:8005")
+        self.api_key = os.getenv("NOTIFY_API_KEY", "")
+        self.timeout = float(os.getenv("NOTIFY_TIMEOUT", "30.0"))
+
+    def _headers(self) -> Dict[str, str]:
+        """Get request headers with X-API-Key authentication"""
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["X-API-Key"] = self.api_key
+        return headers
+
+    async def send_template_email(
+        self,
+        to: str,
+        template_name: str,
+        template_vars: Dict[str, Any],
+        subject: Optional[str] = None,
+        from_email: Optional[str] = None,
+        cc: Optional[List[str]] = None,
+        bcc: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
+        """Send email using a predefined template (bheem-core pattern)"""
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                f"{self.notify_url}/api/v1/email/send/template",
+                json={
+                    "to": to,
+                    "template_name": template_name,
+                    "template_vars": template_vars,
+                    "subject": subject,
+                    "from_email": from_email,
+                    "cc": cc,
+                    "bcc": bcc
+                },
+                headers=self._headers()
+            )
+            return response.json()
+
+    async def send_meeting_invite(
+        self,
+        to: str,
+        meeting_title: str,
+        meeting_time: str,
+        meeting_url: str,
+        host_name: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Send meeting invitation email (bheem-core pattern)"""
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(
+                f"{self.notify_url}/api/v1/mail/bheem-tele/meeting-invite",
+                json={
+                    "to": to,
+                    "meeting_title": meeting_title,
+                    "meeting_time": meeting_time,
+                    "meeting_url": meeting_url,
+                    "host_name": host_name
+                },
+                headers=self._headers()
+            )
+            return response.json()
+
+    async def send_sms(
+        self,
+        to: str,
+        message: str,
+        sender_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Send SMS via MSG91/BheemTele (bheem-core pattern)"""
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            response = await client.post(
+                f"{self.notify_url}/api/v1/bheem-tele/sms/send",
+                json={
+                    "to": to,
+                    "message": message,
+                    "sender_id": sender_id
+                },
+                headers=self._headers()
+            )
+            return response.json()
+
+    # ... (copy remaining methods from bheem-core)
+
+
+# Singleton instance
+notify_client = NotifyClient()
+```
+
+### Integration Points in Workspace (Using Bheem Core Pattern)
 
 #### 1. User Registration & Authentication
 
 ```python
 # File: /bheem-workspace/backend/api/auth.py
+# Pattern: Bheem Core HR module
 
-from services.notify_client import notify_client
+from integrations.notify.notify_client import notify_client
 
 @router.post("/register")
 async def register_user(request: RegisterRequest, db: AsyncSession = Depends(get_db)):
     # ... create user logic ...
 
-    # Send welcome notification
+    # Send welcome notification (bheem-core pattern)
     await notify_client.send_welcome_email(
         to=request.email,
-        username=request.name
+        name=request.name,
+        company_name="Bheem Workspace"
     )
 
     # If phone provided, send OTP for verification
     if request.phone:
-        await notify_client.send_otp(phone=request.phone)
+        result = await notify_client.send_otp(
+            to=request.phone,
+            otp_length=6
+        )
+        # Store request_id for verification
 
     return {"message": "Registration successful"}
 
@@ -1895,25 +2041,27 @@ async def register_user(request: RegisterRequest, db: AsyncSession = Depends(get
 async def request_password_reset(request: PasswordResetRequest, db: AsyncSession = Depends(get_db)):
     # ... generate reset token ...
 
-    await notify_client.send_email(
+    # Use template email (bheem-core pattern)
+    await notify_client.send_template_email(
         to=request.email,
-        subject="Reset Your Bheem Workspace Password",
-        body=f"""
-        <h2>Password Reset</h2>
-        <p>Click the link below to reset your password:</p>
-        <a href="{settings.WORKSPACE_URL}/reset-password?token={reset_token}">
-            Reset Password
-        </a>
-        <p>This link expires in 1 hour.</p>
-        """,
-        is_html=True
+        template_name="password_reset",
+        template_vars={
+            "user_name": user.name,
+            "reset_link": f"{settings.WORKSPACE_URL}/reset-password?token={reset_token}",
+            "expiry_hours": 1
+        }
     )
+
+    return {"message": "Reset email sent"}
 ```
 
 #### 2. Meeting Notifications
 
 ```python
 # File: /bheem-workspace/backend/api/meet.py
+# Pattern: Bheem Core CRM meeting_calendar_service.py
+
+from integrations.notify.notify_client import notify_client
 
 @router.post("/rooms/{room_id}/invite")
 async def invite_to_meeting(
@@ -1922,32 +2070,51 @@ async def invite_to_meeting(
     current_user: User = Depends(get_current_user)
 ):
     room = await get_room(room_id)
+    meet_url = f"https://meet.bheem.cloud/{room_id}"
 
-    # Send meeting invitation via event notification
+    # Send to each invitee (bheem-core pattern)
+    notifications = {"email": [], "sms": []}
+
     for invitee in request.invitees:
-        await send_event_notification(
-            company_id=current_user.company_id or "BHM001",
-            event_type="WORKSPACE_MEETING_INVITE",
-            recipient={
-                "email": invitee.email,
-                "phone": invitee.phone,
-                "name": invitee.name
-            },
-            data={
-                "meeting_name": room.name,
-                "host_name": current_user.name,
-                "meeting_url": f"https://meet.bheem.cloud/{room_id}",
-                "scheduled_time": room.scheduled_at.isoformat() if room.scheduled_at else "Now"
-            }
-        )
+        # Email notification
+        if invitee.email:
+            try:
+                email_result = await notify_client.send_meeting_invite(
+                    to=invitee.email,
+                    meeting_title=room.name,
+                    meeting_time=room.scheduled_at.strftime("%B %d, %Y at %I:%M %p") if room.scheduled_at else "Now",
+                    meeting_url=meet_url,
+                    host_name=current_user.name
+                )
+                notifications["email"].append({"to": invitee.email, "result": email_result})
+            except Exception as e:
+                logger.error(f"[MEET] Email notification failed: {e}")
 
-    return {"message": f"Invitations sent to {len(request.invitees)} participants"}
+        # SMS notification
+        if invitee.phone:
+            try:
+                message = f"Meeting: {room.name} - Join: {meet_url}"
+                sms_result = await notify_client.send_sms(
+                    to=invitee.phone,
+                    message=message
+                )
+                notifications["sms"].append({"to": invitee.phone, "result": sms_result})
+            except Exception as e:
+                logger.error(f"[MEET] SMS notification failed: {e}")
+
+    return {
+        "message": f"Invitations sent to {len(request.invitees)} participants",
+        "notifications": notifications
+    }
 ```
 
 #### 3. Billing & Subscription Notifications
 
 ```python
 # File: /bheem-workspace/backend/api/billing.py
+# Pattern: Bheem Core Sales subscription_notification_handler.py
+
+from integrations.notify.notify_client import notify_client
 
 @router.post("/webhook")
 async def handle_bheempay_webhook(request: Request, db: AsyncSession = Depends(get_db)):
@@ -1959,49 +2126,56 @@ async def handle_bheempay_webhook(request: Request, db: AsyncSession = Depends(g
     tenant = await get_tenant(db, tenant_id)
 
     if event_type == "payment.captured":
-        # Send payment success notification
-        await send_event_notification(
-            company_id="BHM001",  # Revenue recorded under Bheemverse
-            event_type="WORKSPACE_PAYMENT_SUCCESS",
-            recipient={
-                "email": tenant.billing_email,
-                "name": tenant.name
-            },
-            data={
-                "invoice_number": data.get("invoice_number"),
-                "amount": data.get("amount"),
-                "currency": data.get("currency", "INR"),
-                "plan_name": data.get("plan_name"),
-                "receipt_url": f"{settings.WORKSPACE_URL}/billing/receipt/{data.get('payment_id')}"
-            }
-        )
+        # Send payment success notification (bheem-core pattern)
+        try:
+            await notify_client.send_template_email(
+                to=tenant.billing_email,
+                template_name="payment_receipt",
+                template_vars={
+                    "customer_name": tenant.name,
+                    "invoice_number": data.get("invoice_number"),
+                    "amount": f"₹{data.get('amount'):,.2f}",
+                    "plan_name": data.get("plan_name"),
+                    "payment_date": datetime.now().strftime("%B %d, %Y"),
+                    "receipt_url": f"{settings.WORKSPACE_URL}/billing/receipt/{data.get('payment_id')}"
+                }
+            )
+        except Exception as e:
+            logger.error(f"[BILLING] Payment receipt email failed: {e}")
 
     elif event_type == "payment.failed":
-        # Send payment failed notification
-        await send_event_notification(
-            company_id="BHM001",
-            event_type="WORKSPACE_PAYMENT_FAILED",
-            recipient={
-                "email": tenant.billing_email,
-                "phone": tenant.billing_phone,
-                "name": tenant.name
-            },
-            data={
-                "plan_name": data.get("plan_name"),
-                "amount": data.get("amount"),
-                "retry_url": f"{settings.WORKSPACE_URL}/billing/retry"
-            }
-        )
+        # Multi-channel notification (bheem-core pattern)
+        results = {"email": None, "sms": None}
+
+        try:
+            results["email"] = await notify_client.send_template_email(
+                to=tenant.billing_email,
+                template_name="payment_failed",
+                template_vars={
+                    "customer_name": tenant.name,
+                    "plan_name": data.get("plan_name"),
+                    "amount": f"₹{data.get('amount'):,.2f}",
+                    "retry_url": f"{settings.WORKSPACE_URL}/billing/retry"
+                }
+            )
+        except Exception as e:
+            logger.error(f"[BILLING] Payment failed email error: {e}")
+
+        if tenant.billing_phone:
+            try:
+                results["sms"] = await notify_client.send_sms(
+                    to=tenant.billing_phone,
+                    message=f"Payment failed for {data.get('plan_name')}. Please retry: {settings.WORKSPACE_URL}/billing/retry"
+                )
+            except Exception as e:
+                logger.error(f"[BILLING] Payment failed SMS error: {e}")
 
     elif event_type == "subscription.cancelled":
-        await send_event_notification(
-            company_id="BHM001",
-            event_type="WORKSPACE_SUBSCRIPTION_CANCELLED",
-            recipient={
-                "email": tenant.billing_email,
-                "name": tenant.name
-            },
-            data={
+        await notify_client.send_template_email(
+            to=tenant.billing_email,
+            template_name="subscription_cancelled",
+            template_vars={
+                "customer_name": tenant.name,
                 "plan_name": data.get("plan_name"),
                 "end_date": data.get("period_end"),
                 "reactivate_url": f"{settings.WORKSPACE_URL}/billing/plans"
@@ -2015,6 +2189,9 @@ async def handle_bheempay_webhook(request: Request, db: AsyncSession = Depends(g
 
 ```python
 # File: /bheem-workspace/backend/services/internal_workspace_service.py
+# Pattern: Bheem Core HR handlers.py
+
+from integrations.notify.notify_client import notify_client
 
 async def sync_employees(self, company_code: str) -> dict:
     """Sync employees from ERP and send welcome notifications"""
@@ -2022,29 +2199,137 @@ async def sync_employees(self, company_code: str) -> dict:
     employees = await self._erp_request("GET", "/hr/employees", params={"company_id": company_id})
 
     synced = 0
+    notifications_sent = 0
+
     for emp in employees.get("items", []):
         # Upsert user
-        await self._upsert_workspace_user(...)
+        is_new = await self._upsert_workspace_user(...)
 
-        # Send welcome notification for new employees
-        if emp.get("is_new"):
-            await send_event_notification(
-                company_id=company_id,
-                event_type="WORKSPACE_EMPLOYEE_SYNCED",
-                recipient={
-                    "email": emp["work_email"],
-                    "name": f"{emp['first_name']} {emp['last_name']}"
-                },
-                data={
-                    "company_name": company_code,
-                    "workspace_url": f"{settings.WORKSPACE_URL}/login",
-                    "department": emp.get("department", {}).get("name"),
-                    "manager_name": emp.get("manager", {}).get("name")
-                }
-            )
+        # Send welcome notification for new employees (bheem-core pattern)
+        if is_new:
+            try:
+                await notify_client.send_template_email(
+                    to=emp["work_email"],
+                    template_name="employee_workspace_welcome",
+                    template_vars={
+                        "employee_name": f"{emp['first_name']} {emp['last_name']}",
+                        "company_name": company_code,
+                        "department": emp.get("department", {}).get("name", ""),
+                        "manager_name": emp.get("manager", {}).get("name", ""),
+                        "login_url": f"{settings.WORKSPACE_URL}/login",
+                        "help_url": f"{settings.WORKSPACE_URL}/help"
+                    }
+                )
+                notifications_sent += 1
+            except Exception as e:
+                logger.error(f"[ERP_SYNC] Welcome email failed for {emp['work_email']}: {e}")
+
         synced += 1
 
-    return {"synced": synced}
+    return {
+        "synced": synced,
+        "notifications_sent": notifications_sent
+    }
+```
+
+#### 5. Document Sharing Notifications
+
+```python
+# File: /bheem-workspace/backend/api/docs.py
+# Pattern: Bheem Core DMS notification_service.py
+
+from integrations.notify.notify_client import notify_client
+
+@router.post("/documents/{doc_id}/share")
+async def share_document(
+    doc_id: str,
+    request: ShareRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    document = await get_document(db, doc_id)
+
+    # Share with each recipient
+    for recipient in request.recipients:
+        # Create share record
+        await create_share_record(db, doc_id, recipient.email, request.permission)
+
+        # Send notification (bheem-core pattern)
+        try:
+            await notify_client.send_template_email(
+                to=recipient.email,
+                template_name="document_shared",
+                template_vars={
+                    "recipient_name": recipient.name or recipient.email,
+                    "document_name": document.name,
+                    "shared_by": current_user.name,
+                    "permission": request.permission,  # view, edit, comment
+                    "document_url": f"{settings.WORKSPACE_URL}/docs/{doc_id}",
+                    "message": request.message or ""
+                }
+            )
+        except Exception as e:
+            logger.error(f"[DOCS] Share notification failed: {e}")
+
+    return {"shared_with": len(request.recipients)}
+```
+
+#### 6. Calendar Event Reminders
+
+```python
+# File: /bheem-workspace/backend/services/calendar_service.py
+# Pattern: Bheem Core PM task_calendar_service.py
+
+from integrations.notify.notify_client import notify_client
+
+async def send_event_reminder(
+    event: CalendarEvent,
+    reminder_minutes: int = 15
+) -> Dict[str, Any]:
+    """Send calendar event reminder notification"""
+    results = {"email": None, "sms": None, "whatsapp": None}
+
+    # Get attendees
+    attendees = await get_event_attendees(event.id)
+
+    for attendee in attendees:
+        # Email reminder
+        try:
+            results["email"] = await notify_client.send_template_email(
+                to=attendee.email,
+                template_name="calendar_reminder",
+                template_vars={
+                    "event_title": event.title,
+                    "event_time": event.start_time.strftime("%I:%M %p"),
+                    "reminder_text": f"in {reminder_minutes} minutes",
+                    "event_url": f"{settings.WORKSPACE_URL}/calendar/event/{event.id}",
+                    "location": event.location or "No location specified"
+                }
+            )
+        except Exception as e:
+            logger.error(f"[CALENDAR] Reminder email failed: {e}")
+
+        # SMS reminder (if phone available)
+        if attendee.phone:
+            try:
+                results["sms"] = await notify_client.send_sms(
+                    to=attendee.phone,
+                    message=f"Reminder: {event.title} starts in {reminder_minutes} min"
+                )
+            except Exception as e:
+                logger.error(f"[CALENDAR] Reminder SMS failed: {e}")
+
+        # WhatsApp reminder (optional)
+        if attendee.whatsapp_enabled and attendee.phone:
+            try:
+                results["whatsapp"] = await notify_client.send_whatsapp_text(
+                    to=attendee.phone,
+                    message=f"📅 Reminder: {event.title} starts in {reminder_minutes} minutes"
+                )
+            except Exception as e:
+                logger.error(f"[CALENDAR] Reminder WhatsApp failed: {e}")
+
+    return results
 ```
 
 ### WhatsApp Templates for Workspace
