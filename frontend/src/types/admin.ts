@@ -58,12 +58,17 @@ export interface TenantUpdate {
   settings?: Record<string, any>;
 }
 
+// Provisioning Status
+export type ProvisioningStatus = 'success' | 'partial' | 'failed';
+export type ProvisionedService = 'workspace' | 'passport' | 'mailbox' | 'nextcloud' | 'notification';
+
 // Tenant User
 export interface TenantUser {
   id: string;
   tenant_id: string;
   user_id: string;
-  email: string;
+  email: string;  // Workspace email (login email)
+  personal_email?: string | null;  // Personal email (for notifications)
   name: string;
   role: UserRole;
   is_active: boolean;
@@ -72,12 +77,20 @@ export interface TenantUser {
   joined_at: string | null;
   last_login_at: string | null;
   created_at: string;
+  // Provisioning info
+  provisioning_status?: ProvisioningStatus;
+  services_provisioned?: ProvisionedService[];
+  temp_password?: string;  // Only shown on creation
 }
 
 export interface TenantUserCreate {
-  email: string;
+  username: string;  // Will become workspace email: username@tenant-domain
   name: string;
+  personal_email?: string;  // Personal email for sending invite (e.g., user's gmail)
   role?: UserRole;
+  // Provisioning options
+  create_mailbox?: boolean;
+  send_welcome_email?: boolean;
 }
 
 export interface TenantUserUpdate {

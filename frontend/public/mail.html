@@ -1,0 +1,2798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bheem Mail</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #f5f7fa;
+            height: 100vh;
+            overflow: hidden;
+            padding-left: 60px;
+        }
+
+        /* App Switcher */
+        .app-switcher {
+            position: fixed;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 60px;
+            background: #1a1a2e;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 12px 0;
+            gap: 8px;
+            z-index: 1000;
+        }
+        .app-switch-btn {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: rgba(255,255,255,0.6);
+            transition: all 0.2s;
+            text-decoration: none;
+        }
+        .app-switch-btn:hover {
+            background: rgba(255,255,255,0.1);
+            color: white;
+        }
+        .app-switch-btn.active {
+            background: linear-gradient(135deg, #ff6b35, #f7931e);
+            color: white;
+        }
+        .app-switch-btn.home {
+            margin-bottom: 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            padding-bottom: 16px;
+        }
+        .app-switch-btn svg {
+            width: 22px;
+            height: 22px;
+        }
+
+        /* App Loader - shows immediately on page load */
+        .app-loader-overlay {
+            position: fixed;
+            inset: 0;
+            background: #f5f7fa;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: opacity 0.3s;
+        }
+        .app-loader-overlay.fade-out { opacity: 0; pointer-events: none; }
+        .app-loader-overlay.hidden { display: none; }
+        .app-loader-content { text-align: center; }
+        .app-loader-logo {
+            width: 64px;
+            height: 64px;
+            background: linear-gradient(135deg, #ff6b35, #f7931e);
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 20px;
+        }
+        .app-loader-logo svg { color: white; width: 32px; height: 32px; }
+        .app-loader-spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #e5e7eb;
+            border-top-color: #ff6b35;
+            border-radius: 50%;
+            margin: 0 auto 16px;
+            animation: spin 1s linear infinite;
+        }
+        .app-loader-content p { color: #6b7280; font-size: 14px; }
+
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            width: 36px;
+            height: 36px;
+            background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .logo-icon svg {
+            width: 22px;
+            height: 22px;
+            fill: white;
+        }
+
+        .logo-text {
+            font-size: 20px;
+            font-weight: 700;
+            color: white;
+        }
+
+        .logo-text span {
+            color: #ff6b35;
+        }
+
+        .header-search {
+            flex: 1;
+            max-width: 600px;
+            margin: 0 40px;
+        }
+
+        .search-box {
+            display: flex;
+            align-items: center;
+            background: rgba(255,255,255,0.1);
+            border-radius: 8px;
+            padding: 8px 16px;
+            transition: all 0.2s;
+        }
+
+        .search-box:focus-within {
+            background: rgba(255,255,255,0.15);
+        }
+
+        .search-box svg {
+            width: 18px;
+            height: 18px;
+            fill: rgba(255,255,255,0.6);
+            margin-right: 12px;
+        }
+
+        .search-box input {
+            flex: 1;
+            background: none;
+            border: none;
+            outline: none;
+            color: white;
+            font-size: 14px;
+        }
+
+        .search-box input::placeholder {
+            color: rgba(255,255,255,0.5);
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .header-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            border: none;
+            background: rgba(255,255,255,0.1);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            position: relative;
+        }
+
+        .header-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+
+        .header-btn svg {
+            width: 20px;
+            height: 20px;
+            fill: rgba(255,255,255,0.8);
+        }
+
+        .notification-badge {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            width: 8px;
+            height: 8px;
+            background: #ff6b35;
+            border-radius: 50%;
+        }
+
+        .user-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #ff6b35, #f7931e);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        /* Main Layout */
+        .main-container {
+            display: flex;
+            margin-top: 56px;
+            height: calc(100vh - 56px);
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 240px;
+            background: white;
+            border-right: 1px solid #e5e7eb;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+
+        .compose-btn {
+            margin: 16px;
+            padding: 14px 24px;
+            background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+            color: white;
+            border: none;
+            border-radius: 24px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            transition: all 0.2s;
+            box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3);
+        }
+
+        .compose-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(255, 107, 53, 0.4);
+        }
+
+        .compose-btn svg {
+            width: 18px;
+            height: 18px;
+            fill: white;
+        }
+
+        .nav-section {
+            padding: 8px 0;
+        }
+
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 10px 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+            color: #4b5563;
+            font-size: 14px;
+            gap: 14px;
+        }
+
+        .nav-item:hover {
+            background: #f5f7fa;
+        }
+
+        .nav-item.active {
+            background: #fff5f0;
+            color: #ff6b35;
+            font-weight: 500;
+        }
+
+        .nav-item.active svg {
+            fill: #ff6b35;
+        }
+
+        .nav-item svg {
+            width: 20px;
+            height: 20px;
+            fill: #9ca3af;
+        }
+
+        .nav-item .count {
+            margin-left: auto;
+            background: #ff6b35;
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 10px;
+        }
+
+        .nav-divider {
+            height: 1px;
+            background: #e5e7eb;
+            margin: 8px 16px;
+        }
+
+        .nav-label {
+            padding: 12px 20px 8px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #9ca3af;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .label-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+
+        .label-dot.work { background: #3b82f6; }
+        .label-dot.personal { background: #10b981; }
+        .label-dot.finance { background: #f59e0b; }
+        .label-dot.travel { background: #8b5cf6; }
+
+        .storage-info {
+            margin-top: auto;
+            padding: 16px;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .storage-bar {
+            height: 4px;
+            background: #e5e7eb;
+            border-radius: 2px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+
+        .storage-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff6b35, #f7931e);
+            width: 35%;
+        }
+
+        .storage-text {
+            font-size: 12px;
+            color: #6b7280;
+        }
+
+        /* Email List */
+        .email-list {
+            width: 400px;
+            background: white;
+            border-right: 1px solid #e5e7eb;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+
+        .list-header {
+            padding: 12px 16px;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .list-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .list-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .list-action-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            border: none;
+            background: #f5f7fa;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .list-action-btn:hover {
+            background: #e5e7eb;
+        }
+
+        .list-action-btn svg {
+            width: 16px;
+            height: 16px;
+            fill: #6b7280;
+        }
+
+        .list-tabs {
+            display: flex;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .list-tab {
+            flex: 1;
+            padding: 12px;
+            text-align: center;
+            font-size: 13px;
+            font-weight: 500;
+            color: #6b7280;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .list-tab:hover {
+            color: #1f2937;
+        }
+
+        .list-tab.active {
+            color: #ff6b35;
+            border-bottom-color: #ff6b35;
+        }
+
+        .email-items {
+            flex: 1;
+            overflow-y: auto;
+        }
+
+        .email-item {
+            display: flex;
+            padding: 14px 16px;
+            border-bottom: 1px solid #f3f4f6;
+            cursor: pointer;
+            transition: all 0.2s;
+            gap: 12px;
+        }
+
+        .email-item:hover {
+            background: #f9fafb;
+        }
+
+        .email-item.active {
+            background: #fff5f0;
+            border-left: 3px solid #ff6b35;
+        }
+
+        .email-item.unread {
+            background: #fefefe;
+        }
+
+        .email-item.unread .email-sender {
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .email-item.unread .email-subject {
+            font-weight: 600;
+        }
+
+        .email-checkbox {
+            width: 18px;
+            height: 18px;
+            border: 2px solid #d1d5db;
+            border-radius: 4px;
+            flex-shrink: 0;
+            margin-top: 2px;
+            cursor: pointer;
+        }
+
+        .email-checkbox:hover {
+            border-color: #ff6b35;
+        }
+
+        .email-star {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+            cursor: pointer;
+            fill: #d1d5db;
+            margin-top: 2px;
+        }
+
+        .email-star:hover,
+        .email-star.starred {
+            fill: #f59e0b;
+        }
+
+        .email-content {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .email-top {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+        }
+
+        .email-sender {
+            font-size: 14px;
+            color: #4b5563;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .email-time {
+            font-size: 12px;
+            color: #9ca3af;
+            flex-shrink: 0;
+            margin-left: 8px;
+        }
+
+        .email-subject {
+            font-size: 13px;
+            color: #1f2937;
+            margin-bottom: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .email-preview {
+            font-size: 12px;
+            color: #6b7280;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .email-labels {
+            display: flex;
+            gap: 6px;
+            margin-top: 6px;
+        }
+
+        .email-label {
+            font-size: 10px;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+
+        .email-label.work {
+            background: #dbeafe;
+            color: #1d4ed8;
+        }
+
+        .email-label.personal {
+            background: #d1fae5;
+            color: #047857;
+        }
+
+        .email-label.finance {
+            background: #fef3c7;
+            color: #b45309;
+        }
+
+        /* Email View */
+        .email-view {
+            flex: 1;
+            background: white;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .email-view-empty {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #9ca3af;
+        }
+
+        .email-view-empty svg {
+            width: 80px;
+            height: 80px;
+            fill: #e5e7eb;
+            margin-bottom: 16px;
+        }
+
+        .email-view-empty p {
+            font-size: 16px;
+        }
+
+        .view-header {
+            padding: 16px 24px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .view-actions {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 16px;
+        }
+
+        .view-action-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: 1px solid #e5e7eb;
+            background: white;
+            font-size: 13px;
+            color: #4b5563;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .view-action-btn:hover {
+            background: #f5f7fa;
+            border-color: #d1d5db;
+        }
+
+        .view-action-btn svg {
+            width: 16px;
+            height: 16px;
+            fill: #6b7280;
+        }
+
+        .view-subject {
+            font-size: 22px;
+            font-weight: 600;
+            color: #1f2937;
+            margin-bottom: 16px;
+        }
+
+        .view-meta {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+
+        .sender-avatar {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 16px;
+            flex-shrink: 0;
+        }
+
+        .sender-info {
+            flex: 1;
+        }
+
+        .sender-name {
+            font-size: 15px;
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .sender-email {
+            font-size: 13px;
+            color: #6b7280;
+        }
+
+        .email-recipients {
+            font-size: 12px;
+            color: #9ca3af;
+            margin-top: 4px;
+        }
+
+        .view-date {
+            font-size: 13px;
+            color: #6b7280;
+            text-align: right;
+        }
+
+        .view-body {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+            line-height: 1.7;
+            color: #374151;
+            font-size: 14px;
+        }
+
+        .view-body p {
+            margin-bottom: 16px;
+        }
+
+        .view-attachments {
+            padding: 16px 24px;
+            border-top: 1px solid #e5e7eb;
+            background: #f9fafb;
+        }
+
+        .attachments-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #4b5563;
+            margin-bottom: 12px;
+        }
+
+        .attachment-list {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+
+        .attachment-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 14px;
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .attachment-item:hover {
+            border-color: #ff6b35;
+            background: #fff5f0;
+        }
+
+        .attachment-icon {
+            width: 36px;
+            height: 36px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .attachment-icon.pdf {
+            background: #fee2e2;
+        }
+
+        .attachment-icon.pdf svg {
+            fill: #dc2626;
+        }
+
+        .attachment-icon.doc {
+            background: #dbeafe;
+        }
+
+        .attachment-icon.doc svg {
+            fill: #2563eb;
+        }
+
+        .attachment-icon svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .attachment-info {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .attachment-name {
+            font-size: 13px;
+            font-weight: 500;
+            color: #1f2937;
+        }
+
+        .attachment-size {
+            font-size: 11px;
+            color: #9ca3af;
+        }
+
+        .view-reply {
+            padding: 16px 24px;
+            border-top: 1px solid #e5e7eb;
+            background: white;
+        }
+
+        .reply-input {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: #f5f7fa;
+            border-radius: 24px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .reply-input:hover {
+            background: #e5e7eb;
+        }
+
+        .reply-input svg {
+            width: 20px;
+            height: 20px;
+            fill: #6b7280;
+        }
+
+        .reply-input span {
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        /* Compose Modal */
+        .compose-modal {
+            position: fixed;
+            bottom: 0;
+            right: 24px;
+            width: 580px;
+            background: white;
+            border-radius: 12px 12px 0 0;
+            box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.15);
+            z-index: 200;
+            display: none;
+            flex-direction: column;
+            max-height: 600px;
+        }
+
+        .compose-modal.active {
+            display: flex;
+        }
+
+        .compose-modal.minimized {
+            max-height: 48px;
+            overflow: hidden;
+        }
+
+        .compose-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: #1f2937;
+            border-radius: 12px 12px 0 0;
+            cursor: pointer;
+        }
+
+        .compose-title {
+            color: white;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .compose-controls {
+            display: flex;
+            gap: 8px;
+        }
+
+        .compose-ctrl-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 4px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .compose-ctrl-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .compose-ctrl-btn svg {
+            width: 16px;
+            height: 16px;
+            fill: rgba(255, 255, 255, 0.8);
+        }
+
+        .compose-body {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .compose-field {
+            display: flex;
+            align-items: center;
+            padding: 10px 16px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .compose-field label {
+            width: 60px;
+            font-size: 13px;
+            color: #6b7280;
+        }
+
+        .compose-field input {
+            flex: 1;
+            border: none;
+            outline: none;
+            font-size: 14px;
+            color: #1f2937;
+        }
+
+        .compose-content {
+            flex: 1;
+            padding: 16px;
+            overflow-y: auto;
+        }
+
+        .compose-content textarea {
+            width: 100%;
+            height: 100%;
+            min-height: 200px;
+            border: none;
+            outline: none;
+            resize: none;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #1f2937;
+            font-family: inherit;
+        }
+
+        .compose-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border-top: 1px solid #e5e7eb;
+        }
+
+        .toolbar-left {
+            display: flex;
+            gap: 4px;
+        }
+
+        .toolbar-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 6px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .toolbar-btn:hover {
+            background: #f5f7fa;
+        }
+
+        .toolbar-btn svg {
+            width: 20px;
+            height: 20px;
+            fill: #6b7280;
+        }
+
+        .send-btn {
+            padding: 10px 24px;
+            background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+
+        .send-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3);
+        }
+
+        .send-btn svg {
+            width: 16px;
+            height: 16px;
+            fill: white;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #f5f7fa;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #d1d5db;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #9ca3af;
+        }
+
+        /* AI Panel */
+        .ai-panel {
+            width: 320px;
+            background: linear-gradient(180deg, #fafbfc 0%, #f0f4f8 100%);
+            border-left: 1px solid #e5e7eb;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        .ai-panel.collapsed {
+            width: 48px;
+        }
+
+        .ai-panel-header {
+            padding: 16px;
+            border-bottom: 1px solid #e5e7eb;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: white;
+        }
+
+        .ai-panel-title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .ai-panel-title svg {
+            width: 20px;
+            height: 20px;
+            fill: #ff6b35;
+        }
+
+        .ai-badge {
+            background: linear-gradient(135deg, #ff6b35, #f7931e);
+            color: white;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        .ai-panel-toggle {
+            width: 28px;
+            height: 28px;
+            border: none;
+            background: #f5f7fa;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .ai-panel-toggle:hover {
+            background: #e5e7eb;
+        }
+
+        .ai-panel-toggle svg {
+            width: 16px;
+            height: 16px;
+            fill: #6b7280;
+        }
+
+        .ai-panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        .ai-section {
+            background: white;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+
+        .ai-section-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .ai-section-title svg {
+            width: 14px;
+            height: 14px;
+            fill: #9ca3af;
+        }
+
+        .ai-btn {
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid #e5e7eb;
+            background: white;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #374151;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.2s;
+            margin-bottom: 8px;
+        }
+
+        .ai-btn:hover {
+            background: #fff5f0;
+            border-color: #ff6b35;
+            color: #ff6b35;
+        }
+
+        .ai-btn:hover svg {
+            fill: #ff6b35;
+        }
+
+        .ai-btn svg {
+            width: 18px;
+            height: 18px;
+            fill: #6b7280;
+            flex-shrink: 0;
+        }
+
+        .ai-btn.primary {
+            background: linear-gradient(135deg, #ff6b35, #f7931e);
+            color: white;
+            border: none;
+        }
+
+        .ai-btn.primary svg {
+            fill: white;
+        }
+
+        .ai-btn.primary:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(255,107,53,0.3);
+        }
+
+        .ai-summary {
+            background: #f9fafb;
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #374151;
+        }
+
+        .ai-summary-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            color: #9ca3af;
+        }
+
+        .ai-key-points {
+            margin-top: 12px;
+        }
+
+        .ai-key-point {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+            font-size: 13px;
+            color: #374151;
+        }
+
+        .ai-key-point-bullet {
+            width: 6px;
+            height: 6px;
+            background: #ff6b35;
+            border-radius: 50%;
+            flex-shrink: 0;
+            margin-top: 6px;
+        }
+
+        .ai-actions-list {
+            margin-top: 12px;
+        }
+
+        .ai-action-item {
+            display: flex;
+            gap: 8px;
+            padding: 8px;
+            background: #fff5f0;
+            border-radius: 6px;
+            margin-bottom: 6px;
+            font-size: 12px;
+            color: #ff6b35;
+        }
+
+        .ai-action-item svg {
+            width: 14px;
+            height: 14px;
+            fill: #ff6b35;
+            flex-shrink: 0;
+        }
+
+        .smart-replies {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .smart-reply-chip {
+            padding: 10px 14px;
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 20px;
+            font-size: 13px;
+            color: #374151;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: left;
+        }
+
+        .smart-reply-chip:hover {
+            background: #ff6b35;
+            color: white;
+            border-color: #ff6b35;
+        }
+
+        .ai-compose-prompt {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 13px;
+            resize: none;
+            min-height: 80px;
+            margin-bottom: 12px;
+            font-family: inherit;
+        }
+
+        .ai-compose-prompt:focus {
+            outline: none;
+            border-color: #ff6b35;
+            box-shadow: 0 0 0 3px rgba(255,107,53,0.1);
+        }
+
+        .ai-tone-select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 13px;
+            margin-bottom: 12px;
+            background: white;
+            cursor: pointer;
+        }
+
+        .ai-tone-select:focus {
+            outline: none;
+            border-color: #ff6b35;
+        }
+
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .email-list {
+                width: 320px;
+            }
+        }
+
+        @media (max-width: 900px) {
+            .sidebar {
+                width: 60px;
+            }
+            .sidebar .nav-item span,
+            .sidebar .nav-label,
+            .sidebar .storage-info,
+            .sidebar .compose-btn span {
+                display: none;
+            }
+            .sidebar .compose-btn {
+                padding: 12px;
+                border-radius: 12px;
+            }
+            .sidebar .nav-item {
+                justify-content: center;
+                padding: 12px;
+            }
+            .sidebar .nav-item .count {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- App Loader - shows immediately on page load -->
+    <div id="appLoader" class="app-loader-overlay">
+        <div class="app-loader-content">
+            <div class="app-loader-logo">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
+            </div>
+            <div class="app-loader-spinner"></div>
+            <p>Loading Bheem Mail...</p>
+        </div>
+    </div>
+
+    <!-- App Switcher Bar -->
+    <nav class="app-switcher">
+        <a href="/dashboard" class="app-switch-btn home" title="Dashboard">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
+        </a>
+        <a href="/mail" class="app-switch-btn active" title="Mail">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+        </a>
+        <a href="/docs-app" class="app-switch-btn" title="Documents">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+        </a>
+        <a href="/meet" class="app-switch-btn" title="Meetings">
+            <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+        </a>
+    </nav>
+
+    <!-- Header -->
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">
+                <svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
+            </div>
+            <div class="logo-text">Bheem <span>Mail</span></div>
+        </div>
+
+        <div class="header-search">
+            <div class="search-box">
+                <svg viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></svg>
+                <input type="text" placeholder="Search mail..." id="searchInput">
+            </div>
+        </div>
+
+        <div class="header-actions">
+            <button class="header-btn" title="Settings">
+                <svg viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.31.06-.63.06-.94 0-.31-.02-.63-.06-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.04.31-.06.63-.06.94s.02.63.06.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+            </button>
+            <button class="header-btn" title="Help">
+                <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg>
+            </button>
+            <button class="header-btn" title="Notifications">
+                <svg viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></svg>
+                <span class="notification-badge"></span>
+            </button>
+            <div class="user-avatar" onclick="toggleUserMenu()" style="cursor:pointer;">AB</div>
+            <div id="userMenu" class="user-menu" style="display:none;">
+                <div class="user-menu-item" id="userMenuEmail">user@bheem.co.uk</div>
+                <div class="user-menu-divider"></div>
+                <div class="user-menu-item" onclick="logout()">
+                    <svg viewBox="0 0 24 24" style="width:16px;height:16px;fill:#6b7280;margin-right:8px;"><path d="M17 7l-1.41 1.41L18.17 11H8v2h10.17l-2.58 2.58L17 17l5-5zM4 5h8V3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h8v-2H4V5z"/></svg>
+                    Sign Out
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <div class="main-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <button class="compose-btn" onclick="openCompose()">
+                <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a.996.996 0 000-1.41l-2.34-2.34a.996.996 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                <span>Compose</span>
+            </button>
+
+            <nav class="nav-section">
+                <div class="nav-item active" data-folder="inbox" onclick="showFolder('inbox')">
+                    <svg viewBox="0 0 24 24"><path d="M19 3H4.99c-1.11 0-1.98.89-1.98 2L3 19c0 1.1.88 2 1.99 2H19c1.1 0 2-.9 2-2V5c0-1.11-.9-2-2-2zm0 12h-4c0 1.66-1.35 3-3 3s-3-1.34-3-3H4.99V5H19v10z"/></svg>
+                    <span>Inbox</span>
+                    <span class="count">24</span>
+                </div>
+                <div class="nav-item" data-folder="starred" onclick="showFolder('starred')">
+                    <svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+                    <span>Starred</span>
+                </div>
+                <div class="nav-item" data-folder="snoozed" onclick="showFolder('snoozed')">
+                    <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+                    <span>Snoozed</span>
+                </div>
+                <div class="nav-item" data-folder="sent" onclick="showFolder('sent')">
+                    <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                    <span>Sent</span>
+                </div>
+                <div class="nav-item" data-folder="drafts" onclick="showFolder('drafts')">
+                    <svg viewBox="0 0 24 24"><path d="M21.99 8c0-.72-.37-1.35-.94-1.7L12 1 2.95 6.3C2.38 6.65 2 7.28 2 8v10c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2l-.01-10zm-10 7L4 10.47V8l7.99 4.99L20 8v2.47l-8.01 4.53z"/></svg>
+                    <span>Drafts</span>
+                    <span class="count">3</span>
+                </div>
+            </nav>
+
+            <div class="nav-divider"></div>
+
+            <nav class="nav-section">
+                <div class="nav-item" data-folder="important" onclick="showFolder('important')">
+                    <svg viewBox="0 0 24 24"><path d="M17.63 5.84C17.27 5.33 16.67 5 16 5L5 5.01C3.9 5.01 3 5.9 3 7v10c0 1.1.9 1.99 2 1.99L16 19c.67 0 1.27-.33 1.63-.84L22 12l-4.37-6.16z"/></svg>
+                    <span>Important</span>
+                </div>
+                <div class="nav-item" data-folder="spam" onclick="showFolder('spam')">
+                    <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/></svg>
+                    <span>Spam</span>
+                </div>
+                <div class="nav-item" data-folder="trash" onclick="showFolder('trash')">
+                    <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                    <span>Trash</span>
+                </div>
+            </nav>
+
+            <div class="nav-divider"></div>
+
+            <div class="nav-label">Labels</div>
+            <nav class="nav-section">
+                <div class="nav-item" onclick="filterByLabel('work')">
+                    <span class="label-dot work"></span>
+                    <span>Work</span>
+                </div>
+                <div class="nav-item" onclick="filterByLabel('personal')">
+                    <span class="label-dot personal"></span>
+                    <span>Personal</span>
+                </div>
+                <div class="nav-item" onclick="filterByLabel('finance')">
+                    <span class="label-dot finance"></span>
+                    <span>Finance</span>
+                </div>
+                <div class="nav-item" onclick="filterByLabel('travel')">
+                    <span class="label-dot travel"></span>
+                    <span>Travel</span>
+                </div>
+            </nav>
+
+            <div class="storage-info">
+                <div class="storage-bar">
+                    <div class="storage-fill"></div>
+                </div>
+                <div class="storage-text">5.2 GB of 15 GB used</div>
+            </div>
+        </aside>
+
+        <!-- Email List -->
+        <section class="email-list">
+            <div class="list-header">
+                <h2 class="list-title">Inbox</h2>
+                <div class="list-actions">
+                    <button class="list-action-btn" title="Refresh" onclick="refreshMail()">
+                        <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0012 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                    </button>
+                    <button class="list-action-btn" title="More options">
+                        <svg viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+                    </button>
+                </div>
+            </div>
+
+            <div class="list-tabs">
+                <div class="list-tab active" data-tab="primary" onclick="showTab('primary')">Primary</div>
+                <div class="list-tab" data-tab="social" onclick="showTab('social')">Social</div>
+                <div class="list-tab" data-tab="promotions" onclick="showTab('promotions')">Promotions</div>
+            </div>
+
+            <div class="email-items" id="emailList">
+                <!-- Emails will be populated by JavaScript -->
+            </div>
+        </section>
+
+        <!-- Email View -->
+        <main class="email-view" id="emailView">
+            <div class="email-view-empty" id="emptyState">
+                <svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
+                <p>Select an email to read</p>
+            </div>
+
+            <div id="emailContent" style="display: none; flex-direction: column; height: 100%;">
+                <div class="view-header">
+                    <div class="view-actions">
+                        <button class="view-action-btn" onclick="archiveEmail()">
+                            <svg viewBox="0 0 24 24"><path d="M20.54 5.23l-1.39-1.68C18.88 3.21 18.47 3 18 3H6c-.47 0-.88.21-1.16.55L3.46 5.23C3.17 5.57 3 6.02 3 6.5V19c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V6.5c0-.48-.17-.93-.46-1.27zM12 17.5L6.5 12H10v-2h4v2h3.5L12 17.5zM5.12 5l.81-1h12l.94 1H5.12z"/></svg>
+                            <span>Archive</span>
+                        </button>
+                        <button class="view-action-btn" onclick="deleteEmail()">
+                            <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                            <span>Delete</span>
+                        </button>
+                        <button class="view-action-btn" onclick="markUnread()">
+                            <svg viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
+                            <span>Unread</span>
+                        </button>
+                        <button class="view-action-btn" onclick="snoozeEmail()">
+                            <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg>
+                            <span>Snooze</span>
+                        </button>
+                    </div>
+
+                    <h1 class="view-subject" id="viewSubject">Email Subject</h1>
+
+                    <div class="view-meta">
+                        <div class="sender-avatar" id="viewAvatar">JD</div>
+                        <div class="sender-info">
+                            <div class="sender-name" id="viewSenderName">John Doe</div>
+                            <div class="sender-email" id="viewSenderEmail">&lt;john@example.com&gt;</div>
+                            <div class="email-recipients" id="viewRecipients">to me</div>
+                        </div>
+                        <div class="view-date" id="viewDate">Dec 9, 2025, 10:30 AM</div>
+                    </div>
+                </div>
+
+                <div class="view-body" id="viewBody">
+                    <!-- Email body content -->
+                </div>
+
+                <div class="view-attachments" id="viewAttachments" style="display: none;">
+                    <div class="attachments-title">Attachments (2)</div>
+                    <div class="attachment-list" id="attachmentList">
+                        <!-- Attachments -->
+                    </div>
+                </div>
+
+                <div class="view-reply">
+                    <div class="reply-input" onclick="openReply()">
+                        <svg viewBox="0 0 24 24"><path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg>
+                        <span>Click here to Reply</span>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- AI Panel -->
+        <aside class="ai-panel" id="aiPanel">
+            <div class="ai-panel-header">
+                <div class="ai-panel-title">
+                    <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                    <span>Bheem AI</span>
+                    <span class="ai-badge">BETA</span>
+                </div>
+                <button class="ai-panel-toggle" onclick="toggleAIPanel()" title="Toggle AI Panel">
+                    <svg viewBox="0 0 24 24"><path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/></svg>
+                </button>
+            </div>
+            <div class="ai-panel-content" id="aiPanelContent">
+                <!-- AI Compose Section -->
+                <div class="ai-section" id="aiComposeSection">
+                    <div class="ai-section-title">
+                        <svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a.996.996 0 000-1.41l-2.34-2.34a.996.996 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>
+                        AI Compose
+                    </div>
+                    <textarea class="ai-compose-prompt" id="aiComposePrompt" placeholder="Describe what you want to write...&#10;e.g., &quot;Write a follow-up email about the project deadline&quot;"></textarea>
+                    <select class="ai-tone-select" id="aiToneSelect">
+                        <option value="professional">Professional</option>
+                        <option value="friendly">Friendly</option>
+                        <option value="formal">Formal</option>
+                        <option value="casual">Casual</option>
+                        <option value="urgent">Urgent</option>
+                    </select>
+                    <button class="ai-btn primary" onclick="aiCompose()">
+                        <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                        Generate Email
+                    </button>
+                </div>
+
+                <!-- Summary Section (shown when email is selected) -->
+                <div class="ai-section" id="aiSummarySection" style="display:none;">
+                    <div class="ai-section-title">
+                        <svg viewBox="0 0 24 24"><path d="M14 17H4v2h10v-2zm6-8H4v2h16V9zM4 15h16v-2H4v2zM4 5v2h16V5H4z"/></svg>
+                        Email Summary
+                    </div>
+                    <div id="aiSummaryContent">
+                        <button class="ai-btn" onclick="aiSummarize()">
+                            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                            Summarize this email
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Smart Replies Section -->
+                <div class="ai-section" id="aiRepliesSection" style="display:none;">
+                    <div class="ai-section-title">
+                        <svg viewBox="0 0 24 24"><path d="M10 9V5l-7 7 7 7v-4.1c5 0 8.5 1.6 11 5.1-1-5-4-10-11-11z"/></svg>
+                        Smart Replies
+                    </div>
+                    <div class="smart-replies" id="smartRepliesContent">
+                        <button class="ai-btn" onclick="aiGenerateReplies()">
+                            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                            Generate reply suggestions
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Actions Section -->
+                <div class="ai-section" id="aiActionsSection" style="display:none;">
+                    <div class="ai-section-title">
+                        <svg viewBox="0 0 24 24"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
+                        Action Items
+                    </div>
+                    <div id="aiActionsContent">
+                        <button class="ai-btn" onclick="aiExtractActions()">
+                            <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+                            Extract action items
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="ai-section">
+                    <div class="ai-section-title">
+                        <svg viewBox="0 0 24 24"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42A8.954 8.954 0 0013 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+                        Quick Actions
+                    </div>
+                    <button class="ai-btn" onclick="aiRewrite('shorter')">
+                        <svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/></svg>
+                        Make it shorter
+                    </button>
+                    <button class="ai-btn" onclick="aiRewrite('longer')">
+                        <svg viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                        Make it longer
+                    </button>
+                    <button class="ai-btn" onclick="aiRewrite('professional')">
+                        <svg viewBox="0 0 24 24"><path d="M20 6h-4V4c0-1.11-.89-2-2-2h-4c-1.11 0-2 .89-2 2v2H4c-1.11 0-1.99.89-1.99 2L2 19c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V8c0-1.11-.89-2-2-2zm-6 0h-4V4h4v2z"/></svg>
+                        More professional
+                    </button>
+                </div>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Compose Modal -->
+    <div class="compose-modal" id="composeModal">
+        <div class="compose-header" onclick="toggleMinimize()">
+            <span class="compose-title">New Message</span>
+            <div class="compose-controls">
+                <button class="compose-ctrl-btn" onclick="event.stopPropagation(); toggleMinimize()">
+                    <svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/></svg>
+                </button>
+                <button class="compose-ctrl-btn" onclick="event.stopPropagation(); maximizeCompose()">
+                    <svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+                </button>
+                <button class="compose-ctrl-btn" onclick="event.stopPropagation(); closeCompose()">
+                    <svg viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+            </div>
+        </div>
+        <div class="compose-body">
+            <div class="compose-field">
+                <label>To</label>
+                <input type="email" id="composeTo" placeholder="Recipients">
+            </div>
+            <div class="compose-field">
+                <label>Subject</label>
+                <input type="text" id="composeSubject" placeholder="Subject">
+            </div>
+            <div class="compose-content">
+                <textarea id="composeBody" placeholder="Write your message..."></textarea>
+            </div>
+            <div class="compose-toolbar">
+                <div class="toolbar-left">
+                    <button class="toolbar-btn" title="Formatting">
+                        <svg viewBox="0 0 24 24"><path d="M5 17v2h14v-2H5zm4.5-4.2h5l.9 2.2h2.1L12.75 4h-1.5L6.5 15h2.1l.9-2.2zM12 5.98L13.87 11h-3.74L12 5.98z"/></svg>
+                    </button>
+                    <button class="toolbar-btn" title="Attach file">
+                        <svg viewBox="0 0 24 24"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 015 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6H10v9.5a2.5 2.5 0 005 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6h-1.5z"/></svg>
+                    </button>
+                    <button class="toolbar-btn" title="Insert link">
+                        <svg viewBox="0 0 24 24"><path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/></svg>
+                    </button>
+                    <button class="toolbar-btn" title="Insert emoji">
+                        <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm3.5-9c.83 0 1.5-.67 1.5-1.5S16.33 8 15.5 8 14 8.67 14 9.5s.67 1.5 1.5 1.5zm-7 0c.83 0 1.5-.67 1.5-1.5S9.33 8 8.5 8 7 8.67 7 9.5 7.67 11 8.5 11zm3.5 6.5c2.33 0 4.31-1.46 5.11-3.5H6.89c.8 2.04 2.78 3.5 5.11 3.5z"/></svg>
+                    </button>
+                    <button class="toolbar-btn" title="Insert photo">
+                        <svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+                    </button>
+                    <button class="toolbar-btn" title="Delete draft" onclick="discardDraft()">
+                        <svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                    </button>
+                </div>
+                <button class="send-btn" onclick="sendEmail()">
+                    <span>Send</span>
+                    <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div id="loginModal" class="login-modal hidden">
+        <div class="login-box">
+            <div class="login-header">
+                <div class="logo-icon" style="width:48px;height:48px;margin:0 auto 16px;">
+                    <svg viewBox="0 0 24 24" style="width:28px;height:28px;"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
+                </div>
+                <h2>Sign in to Bheem Mail</h2>
+                <p style="color:#6b7280;font-size:14px;margin-top:8px;">Use your Bheem Workspace credentials</p>
+            </div>
+            <div class="login-form">
+                <div class="login-field">
+                    <label>Email Address</label>
+                    <input type="email" id="loginEmail" placeholder="you@bheem.co.uk">
+                </div>
+                <div class="login-field">
+                    <label>Password</label>
+                    <input type="password" id="loginPassword" placeholder="Enter your password">
+                </div>
+                <div id="loginError" class="login-error" style="display:none;"></div>
+                <button class="login-btn" onclick="doLogin()">
+                    <span id="loginBtnText">Sign In with Bheem</span>
+                    <div id="loginSpinner" class="spinner" style="display:none;"></div>
+                </button>
+            </div>
+            <div class="login-footer">
+                <p>Single Sign-On powered by Bheem Core</p>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .login-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .login-modal.hidden { display: none; }
+        .login-box {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            width: 400px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .login-header { text-align: center; margin-bottom: 32px; }
+        .login-header h2 { font-size: 24px; color: #1f2937; margin: 0; }
+        .login-field { margin-bottom: 20px; }
+        .login-field label { display: block; font-size: 13px; font-weight: 500; color: #4b5563; margin-bottom: 8px; }
+        .login-field input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.2s;
+            box-sizing: border-box;
+        }
+        .login-field input:focus { outline: none; border-color: #ff6b35; box-shadow: 0 0 0 3px rgba(255,107,53,0.1); }
+        .login-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #ff6b35 0%, #f7931e 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+        .login-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(255,107,53,0.4); }
+        .login-btn:disabled { opacity: 0.7; cursor: not-allowed; transform: none; }
+        .login-error { background: #fee2e2; color: #dc2626; padding: 12px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
+        .login-footer { text-align: center; margin-top: 24px; color: #9ca3af; font-size: 12px; }
+        .spinner { width: 20px; height: 20px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255,255,255,0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+        }
+        .loading-overlay.hidden { display: none; }
+        .loading-content { text-align: center; }
+        .loading-content .spinner { width: 40px; height: 40px; border-width: 3px; border-color: #e5e7eb; border-top-color: #ff6b35; margin: 0 auto 16px; }
+        .user-menu {
+            position: absolute;
+            top: 60px;
+            right: 20px;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+            min-width: 200px;
+            z-index: 100;
+            overflow: hidden;
+        }
+        .user-menu-item {
+            padding: 12px 16px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            font-size: 14px;
+            color: #374151;
+        }
+        .user-menu-item:first-child {
+            font-weight: 500;
+            color: #1f2937;
+            cursor: default;
+        }
+        .user-menu-item:hover:not(:first-child) {
+            background: #f3f4f6;
+        }
+        .user-menu-divider {
+            height: 1px;
+            background: #e5e7eb;
+            margin: 4px 0;
+        }
+    </style>
+
+    <script>
+        // API Configuration
+        const API_BASE = '/api/v1';
+
+        // State
+        let emails = [];
+        let currentEmail = null;
+        let currentFolder = 'INBOX';
+        let userCredentials = null;
+        let authToken = null;
+        let currentUser = null;
+        let folders = [];
+
+        // Helper function to hide the app loader
+        function hideAppLoader() {
+            const loader = document.getElementById('appLoader');
+            if (loader) {
+                loader.classList.add('fade-out');
+                setTimeout(() => loader.classList.add('hidden'), 300);
+            }
+        }
+
+        // Helper function to show login modal
+        function showLoginModal() {
+            document.getElementById('loginModal').classList.remove('hidden');
+        }
+
+        // Check for stored credentials (SSO token)
+        async function checkAuth() {
+            // Check for SSO token in localStorage (shared across Bheem apps)
+            const token = localStorage.getItem('bheem_token');
+            const user = localStorage.getItem('bheem_user');
+            const mailCreds = sessionStorage.getItem('mailCredentials');
+
+            if (token && user) {
+                // Verify token is still valid
+                try {
+                    const verifyResponse = await fetch(`${API_BASE}/auth/verify`, {
+                        headers: { 'Authorization': `Bearer ${token}` }
+                    });
+
+                    if (!verifyResponse.ok) {
+                        // Token expired, clear storage
+                        localStorage.removeItem('bheem_token');
+                        localStorage.removeItem('bheem_user');
+                        sessionStorage.removeItem('mailCredentials');
+                        hideAppLoader();
+                        showLoginModal();
+                        return;
+                    }
+                } catch (e) {
+                    console.error('Token verification failed:', e);
+                    hideAppLoader();
+                    showLoginModal();
+                    return;
+                }
+
+                authToken = token;
+                currentUser = JSON.parse(user);
+
+                // Also need mail credentials for IMAP
+                if (mailCreds) {
+                    userCredentials = JSON.parse(mailCreds);
+                    hideAppLoader();
+                    initMail();
+                } else {
+                    // Show login to get mail password
+                    document.getElementById('loginEmail').value = currentUser.email || currentUser.username;
+                    document.getElementById('loginModal').querySelector('h2').textContent = 'Enter Mail Password';
+                    document.getElementById('loginModal').querySelector('p').textContent = `Signed in as ${currentUser.email || currentUser.username}`;
+                    document.getElementById('loginEmail').disabled = true;
+                    hideAppLoader();
+                    showLoginModal();
+                }
+            } else {
+                // No token - show login
+                hideAppLoader();
+                showLoginModal();
+            }
+        }
+
+        // Login with Bheem Core SSO
+        async function doLogin() {
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+            const errorDiv = document.getElementById('loginError');
+            const btnText = document.getElementById('loginBtnText');
+            const spinner = document.getElementById('loginSpinner');
+            const btn = document.querySelector('.login-btn');
+
+            if (!email || !password) {
+                errorDiv.textContent = 'Please enter email and password';
+                errorDiv.style.display = 'block';
+                return;
+            }
+
+            errorDiv.style.display = 'none';
+            btnText.textContent = 'Signing in...';
+            spinner.style.display = 'block';
+            btn.disabled = true;
+
+            try {
+                // First, authenticate with Bheem Core SSO
+                if (!authToken) {
+                    const authResponse = await fetch(`${API_BASE}/auth/login`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username: email, password: password })
+                    });
+
+                    if (!authResponse.ok) {
+                        const err = await authResponse.json().catch(() => ({}));
+                        throw new Error(err.detail || 'Invalid Bheem credentials');
+                    }
+
+                    const authData = await authResponse.json();
+                    authToken = authData.access_token;
+                    currentUser = authData.user || { email: email, username: email };
+
+                    // Store SSO token for other Bheem apps
+                    localStorage.setItem('bheem_token', authToken);
+                    localStorage.setItem('bheem_user', JSON.stringify(currentUser));
+                }
+
+                // Now test IMAP connection with mail credentials
+                const response = await fetch(`${API_BASE}/mail/folders?email=${encodeURIComponent(email)}&password=${encodeURIComponent(password)}`, {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+
+                if (!response.ok) {
+                    throw new Error('Invalid mail credentials');
+                }
+
+                const data = await response.json();
+                folders = data.folders || ['INBOX', 'Sent', 'Drafts', 'Trash', 'Spam'];
+
+                // Store mail credentials separately (for IMAP)
+                userCredentials = { email, password };
+                sessionStorage.setItem('mailCredentials', JSON.stringify(userCredentials));
+
+                document.getElementById('loginModal').classList.add('hidden');
+                updateUserDisplay();
+                initMail();
+
+            } catch (error) {
+                errorDiv.textContent = error.message;
+                errorDiv.style.display = 'block';
+            } finally {
+                btnText.textContent = 'Sign In with Bheem';
+                spinner.style.display = 'none';
+                btn.disabled = false;
+            }
+        }
+
+        // Toggle user menu
+        function toggleUserMenu() {
+            const menu = document.getElementById('userMenu');
+            menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+        }
+
+        // Close menu when clicking outside
+        document.addEventListener('click', function(e) {
+            const menu = document.getElementById('userMenu');
+            const avatar = document.querySelector('.user-avatar');
+            if (menu && !menu.contains(e.target) && !avatar.contains(e.target)) {
+                menu.style.display = 'none';
+            }
+        });
+
+        // Update user display
+        function updateUserDisplay() {
+            if (userCredentials) {
+                const initials = userCredentials.email.split('@')[0].substring(0,2).toUpperCase();
+                document.querySelector('.user-avatar').textContent = initials;
+                document.getElementById('userMenuEmail').textContent = userCredentials.email;
+            }
+        }
+
+        // Initialize mail
+        async function initMail() {
+            updateUserDisplay();
+            await loadEmails('INBOX');
+            startAutoRefresh();
+        }
+
+        // Load emails from API
+        async function loadEmails(folder = 'INBOX') {
+            if (!userCredentials) return;
+
+            const emailList = document.getElementById('emailList');
+            emailList.innerHTML = '<div style="padding:40px;text-align:center;color:#9ca3af;"><div class="spinner" style="border-color:#e5e7eb;border-top-color:#ff6b35;width:32px;height:32px;margin:0 auto 16px;"></div>Loading emails...</div>';
+
+            try {
+                const response = await fetch(
+                    `${API_BASE}/mail/messages?email=${encodeURIComponent(userCredentials.email)}&password=${encodeURIComponent(userCredentials.password)}&folder=${encodeURIComponent(folder)}&limit=50`,
+                    { headers: { 'Authorization': `Bearer ${authToken || 'demo-token'}` } }
+                );
+
+                if (!response.ok) throw new Error('Failed to load emails');
+
+                const data = await response.json();
+
+                // Transform API response to our format
+                emails = (data.messages || []).map((msg, index) => ({
+                    id: msg.id,
+                    sender: extractName(msg.from),
+                    email: extractEmail(msg.from),
+                    subject: msg.subject || '(No Subject)',
+                    preview: msg.preview || '',
+                    body: '',
+                    time: formatTime(msg.date),
+                    date: msg.date,
+                    unread: !msg.read,
+                    starred: false,
+                    labels: [],
+                    attachments: []
+                }));
+
+                // Update count
+                document.querySelector('.nav-item[data-folder="inbox"] .count').textContent = emails.filter(e => e.unread).length || '';
+
+                renderEmailList();
+
+            } catch (error) {
+                console.error('Error loading emails:', error);
+                emailList.innerHTML = `<div style="padding:40px;text-align:center;color:#dc2626;">
+                    <p>Failed to load emails</p>
+                    <p style="font-size:12px;color:#9ca3af;margin-top:8px;">${error.message}</p>
+                    <button onclick="loadEmails('${folder}')" style="margin-top:16px;padding:8px 16px;background:#ff6b35;color:white;border:none;border-radius:6px;cursor:pointer;">Retry</button>
+                </div>`;
+            }
+        }
+
+        // Helper functions
+        function extractName(fromStr) {
+            if (!fromStr) return 'Unknown';
+            const match = fromStr.match(/^"?([^"<]+)"?\s*</);
+            if (match) return match[1].trim();
+            return fromStr.split('@')[0];
+        }
+
+        function extractEmail(fromStr) {
+            if (!fromStr) return '';
+            const match = fromStr.match(/<([^>]+)>/);
+            if (match) return match[1];
+            return fromStr;
+        }
+
+        function formatTime(dateStr) {
+            if (!dateStr) return '';
+            try {
+                const date = new Date(dateStr);
+                const now = new Date();
+                const diff = now - date;
+
+                if (diff < 86400000) { // Today
+                    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                } else if (diff < 172800000) { // Yesterday
+                    return 'Yesterday';
+                } else {
+                    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                }
+            } catch (e) {
+                return dateStr;
+            }
+        }
+
+        // Render email list
+        function renderEmailList(emailsToRender = emails) {
+            const emailList = document.getElementById('emailList');
+
+            if (emailsToRender.length === 0) {
+                emailList.innerHTML = '<div style="padding:60px 40px;text-align:center;color:#9ca3af;"><svg viewBox="0 0 24 24" style="width:64px;height:64px;fill:#e5e7eb;margin-bottom:16px;"><path d="M20 4H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg><p style="font-size:16px;">No emails in this folder</p></div>';
+                return;
+            }
+
+            emailList.innerHTML = emailsToRender.map(email => `
+                <div class="email-item ${email.unread ? 'unread' : ''} ${currentEmail?.id === email.id ? 'active' : ''}"
+                     onclick="viewEmail('${email.id}')">
+                    <input type="checkbox" class="email-checkbox" onclick="event.stopPropagation()">
+                    <svg class="email-star ${email.starred ? 'starred' : ''}" viewBox="0 0 24 24"
+                         onclick="event.stopPropagation(); toggleStar('${email.id}')">
+                        <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+                    </svg>
+                    <div class="email-content">
+                        <div class="email-top">
+                            <span class="email-sender">${escapeHtml(email.sender)}</span>
+                            <span class="email-time">${email.time}</span>
+                        </div>
+                        <div class="email-subject">${escapeHtml(email.subject)}</div>
+                        <div class="email-preview">${escapeHtml(email.preview)}</div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Convert URLs in plain text to clickable links
+        function linkifyText(text) {
+            const urlRegex = /(https?:\/\/[^\s<>"{}|\\^`\[\]]+)/g;
+            const escaped = escapeHtml(text);
+            return `<pre style="white-space:pre-wrap;font-family:inherit;">${escaped.replace(urlRegex, '<a href="$1" target="_blank" rel="noopener noreferrer" style="color:#ff6b35;text-decoration:underline;">$1</a>')}</pre>`;
+        }
+
+        // Auto-refresh interval
+        let autoRefreshInterval = null;
+
+        function startAutoRefresh() {
+            if (autoRefreshInterval) clearInterval(autoRefreshInterval);
+            autoRefreshInterval = setInterval(() => {
+                if (userCredentials && document.visibilityState === 'visible') {
+                    loadEmails(currentFolder);
+                }
+            }, 30000); // Refresh every 30 seconds
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+                autoRefreshInterval = null;
+            }
+        }
+
+        // View email
+        async function viewEmail(id) {
+            const email = emails.find(e => e.id === id);
+            if (!email || !userCredentials) return;
+
+            currentEmail = email;
+            email.unread = false;
+
+            document.getElementById('emptyState').style.display = 'none';
+            document.getElementById('emailContent').style.display = 'flex';
+
+            // Show loading state
+            document.getElementById('viewBody').innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;"><div class="spinner" style="border-color:#e5e7eb;border-top-color:#ff6b35;width:24px;height:24px;margin:0 auto 12px;"></div>Loading...</div>';
+
+            document.getElementById('viewSubject').textContent = email.subject;
+            document.getElementById('viewAvatar').textContent = email.sender.substring(0,2).toUpperCase();
+            document.getElementById('viewSenderName').textContent = email.sender;
+            document.getElementById('viewSenderEmail').textContent = `<${email.email}>`;
+            document.getElementById('viewRecipients').textContent = `to ${userCredentials.email}`;
+            document.getElementById('viewDate').textContent = email.date;
+
+            // Fetch full email
+            try {
+                const response = await fetch(
+                    `${API_BASE}/mail/messages/${id}?email=${encodeURIComponent(userCredentials.email)}&password=${encodeURIComponent(userCredentials.password)}&folder=${encodeURIComponent(currentFolder)}`,
+                    { headers: { 'Authorization': `Bearer ${authToken || 'demo-token'}` } }
+                );
+
+                if (response.ok) {
+                    const fullEmail = await response.json();
+                    let bodyContent = fullEmail.body_html || `<pre style="white-space:pre-wrap;font-family:inherit;">${escapeHtml(fullEmail.body_text || email.preview)}</pre>`;
+                    // Make links clickable if plain text
+                    if (!fullEmail.body_html && fullEmail.body_text) {
+                        bodyContent = linkifyText(fullEmail.body_text);
+                    }
+                    document.getElementById('viewBody').innerHTML = bodyContent;
+                    // Make all links open in new tab
+                    document.querySelectorAll('#viewBody a').forEach(link => {
+                        link.setAttribute('target', '_blank');
+                        link.setAttribute('rel', 'noopener noreferrer');
+                        link.style.color = '#ff6b35';
+                        link.style.textDecoration = 'underline';
+                    });
+
+                    // Handle attachments
+                    const attachmentsDiv = document.getElementById('viewAttachments');
+                    const attachmentList = document.getElementById('attachmentList');
+
+                    if (fullEmail.attachments && fullEmail.attachments.length > 0) {
+                        attachmentsDiv.style.display = 'block';
+                        attachmentList.innerHTML = fullEmail.attachments.map(att => `
+                            <div class="attachment-item">
+                                <div class="attachment-icon pdf">
+                                    <svg viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                                </div>
+                                <div class="attachment-info">
+                                    <span class="attachment-name">${escapeHtml(att.filename)}</span>
+                                    <span class="attachment-size">${formatSize(att.size)}</span>
+                                </div>
+                            </div>
+                        `).join('');
+                    } else {
+                        attachmentsDiv.style.display = 'none';
+                    }
+                } else {
+                    document.getElementById('viewBody').innerHTML = `<pre style="white-space:pre-wrap;font-family:inherit;">${escapeHtml(email.preview)}</pre>`;
+                }
+            } catch (error) {
+                console.error('Error loading email:', error);
+                document.getElementById('viewBody').innerHTML = `<pre style="white-space:pre-wrap;font-family:inherit;">${escapeHtml(email.preview)}</pre>`;
+            }
+
+            renderEmailList();
+        }
+
+        function formatSize(bytes) {
+            if (!bytes) return '';
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        // Toggle star
+        function toggleStar(id) {
+            const email = emails.find(e => e.id === id);
+            if (email) {
+                email.starred = !email.starred;
+                renderEmailList();
+            }
+        }
+
+        // Show folder
+        function showFolder(folder) {
+            const folderMap = {
+                'inbox': 'INBOX',
+                'sent': 'Sent',
+                'drafts': 'Drafts',
+                'trash': 'Trash',
+                'spam': 'Spam',
+                'starred': 'starred',
+                'important': 'INBOX',
+                'snoozed': 'INBOX'
+            };
+
+            currentFolder = folderMap[folder] || 'INBOX';
+
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.classList.toggle('active', item.dataset.folder === folder);
+            });
+            document.querySelector('.list-title').textContent = folder.charAt(0).toUpperCase() + folder.slice(1);
+
+            if (folder === 'starred') {
+                renderEmailList(emails.filter(e => e.starred));
+            } else {
+                loadEmails(currentFolder);
+            }
+        }
+
+        // Show tab
+        function showTab(tab) {
+            document.querySelectorAll('.list-tab').forEach(t => {
+                t.classList.toggle('active', t.dataset.tab === tab);
+            });
+        }
+
+        // Filter by label
+        function filterByLabel(label) {
+            const filtered = emails.filter(e => e.labels && e.labels.includes(label));
+            renderEmailList(filtered);
+            document.querySelector('.list-title').textContent = label.charAt(0).toUpperCase() + label.slice(1);
+        }
+
+        // Compose functions
+        function openCompose() {
+            document.getElementById('composeModal').classList.add('active');
+            document.getElementById('composeModal').classList.remove('minimized');
+        }
+
+        function closeCompose() {
+            document.getElementById('composeModal').classList.remove('active');
+            document.getElementById('composeTo').value = '';
+            document.getElementById('composeSubject').value = '';
+            document.getElementById('composeBody').value = '';
+        }
+
+        function toggleMinimize() {
+            document.getElementById('composeModal').classList.toggle('minimized');
+        }
+
+        function maximizeCompose() {
+            document.getElementById('composeModal').classList.remove('minimized');
+        }
+
+        function openReply() {
+            if (!currentEmail) return;
+            openCompose();
+            document.getElementById('composeTo').value = currentEmail.email;
+            document.getElementById('composeSubject').value = 'Re: ' + currentEmail.subject;
+        }
+
+        // Send email via API
+        async function sendEmail() {
+            const to = document.getElementById('composeTo').value;
+            const subject = document.getElementById('composeSubject').value;
+            const body = document.getElementById('composeBody').value;
+
+            if (!to || !subject) {
+                alert('Please fill in recipient and subject');
+                return;
+            }
+
+            if (!userCredentials) {
+                alert('Please login first');
+                return;
+            }
+
+            const sendBtn = document.querySelector('.send-btn');
+            const originalText = sendBtn.innerHTML;
+            sendBtn.innerHTML = '<div class="spinner" style="width:16px;height:16px;"></div> Sending...';
+            sendBtn.disabled = true;
+
+            try {
+                const response = await fetch(
+                    `${API_BASE}/mail/send?email=${encodeURIComponent(userCredentials.email)}&password=${encodeURIComponent(userCredentials.password)}`,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${authToken || 'demo-token'}`
+                        },
+                        body: JSON.stringify({
+                            to: [to],
+                            subject: subject,
+                            body: body,
+                            is_html: false
+                        })
+                    }
+                );
+
+                if (response.ok) {
+                    alert('Email sent successfully!');
+                    closeCompose();
+                } else {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to send');
+                }
+            } catch (error) {
+                alert('Failed to send email: ' + error.message);
+            } finally {
+                sendBtn.innerHTML = originalText;
+                sendBtn.disabled = false;
+            }
+        }
+
+        function discardDraft() {
+            if (confirm('Discard this draft?')) {
+                closeCompose();
+            }
+        }
+
+        // Email actions
+        async function archiveEmail() {
+            if (currentEmail && userCredentials) {
+                // Move to archive (or just remove from view)
+                alert('Email archived');
+            }
+        }
+
+        async function deleteEmail() {
+            if (currentEmail && userCredentials) {
+                try {
+                    const response = await fetch(
+                        `${API_BASE}/mail/messages/${currentEmail.id}?email=${encodeURIComponent(userCredentials.email)}&password=${encodeURIComponent(userCredentials.password)}&folder=${encodeURIComponent(currentFolder)}`,
+                        {
+                            method: 'DELETE',
+                            headers: { 'Authorization': `Bearer ${authToken || 'demo-token'}` }
+                        }
+                    );
+
+                    if (response.ok) {
+                        const index = emails.findIndex(e => e.id === currentEmail.id);
+                        if (index > -1) {
+                            emails.splice(index, 1);
+                        }
+                        currentEmail = null;
+                        document.getElementById('emptyState').style.display = 'flex';
+                        document.getElementById('emailContent').style.display = 'none';
+                        renderEmailList();
+                    }
+                } catch (error) {
+                    console.error('Delete error:', error);
+                }
+            }
+        }
+
+        function markUnread() {
+            if (currentEmail) {
+                currentEmail.unread = true;
+                renderEmailList();
+            }
+        }
+
+        function snoozeEmail() {
+            if (currentEmail) {
+                alert('Email snoozed');
+            }
+        }
+
+        async function refreshMail() {
+            const refreshBtn = document.querySelector('.list-action[onclick="refreshMail()"]');
+            if (refreshBtn) {
+                refreshBtn.style.animation = 'spin 1s linear infinite';
+            }
+            await loadEmails(currentFolder);
+            if (refreshBtn) {
+                refreshBtn.style.animation = '';
+            }
+        }
+
+        // Logout
+        function logout() {
+            stopAutoRefresh();
+            sessionStorage.removeItem('mailCredentials');
+            localStorage.removeItem('bheem_token');
+            localStorage.removeItem('bheem_user');
+            userCredentials = null;
+            authToken = null;
+            currentUser = null;
+            emails = [];
+            document.getElementById('loginEmail').disabled = false;
+            document.getElementById('loginEmail').value = '';
+            document.getElementById('loginModal').classList.remove('hidden');
+        }
+
+        // Search functionality
+        document.getElementById('searchInput').addEventListener('input', function(e) {
+            const query = e.target.value.toLowerCase();
+            if (query) {
+                const filtered = emails.filter(email =>
+                    email.subject.toLowerCase().includes(query) ||
+                    email.sender.toLowerCase().includes(query) ||
+                    email.preview.toLowerCase().includes(query)
+                );
+                renderEmailList(filtered);
+            } else {
+                renderEmailList();
+            }
+        });
+
+        // Enter key for login
+        document.getElementById('loginPassword').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') doLogin();
+        });
+
+        // ============================================
+        // AI FEATURES
+        // ============================================
+
+        // Toggle AI Panel
+        function toggleAIPanel() {
+            const panel = document.getElementById('aiPanel');
+            const toggle = panel.querySelector('.ai-panel-toggle svg');
+            panel.classList.toggle('collapsed');
+
+            if (panel.classList.contains('collapsed')) {
+                toggle.innerHTML = '<path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/>';
+            } else {
+                toggle.innerHTML = '<path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z"/>';
+            }
+        }
+
+        // Show AI sections when email is selected
+        function showAISections() {
+            document.getElementById('aiSummarySection').style.display = 'block';
+            document.getElementById('aiRepliesSection').style.display = 'block';
+            document.getElementById('aiActionsSection').style.display = 'block';
+        }
+
+        // Hide AI sections when no email selected
+        function hideAISections() {
+            document.getElementById('aiSummarySection').style.display = 'none';
+            document.getElementById('aiRepliesSection').style.display = 'none';
+            document.getElementById('aiActionsSection').style.display = 'none';
+        }
+
+        // AI Compose - Generate email from prompt
+        async function aiCompose() {
+            const prompt = document.getElementById('aiComposePrompt').value;
+            const tone = document.getElementById('aiToneSelect').value;
+
+            if (!prompt.trim()) {
+                alert('Please describe what you want to write');
+                return;
+            }
+
+            const btn = document.querySelector('#aiComposeSection .ai-btn.primary');
+            const originalText = btn.innerHTML;
+            btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-color:#fff3;border-top-color:white;"></div> Generating...';
+            btn.disabled = true;
+
+            try {
+                const response = await fetch(`${API_BASE}/mail/ai/compose`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken || ''}`
+                    },
+                    body: JSON.stringify({ prompt, tone })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    // Open compose modal with generated content
+                    openCompose();
+                    document.getElementById('composeSubject').value = data.subject || '';
+                    document.getElementById('composeBody').value = data.body || '';
+                    document.getElementById('aiComposePrompt').value = '';
+                } else {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to generate email');
+                }
+            } catch (error) {
+                alert('AI Error: ' + error.message);
+            } finally {
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+            }
+        }
+
+        // AI Summarize - Summarize current email
+        async function aiSummarize() {
+            if (!currentEmail) {
+                alert('Please select an email first');
+                return;
+            }
+
+            const contentDiv = document.getElementById('aiSummaryContent');
+            contentDiv.innerHTML = '<div class="ai-summary-loading"><div class="spinner" style="width:20px;height:20px;border-color:#e5e7eb;border-top-color:#ff6b35;"></div></div>';
+
+            try {
+                // Get the email body content
+                const emailBody = document.getElementById('viewBody').innerText || currentEmail.preview;
+
+                const response = await fetch(`${API_BASE}/mail/ai/summarize`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken || ''}`
+                    },
+                    body: JSON.stringify({ content: emailBody, max_length: 200 })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+
+                    let html = `<div class="ai-summary">${escapeHtml(data.summary)}</div>`;
+
+                    if (data.key_points && data.key_points.length > 0) {
+                        html += '<div class="ai-key-points">';
+                        data.key_points.forEach(point => {
+                            html += `<div class="ai-key-point"><div class="ai-key-point-bullet"></div><span>${escapeHtml(point)}</span></div>`;
+                        });
+                        html += '</div>';
+                    }
+
+                    if (data.action_items && data.action_items.length > 0) {
+                        html += '<div class="ai-actions-list">';
+                        data.action_items.forEach(item => {
+                            html += `<div class="ai-action-item"><svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg><span>${escapeHtml(item)}</span></div>`;
+                        });
+                        html += '</div>';
+                    }
+
+                    contentDiv.innerHTML = html;
+                } else {
+                    throw new Error('Failed to summarize');
+                }
+            } catch (error) {
+                contentDiv.innerHTML = `<button class="ai-btn" onclick="aiSummarize()"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>Try again</button>`;
+            }
+        }
+
+        // AI Generate Smart Replies
+        async function aiGenerateReplies() {
+            if (!currentEmail) {
+                alert('Please select an email first');
+                return;
+            }
+
+            const contentDiv = document.getElementById('smartRepliesContent');
+            contentDiv.innerHTML = '<div class="ai-summary-loading"><div class="spinner" style="width:20px;height:20px;border-color:#e5e7eb;border-top-color:#ff6b35;"></div></div>';
+
+            try {
+                const emailBody = document.getElementById('viewBody').innerText || currentEmail.preview;
+
+                const response = await fetch(`${API_BASE}/mail/ai/replies`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken || ''}`
+                    },
+                    body: JSON.stringify({
+                        email_content: emailBody,
+                        sender_name: currentEmail.sender,
+                        count: 3
+                    })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+
+                    let html = '';
+                    (data.replies || []).forEach(reply => {
+                        html += `<div class="smart-reply-chip" onclick="useSmartReply(this)">${escapeHtml(reply)}</div>`;
+                    });
+
+                    contentDiv.innerHTML = html || '<p style="color:#9ca3af;font-size:13px;">No suggestions available</p>';
+                } else {
+                    throw new Error('Failed to generate replies');
+                }
+            } catch (error) {
+                contentDiv.innerHTML = `<button class="ai-btn" onclick="aiGenerateReplies()"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>Try again</button>`;
+            }
+        }
+
+        // Use a smart reply
+        function useSmartReply(element) {
+            const replyText = element.textContent;
+            openReply();
+            document.getElementById('composeBody').value = replyText + '\n\n';
+        }
+
+        // AI Extract Action Items
+        async function aiExtractActions() {
+            if (!currentEmail) {
+                alert('Please select an email first');
+                return;
+            }
+
+            const contentDiv = document.getElementById('aiActionsContent');
+            contentDiv.innerHTML = '<div class="ai-summary-loading"><div class="spinner" style="width:20px;height:20px;border-color:#e5e7eb;border-top-color:#ff6b35;"></div></div>';
+
+            try {
+                const emailBody = document.getElementById('viewBody').innerText || currentEmail.preview;
+
+                const response = await fetch(`${API_BASE}/mail/ai/actions`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${authToken || ''}`
+                    },
+                    body: JSON.stringify({ content: emailBody })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+
+                    let html = '';
+
+                    if (data.action_items && data.action_items.length > 0) {
+                        html += '<div class="ai-actions-list">';
+                        data.action_items.forEach(item => {
+                            const task = typeof item === 'string' ? item : item.task;
+                            html += `<div class="ai-action-item"><svg viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg><span>${escapeHtml(task)}</span></div>`;
+                        });
+                        html += '</div>';
+                    }
+
+                    if (data.deadlines && data.deadlines.length > 0) {
+                        html += '<div style="margin-top:12px;"><strong style="font-size:12px;color:#6b7280;">Deadlines:</strong>';
+                        data.deadlines.forEach(deadline => {
+                            html += `<div class="ai-action-item" style="background:#fef3c7;color:#b45309;"><svg viewBox="0 0 24 24" style="fill:#b45309;"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></svg><span>${escapeHtml(deadline)}</span></div>`;
+                        });
+                        html += '</div>';
+                    }
+
+                    contentDiv.innerHTML = html || '<p style="color:#9ca3af;font-size:13px;">No action items found</p>';
+                } else {
+                    throw new Error('Failed to extract actions');
+                }
+            } catch (error) {
+                contentDiv.innerHTML = `<button class="ai-btn" onclick="aiExtractActions()"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>Try again</button>`;
+            }
+        }
+
+        // AI Rewrite - Rewrite compose email with different tone
+        async function aiRewrite(tone) {
+            const composeBody = document.getElementById('composeBody');
+            const content = composeBody.value;
+
+            if (!content.trim()) {
+                alert('Please write some content first, or use AI Compose to generate an email');
+                return;
+            }
+
+            // Find the button that was clicked
+            const buttons = document.querySelectorAll('.ai-btn');
+            let btn = null;
+            buttons.forEach(b => {
+                if (b.onclick && b.onclick.toString().includes(tone)) {
+                    btn = b;
+                }
+            });
+
+            if (btn) {
+                const originalText = btn.innerHTML;
+                btn.innerHTML = '<div class="spinner" style="width:16px;height:16px;border-color:#ccc;border-top-color:#666;"></div> Rewriting...';
+                btn.disabled = true;
+
+                try {
+                    const response = await fetch(`${API_BASE}/mail/ai/rewrite`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${authToken || ''}`
+                        },
+                        body: JSON.stringify({ content, tone })
+                    });
+
+                    if (response.ok) {
+                        const data = await response.json();
+                        composeBody.value = data.body || content;
+                    } else {
+                        throw new Error('Failed to rewrite');
+                    }
+                } catch (error) {
+                    alert('AI Error: ' + error.message);
+                } finally {
+                    btn.innerHTML = originalText;
+                    btn.disabled = false;
+                }
+            }
+        }
+
+        // Update viewEmail to show AI sections
+        const originalViewEmail = viewEmail;
+        viewEmail = async function(id) {
+            await originalViewEmail(id);
+            showAISections();
+            // Reset AI sections content
+            document.getElementById('aiSummaryContent').innerHTML = `<button class="ai-btn" onclick="aiSummarize()"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>Summarize this email</button>`;
+            document.getElementById('smartRepliesContent').innerHTML = `<button class="ai-btn" onclick="aiGenerateReplies()"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>Generate reply suggestions</button>`;
+            document.getElementById('aiActionsContent').innerHTML = `<button class="ai-btn" onclick="aiExtractActions()"><svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>Extract action items</button>`;
+        };
+
+        // Initialize - check auth
+        checkAuth();
+    </script>
+</body>
+</html>

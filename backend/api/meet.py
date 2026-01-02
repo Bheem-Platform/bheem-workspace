@@ -14,6 +14,7 @@ from core.database import get_db
 from core.security import get_current_user, get_optional_user
 from core.config import settings
 from services.livekit_service import livekit_service
+from integrations.notify import notify_client
 
 router = APIRouter(prefix="/meet", tags=["Bheem Meet"])
 
@@ -24,6 +25,8 @@ class CreateRoomRequest(BaseModel):
     duration_minutes: Optional[int] = 60
     description: Optional[str] = None
     max_participants: Optional[int] = 100
+    participants: Optional[List[str]] = None  # Email addresses to invite
+    send_invites: bool = True  # Whether to send email invites
 
 class CreateRoomResponse(BaseModel):
     room_id: str
@@ -99,15 +102,44 @@ async def create_room(
         print(f"Warning: Could not save room to ERP: {e}")
         # Continue even if ERP save fails
     
-    return CreateRoomResponse(
+    join_url = livekit_service.get_join_url(room_code)
+
+    # Send meeting invites to participants
+    invites_sent = []
+    if request.send_invites and request.participants:
+        host_name = current_user.get("username", "Host")
+        meeting_time = request.scheduled_time.strftime("%B %d, %Y at %I:%M %p") if request.scheduled_time else "Now"
+
+        for participant_email in request.participants:
+            try:
+                result = await notify_client.send_meeting_invite(
+                    to=participant_email,
+                    meeting_title=request.name,
+                    meeting_time=meeting_time,
+                    meeting_url=join_url,
+                    host_name=host_name,
+                    attendees=request.participants
+                )
+                if not result.get("error"):
+                    invites_sent.append(participant_email)
+            except Exception as e:
+                print(f"Failed to send meeting invite to {participant_email}: {e}")
+
+    response = CreateRoomResponse(
         room_id=room_id,
         room_code=room_code,
         name=request.name,
-        join_url=livekit_service.get_join_url(room_code),
+        join_url=join_url,
         host_token=host_token,
         ws_url=livekit_service.get_ws_url(),
         created_at=datetime.utcnow()
     )
+
+    # Log invites sent
+    if invites_sent:
+        print(f"Meeting invites sent to: {invites_sent}")
+
+    return response
 
 @router.post("/token", response_model=JoinRoomResponse)
 async def get_join_token(

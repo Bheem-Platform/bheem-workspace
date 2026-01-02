@@ -25,8 +25,9 @@ export default function UserForm({
   error = null,
 }: UserFormProps) {
   const [formData, setFormData] = useState({
-    email: initialData?.email || '',
+    username: initialData?.username || '',
     name: initialData?.name || '',
+    personal_email: initialData?.personal_email || '',
     role: initialData?.role || 'member' as UserRole,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -43,11 +44,18 @@ export default function UserForm({
   const validate = () => {
     const newErrors: Record<string, string> = {};
 
-    if (!formData.email.trim()) newErrors.email = 'Email is required';
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      newErrors.email = 'Invalid email format';
+    if (!formData.username.trim()) newErrors.username = 'Username is required';
+    if (!/^[a-zA-Z0-9._-]+$/.test(formData.username)) {
+      newErrors.username = 'Username can only contain letters, numbers, dots, underscores, and hyphens';
     }
     if (!formData.name.trim()) newErrors.name = 'Name is required';
+    // Personal email is required for new users (to send login credentials)
+    if (!isEdit && !formData.personal_email.trim()) {
+      newErrors.personal_email = 'Personal email is required to send login credentials';
+    }
+    if (formData.personal_email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.personal_email)) {
+      newErrors.personal_email = 'Invalid email format';
+    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -57,7 +65,12 @@ export default function UserForm({
     e.preventDefault();
     if (!validate()) return;
 
-    await onSubmit(formData);
+    await onSubmit({
+      username: formData.username,
+      name: formData.name,
+      personal_email: formData.personal_email || undefined,
+      role: formData.role,
+    });
   };
 
   return (
@@ -69,23 +82,26 @@ export default function UserForm({
         </div>
       )}
 
-      {/* Email */}
+      {/* Username */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
-          Email Address *
+          Username *
         </label>
         <input
-          type="email"
-          name="email"
-          value={formData.email}
+          type="text"
+          name="username"
+          value={formData.username}
           onChange={handleChange}
           disabled={isEdit}
           className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
-            errors.email ? 'border-red-500' : 'border-gray-300'
+            errors.username ? 'border-red-500' : 'border-gray-300'
           } ${isEdit ? 'bg-gray-100' : ''}`}
-          placeholder="user@company.com"
+          placeholder="johndoe"
         />
-        {errors.email && <p className="mt-1 text-sm text-red-500">{errors.email}</p>}
+        {errors.username && <p className="mt-1 text-sm text-red-500">{errors.username}</p>}
+        <p className="mt-1 text-xs text-gray-500">
+          This will become the workspace email: <strong>{formData.username || 'username'}@your-domain.com</strong>
+        </p>
       </div>
 
       {/* Name */}
@@ -104,6 +120,29 @@ export default function UserForm({
           placeholder="John Doe"
         />
         {errors.name && <p className="mt-1 text-sm text-red-500">{errors.name}</p>}
+      </div>
+
+      {/* Personal Email (for sending invite) */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Personal Email {isEdit ? <span className="text-gray-400">(optional)</span> : '*'}
+        </label>
+        <input
+          type="email"
+          name="personal_email"
+          value={formData.personal_email}
+          onChange={handleChange}
+          className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+            errors.personal_email ? 'border-red-500' : 'border-gray-300'
+          }`}
+          placeholder="john@gmail.com"
+        />
+        {errors.personal_email && <p className="mt-1 text-sm text-red-500">{errors.personal_email}</p>}
+        <p className="mt-1 text-xs text-gray-500">
+          {isEdit
+            ? 'Used for sending notifications'
+            : 'Login credentials will be sent to this email (e.g., user\'s Gmail or personal email)'}
+        </p>
       </div>
 
       {/* Role */}

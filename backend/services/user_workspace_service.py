@@ -64,6 +64,28 @@ class UserWorkspaceService:
 
         email = self._get_user_email(user._asdict())
 
+        # Also get workspace role from TenantUser (if user belongs to a workspace)
+        workspace_role = None
+        tenant_info = None
+        try:
+            tenant_result = await db.execute(text("""
+                SELECT tu.role, tu.tenant_id, t.name as tenant_name, t.slug as tenant_slug
+                FROM workspace.tenant_users tu
+                JOIN workspace.tenants t ON tu.tenant_id = t.id
+                WHERE tu.user_id = :user_id AND tu.is_active = true
+                LIMIT 1
+            """), {"user_id": user_id})
+            tenant_user = tenant_result.fetchone()
+            if tenant_user:
+                workspace_role = tenant_user.role
+                tenant_info = {
+                    "id": str(tenant_user.tenant_id),
+                    "name": tenant_user.tenant_name,
+                    "slug": tenant_user.tenant_slug
+                }
+        except Exception:
+            pass  # Workspace tables might not exist
+
         return {
             "user": {
                 "id": str(user.id),
@@ -72,7 +94,9 @@ class UserWorkspaceService:
                 "name": f"{user.first_name or ''} {user.last_name or ''}".strip() or user.username,
                 "company": user.company_name,
                 "company_domain": user.domain,
-                "role": user.role
+                "role": user.role,
+                "workspace_role": workspace_role,
+                "tenant": tenant_info
             },
             "workspace": {
                 "email": {

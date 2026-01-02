@@ -28,6 +28,7 @@ from models.admin_models import (
 from services.mailgun_service import mailgun_service
 from services.cloudflare_service import cloudflare_service
 from services.mailcow_service import mailcow_service
+from services.user_provisioning import get_provisioning_service, ProvisioningStatus
 
 router = APIRouter()
 
@@ -101,10 +102,19 @@ class TenantResponse(BaseModel):
 
 # User Models
 class UserCreate(BaseModel):
-    email: EmailStr
+    """
+    User creation following industry-standard pattern (Google Workspace/Microsoft 365 style):
+    - username: Used to generate workspace email (username@tenant-domain.com)
+    - personal_email: Where to send the invite (user's existing email)
+    - The workspace email becomes the LOGIN credential
+    """
+    username: str  # Will become workspace email: username@tenant-domain.com
     name: str
+    personal_email: Optional[EmailStr] = None  # For sending invite (e.g., user's gmail)
     role: UserRole = UserRole.MEMBER
-    user_id: Optional[str] = None  # Reference to bheem-core user (optional for invites)
+    # Provisioning options
+    create_mailbox: Optional[bool] = True  # Always create mailbox by default
+    send_welcome_email: Optional[bool] = True  # Send welcome email to personal_email
 
 class UserUpdate(BaseModel):
     role: Optional[UserRole] = None
@@ -115,7 +125,8 @@ class UserResponse(BaseModel):
     id: str
     tenant_id: str
     user_id: str
-    email: Optional[str] = None
+    email: Optional[str] = None  # Workspace email (login email)
+    personal_email: Optional[str] = None  # Personal email (for notifications)
     name: Optional[str] = None
     role: str
     is_active: bool
@@ -123,6 +134,10 @@ class UserResponse(BaseModel):
     invited_at: Optional[datetime]
     joined_at: Optional[datetime]
     created_at: datetime
+    # Provisioning info
+    provisioning_status: Optional[str] = None  # success, partial, failed
+    services_provisioned: Optional[List[str]] = None  # ['workspace', 'mailbox', 'passport', 'notification']
+    temp_password: Optional[str] = None  # Temporary password (only shown once on creation)
 
     class Config:
         from_attributes = True
@@ -658,10 +673,18 @@ async def add_tenant_user(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin())
 ):
-    """Add a user to tenant (Admin or SuperAdmin)"""
+    """
+    Add a user to tenant with unified provisioning (Admin or SuperAdmin)
+
+    This endpoint provisions the user across ALL services:
+    - Creates user in Bheem Passport (SSO)
+    - Creates TenantUser in Workspace DB
+    - Creates Mailbox in Mailcow (if email matches tenant domain)
+    - Sends welcome email via Bheem Notify
+    """
     import logging
     logger = logging.getLogger(__name__)
-    logger.info(f"Adding user: email={user.email}, name={user.name}, role={user.role}")
+    logger.info(f"Provisioning user: username={user.username}, name={user.name}, role={user.role}")
 
     # Resolve tenant ID (supports UUID or slug)
     resolved_id = await resolve_tenant_id(tenant_id, db)
@@ -688,66 +711,86 @@ async def add_tenant_user(
             detail=f"User limit reached ({tenant.max_users}). Upgrade plan for more users."
         )
 
-    # Get or generate user_id
-    if user.user_id and user.user_id.strip():
-        try:
-            target_user_id = uuid.UUID(user.user_id)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid user_id format")
-    else:
-        # For invitations, generate a placeholder UUID
-        # In production, this would lookup/create user in Passport
-        target_user_id = uuid.uuid4()
+    # Use unified provisioning service
+    provisioner = get_provisioning_service(db)
 
-    # Check if user already in tenant by email
-    existing = await db.execute(
+    # Get inviter info from current user
+    inviter_name = current_user.get("username") or current_user.get("name") or "Admin"
+    inviter_email = current_user.get("email")
+
+    # Provision user with all services (industry-standard pattern)
+    # - username becomes workspace email: username@tenant-domain
+    # - personal_email is where the invite is sent
+    result = await provisioner.provision_user(
+        tenant_id=resolved_id,
+        username=user.username,
+        name=user.name,
+        role=user.role.value,
+        personal_email=user.personal_email,
+        create_mailbox=user.create_mailbox,
+        send_welcome_email=user.send_welcome_email,
+        inviter_name=inviter_name,
+        inviter_email=inviter_email
+    )
+
+    # Check for complete failure
+    if result.status == ProvisioningStatus.FAILED:
+        error_message = result.errors[0] if result.errors else "User provisioning failed"
+        logger.error(f"Provisioning failed for {user.username}: {error_message}")
+        raise HTTPException(status_code=400, detail=error_message)
+
+    # Log activity with provisioning details
+    await log_activity(
+        db,
+        action="user_provisioned",
+        tenant_id=str(resolved_id),
+        user_id=result.user_id,
+        entity_type="tenant_user",
+        entity_id=result.user_id,
+        description=f"Provisioned user {result.email} with services: {list(result.services.keys())}",
+        metadata={
+            "provisioning_status": result.status.value,
+            "services": list(result.services.keys()),
+            "errors": result.errors if result.errors else None
+        }
+    )
+
+    # Get the created user for response
+    user_result = await db.execute(
         select(TenantUser).where(
             and_(
                 TenantUser.tenant_id == resolved_id,
-                TenantUser.email == user.email
+                TenantUser.email == result.email  # Use workspace email from result
             )
         )
     )
-    existing_user = existing.scalar_one_or_none()
-    if existing_user:
-        logger.warning(f"User {user.email} already exists in tenant")
-        raise HTTPException(status_code=400, detail=f"User with email {user.email} already exists in this workspace")
+    new_user = user_result.scalar_one_or_none()
 
-    new_user = TenantUser(
-        tenant_id=resolved_id,
-        user_id=target_user_id,
-        email=user.email,
-        name=user.name,
-        role=user.role.value,
-        invited_at=datetime.utcnow()
-    )
+    if not new_user:
+        raise HTTPException(status_code=500, detail="User provisioning completed but user not found")
 
-    db.add(new_user)
-    await db.commit()
-    await db.refresh(new_user)
-
-    await log_activity(
-        db,
-        action="user_added",
-        tenant_id=tenant_id,
-        user_id=str(target_user_id),
-        entity_type="tenant_user",
-        entity_id=str(new_user.id),
-        description=f"Added user {user.email} to tenant with role: {user.role.value}"
+    logger.info(
+        f"User provisioned: username={user.username}, workspace_email={result.email}, "
+        f"personal_email={user.personal_email}, status={result.status.value}, "
+        f"services={list(result.services.keys())}"
     )
 
     return UserResponse(
         id=str(new_user.id),
         tenant_id=str(new_user.tenant_id),
         user_id=str(new_user.user_id),
-        email=new_user.email,
+        email=new_user.email,  # Workspace email (login)
+        personal_email=new_user.personal_email,  # Personal email (for notifications)
         name=new_user.name,
         role=new_user.role,
         is_active=new_user.is_active,
         permissions=new_user.permissions or {},
         invited_at=new_user.invited_at,
         joined_at=new_user.joined_at,
-        created_at=new_user.created_at
+        created_at=new_user.created_at,
+        provisioning_status=result.status.value,
+        services_provisioned=list(result.services.keys()),
+        temp_password=result.temp_password  # Show temp password only on creation
     )
 
 @router.patch("/tenants/{tenant_id}/users/{user_id}", response_model=UserResponse)
@@ -800,29 +843,57 @@ async def update_tenant_user(
 async def remove_tenant_user(
     tenant_id: str,
     user_id: str,
+    delete_mailbox: bool = Query(False, description="Also delete user's mailbox"),
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(require_admin())
 ):
-    """Remove user from tenant (Admin or SuperAdmin)"""
+    """
+    Remove/deprovision user from tenant (Admin or SuperAdmin)
+
+    This endpoint deprovisions the user from services:
+    - Disables user in Workspace DB
+    - Optionally deletes mailbox in Mailcow
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
     resolved_id = await resolve_tenant_id(tenant_id, db)
-    result = await db.execute(
-        select(TenantUser).where(
-            and_(
-                TenantUser.tenant_id == resolved_id,
-                TenantUser.user_id == uuid.UUID(user_id)
-            )
-        )
+
+    # Use deprovisioning service
+    provisioner = get_provisioning_service(db)
+
+    result = await provisioner.deprovision_user(
+        tenant_id=resolved_id,
+        user_id=user_id,
+        delete_mailbox=delete_mailbox
     )
-    user = result.scalar_one_or_none()
 
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found in tenant")
+    if result.status == ProvisioningStatus.FAILED:
+        error_message = result.errors[0] if result.errors else "User deprovisioning failed"
+        raise HTTPException(status_code=400, detail=error_message)
 
-    user.is_active = False
-    user.updated_at = datetime.utcnow()
-    await db.commit()
+    await log_activity(
+        db,
+        action="user_deprovisioned",
+        tenant_id=str(resolved_id),
+        user_id=user_id,
+        entity_type="tenant_user",
+        entity_id=user_id,
+        description=f"Deprovisioned user {result.email}",
+        metadata={
+            "services": list(result.services.keys()),
+            "delete_mailbox": delete_mailbox
+        }
+    )
 
-    return {"message": "User removed from tenant", "user_id": user_id}
+    logger.info(f"User deprovisioned: {user_id}, services={list(result.services.keys())}")
+
+    return {
+        "message": "User deprovisioned from tenant",
+        "user_id": user_id,
+        "email": result.email,
+        "services_deprovisioned": list(result.services.keys())
+    }
 
 # ==================== DOMAIN ENDPOINTS ====================
 

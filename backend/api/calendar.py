@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 
 from core.security import get_current_user
 from services.caldav_service import caldav_service
+from integrations.notify import notify_client
 
 router = APIRouter(prefix="/calendar", tags=["Bheem Calendar"])
 
@@ -20,6 +21,8 @@ class EventCreate(BaseModel):
     end: datetime
     location: Optional[str] = ""
     description: Optional[str] = ""
+    attendees: Optional[List[str]] = None  # Email addresses to invite
+    send_invites: bool = True  # Whether to send email invites
 
 class EventUpdate(BaseModel):
     title: Optional[str]
@@ -132,10 +135,34 @@ async def create_event(
             detail="Failed to create event"
         )
 
+    # Send calendar invites to attendees
+    invites_sent = []
+    if request.send_invites and request.attendees:
+        organizer_name = current_user.get("username", "Organizer")
+        event_time = request.start.strftime("%B %d, %Y at %I:%M %p")
+        event_end_time = request.end.strftime("%I:%M %p")
+
+        for attendee_email in request.attendees:
+            try:
+                result = await notify_client.send_calendar_invite(
+                    to=attendee_email,
+                    event_title=request.title,
+                    event_time=f"{event_time} - {event_end_time}",
+                    location=request.location or "Not specified",
+                    organizer_name=organizer_name,
+                    description=request.description or "",
+                    attendees=request.attendees
+                )
+                if not result.get("error"):
+                    invites_sent.append(attendee_email)
+            except Exception as e:
+                print(f"Failed to send calendar invite to {attendee_email}: {e}")
+
     return {
         "success": True,
         "event_uid": event_uid,
-        "calendar_id": request.calendar_id
+        "calendar_id": request.calendar_id,
+        "invites_sent": invites_sent
     }
 
 @router.delete("/events/{event_uid}")

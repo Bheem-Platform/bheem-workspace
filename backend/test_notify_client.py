@@ -4,7 +4,7 @@ Test script for Bheem Notify Client
 Tests the centralized notification service integration
 """
 import asyncio
-from services.notify_client import notify_client
+from integrations.notify import notify_client
 
 
 async def test_health():
@@ -62,7 +62,7 @@ async def test_backward_compatibility():
     print("Testing Backward Compatibility")
     print("="*50)
 
-    from services.notify_client import msg91_service
+    from integrations.notify import msg91_service
 
     # Test properties
     print(f"sender_email: {msg91_service.sender_email}")

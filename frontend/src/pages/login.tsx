@@ -63,7 +63,35 @@ export default function LoginPage() {
 
       const { access_token, user } = response.data;
       setAuth(access_token, user);
-      router.push(redirectTo);
+
+      // Determine redirect based on user role
+      // SuperAdmin goes to super-admin panel
+      // Workspace admins go to /admin
+      // Regular users go to user dashboard
+      let targetUrl = '/dashboard';
+
+      if (user.role === 'SuperAdmin') {
+        targetUrl = '/super-admin';
+      } else {
+        // Check if user has workspace admin role by fetching their membership
+        try {
+          const membershipRes = await api.get('/user-workspace/me', {
+            headers: { Authorization: `Bearer ${access_token}` }
+          });
+          const workspaceData = membershipRes.data;
+          const workspaceRole = workspaceData?.user?.workspace_role;
+          if (workspaceRole === 'admin' || workspaceRole === 'manager') {
+            targetUrl = '/admin';
+          }
+        } catch {
+          // If no workspace membership found, go to dashboard
+          targetUrl = '/dashboard';
+        }
+      }
+
+      // Use redirect param if specified, otherwise use role-based redirect
+      const finalRedirect = router.query.redirect ? redirectTo : targetUrl;
+      router.push(finalRedirect);
     } catch (err: any) {
       console.error('Login error:', err);
       if (err.response?.status === 401) {

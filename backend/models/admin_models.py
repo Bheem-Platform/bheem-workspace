@@ -97,7 +97,8 @@ class TenantUser(Base):
     user_id = Column(UUID(as_uuid=True), nullable=False)
 
     # User info (for display)
-    email = Column(String(320))
+    email = Column(String(320))  # Workspace email (login email): username@tenant-domain.com
+    personal_email = Column(String(320))  # Personal email for notifications (e.g., user's gmail)
     name = Column(String(255))
 
     # Role within tenant

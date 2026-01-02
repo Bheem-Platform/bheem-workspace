@@ -81,6 +81,24 @@ class Settings(BaseSettings):
     MSG91_SENDER_NAME: str = "Bheem-Tele"
 
     # ============================================
+    # BHEEM NOTIFY CONFIGURATION
+    # ============================================
+    NOTIFY_SERVICE_URL: str = "https://platform.bheem.co.uk"
+    NOTIFY_API_KEY: Optional[str] = None
+    NOTIFY_TIMEOUT: float = 30.0
+    NOTIFY_SENDER_EMAIL: str = "noreply@bheem.cloud"
+    NOTIFY_SENDER_NAME: str = "Bheem Workspace"
+
+    # ============================================
+    # USER PROVISIONING CONFIGURATION
+    # ============================================
+    WORKSPACE_FRONTEND_URL: str = "https://workspace.bheem.cloud"
+    PROVISIONING_AUTO_MAILBOX: bool = True
+    PROVISIONING_SEND_WELCOME: bool = True
+    PROVISIONING_SYNC_PASSPORT: bool = True
+    PROVISIONING_SYNC_NEXTCLOUD: bool = False  # Enable when ready
+
+    # ============================================
     # ERP INTEGRATION CONFIGURATION
     # ============================================
 

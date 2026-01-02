@@ -17,7 +17,9 @@ from core.security import (
 from core.config import settings
 from services.passport_client import get_passport_client, BheemPassportClient
 from services.mailcow_service import mailcow_service
+from integrations.notify import notify_client
 import asyncio
+import secrets
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -333,9 +335,11 @@ async def change_password(
 @router.post("/password/reset/request")
 async def request_password_reset(request: PasswordResetRequest):
     """
-    Request password reset via Bheem Passport
+    Request password reset - sends email via Bheem Notify
     """
     passport = get_passport()
+    reset_url = None
+    user_name = request.email.split("@")[0]  # Default name from email
 
     if settings.USE_PASSPORT_AUTH:
         try:
@@ -343,22 +347,39 @@ async def request_password_reset(request: PasswordResetRequest):
                 email=request.email,
                 company_code=request.company_code
             )
-            return result
+            # Extract reset URL if Passport returns it
+            reset_url = result.get("reset_url") or result.get("reset_link")
+            user_name = result.get("user_name") or user_name
 
-        except HTTPException as e:
-            raise e
         except Exception as e:
-            print(f"[Workspace Auth] Password reset request failed: {e}")
-            # Return success anyway to prevent email enumeration
-            return {
-                "message": "If the email exists in our system, you will receive a password reset link shortly.",
-                "success": True
-            }
+            print(f"[Workspace Auth] Passport password reset failed: {e}")
+            # Continue to send email anyway
 
-    raise HTTPException(
-        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-        detail="Password reset requires Bheem Passport service"
-    )
+    # Generate reset URL if Passport didn't provide one
+    if not reset_url:
+        # Generate a simple token-based URL (in production, use secure token generation)
+        reset_token = secrets.token_urlsafe(32)
+        frontend_url = settings.WORKSPACE_FRONTEND_URL or "https://workspace.bheem.cloud"
+        reset_url = f"{frontend_url}/reset-password?token={reset_token}&email={request.email}"
+
+    # Send password reset email via Bheem Notify
+    try:
+        await notify_client.send_password_reset_email(
+            to=request.email,
+            name=user_name,
+            reset_url=reset_url,
+            expires_in="24 hours"
+        )
+        print(f"Password reset email sent to: {request.email}")
+    except Exception as e:
+        print(f"Failed to send password reset email: {e}")
+        # Don't expose email sending errors to prevent enumeration
+
+    # Always return success to prevent email enumeration
+    return {
+        "message": "If the email exists in our system, you will receive a password reset link shortly.",
+        "success": True
+    }
 
 
 @router.get("/companies")
