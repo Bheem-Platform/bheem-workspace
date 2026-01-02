@@ -104,7 +104,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     name: str
     role: UserRole = UserRole.MEMBER
-    user_id: str  # Reference to bheem-core user
+    user_id: Optional[str] = None  # Reference to bheem-core user (optional for invites)
 
 class UserUpdate(BaseModel):
     role: Optional[UserRole] = None
@@ -115,6 +115,8 @@ class UserResponse(BaseModel):
     id: str
     tenant_id: str
     user_id: str
+    email: Optional[str] = None
+    name: Optional[str] = None
     role: str
     is_active: bool
     permissions: Dict[str, Any]
@@ -637,6 +639,8 @@ async def list_tenant_users(
             id=str(u.id),
             tenant_id=str(u.tenant_id),
             user_id=str(u.user_id),
+            email=u.email,
+            name=u.name,
             role=u.role,
             is_active=u.is_active,
             permissions=u.permissions or {},
@@ -680,12 +684,23 @@ async def add_tenant_user(
             detail=f"User limit reached ({tenant.max_users}). Upgrade plan for more users."
         )
 
-    # Check if user already in tenant
+    # Get or generate user_id
+    if user.user_id:
+        target_user_id = uuid.UUID(user.user_id)
+    else:
+        # For invitations, generate a placeholder UUID
+        # In production, this would lookup/create user in Passport
+        target_user_id = uuid.uuid4()
+
+    # Check if user already in tenant (by user_id or email)
     existing = await db.execute(
         select(TenantUser).where(
             and_(
                 TenantUser.tenant_id == resolved_id,
-                TenantUser.user_id == uuid.UUID(user.user_id)
+                or_(
+                    TenantUser.user_id == target_user_id,
+                    TenantUser.email == user.email
+                )
             )
         )
     )
@@ -694,7 +709,9 @@ async def add_tenant_user(
 
     new_user = TenantUser(
         tenant_id=resolved_id,
-        user_id=uuid.UUID(user.user_id),
+        user_id=target_user_id,
+        email=user.email,
+        name=user.name,
         role=user.role.value,
         invited_at=datetime.utcnow()
     )
@@ -707,16 +724,18 @@ async def add_tenant_user(
         db,
         action="user_added",
         tenant_id=tenant_id,
-        user_id=user.user_id,
+        user_id=str(target_user_id),
         entity_type="tenant_user",
         entity_id=str(new_user.id),
-        description=f"Added user to tenant with role: {user.role.value}"
+        description=f"Added user {user.email} to tenant with role: {user.role.value}"
     )
 
     return UserResponse(
         id=str(new_user.id),
         tenant_id=str(new_user.tenant_id),
         user_id=str(new_user.user_id),
+        email=new_user.email,
+        name=new_user.name,
         role=new_user.role,
         is_active=new_user.is_active,
         permissions=new_user.permissions or {},
