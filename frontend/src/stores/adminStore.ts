@@ -362,10 +362,8 @@ export const useAdminStore = create<AdminState>((set, get) => ({
     }
   },
 
-  // Aliases - expose tenantUsers as users for convenience
-  get users() {
-    return get().tenantUsers;
-  },
+  // Aliases for backward compatibility (prefer using tenantUsers/fetchTenantUsers directly)
+  users: [],
   fetchUsers: async (tenantId) => {
     return get().fetchTenantUsers(tenantId);
   },

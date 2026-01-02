@@ -12,7 +12,7 @@ import type { TenantUser, TenantUserCreate, TenantUserUpdate } from '@/types/adm
 
 export default function UsersPage() {
   const router = useRouter();
-  const { users, fetchUsers, addUser, removeUser, loading, error, clearError } = useAdminStore();
+  const { tenantUsers, fetchTenantUsers, addUser, removeUser, loading, error, clearError } = useAdminStore();
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [showInviteModal, setShowInviteModal] = useState(false);
@@ -28,8 +28,8 @@ export default function UsersPage() {
 
   useEffect(() => {
     if (!isAuthenticated || authLoading) return;
-    fetchUsers(tenantId);
-  }, [fetchUsers, tenantId, isAuthenticated, authLoading]);
+    fetchTenantUsers(tenantId);
+  }, [fetchTenantUsers, tenantId, isAuthenticated, authLoading]);
 
   const handleInviteUser = async (data: TenantUserCreate) => {
     setInviting(true);
@@ -47,7 +47,7 @@ export default function UsersPage() {
     setSelectedUser(null);
   };
 
-  const filteredUsers = users.filter((user) => {
+  const filteredUsers = tenantUsers.filter((user) => {
     const matchesSearch =
       user.email.toLowerCase().includes(search.toLowerCase()) ||
       user.name.toLowerCase().includes(search.toLowerCase());
@@ -199,24 +199,24 @@ export default function UsersPage() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-sm text-gray-500">Total Users</p>
-            <p className="text-2xl font-bold text-gray-900">{users.length}</p>
+            <p className="text-2xl font-bold text-gray-900">{tenantUsers.length}</p>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-sm text-gray-500">Admins</p>
             <p className="text-2xl font-bold text-purple-600">
-              {users.filter((u) => u.role === 'admin').length}
+              {tenantUsers.filter((u) => u.role === 'admin').length}
             </p>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-sm text-gray-500">Members</p>
             <p className="text-2xl font-bold text-blue-600">
-              {users.filter((u) => u.role === 'member').length}
+              {tenantUsers.filter((u) => u.role === 'member').length}
             </p>
           </div>
           <div className="bg-white rounded-lg border border-gray-200 p-4">
             <p className="text-sm text-gray-500">Guests</p>
             <p className="text-2xl font-bold text-gray-600">
-              {users.filter((u) => u.role === 'guest').length}
+              {tenantUsers.filter((u) => u.role === 'guest').length}
             </p>
           </div>
         </div>
