@@ -50,3 +50,31 @@ async def test_connection():
     except Exception as e:
         print(f"Database connection failed: {e}")
         return False
+
+
+# Alias for background tasks that need session maker
+async_session_maker = AsyncSessionLocal
+
+
+def get_db_connection():
+    """
+    Get a synchronous database connection using psycopg2.
+    Used by APIs that need sync database access.
+    """
+    import psycopg2
+    from urllib.parse import urlparse, unquote
+
+    # Parse the async database URL to get connection params
+    db_url = settings.DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://")
+    parsed = urlparse(db_url)
+
+    # URL decode the password (handles special characters like @ and #)
+    password = unquote(parsed.password) if parsed.password else None
+
+    return psycopg2.connect(
+        host=parsed.hostname,
+        port=parsed.port or 5432,
+        user=parsed.username,
+        password=password,
+        database=parsed.path.lstrip('/')
+    )

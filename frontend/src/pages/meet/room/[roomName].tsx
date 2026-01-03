@@ -1,257 +1,524 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/router';
-import {
-  LiveKitRoom,
-  VideoConference,
-  RoomAudioRenderer,
-  ControlBar,
-  useTracks,
-  ParticipantTile,
-  useRoomContext,
-} from '@livekit/components-react';
-import '@livekit/components-styles';
-import {
-  Mic,
-  MicOff,
-  Video,
-  VideoOff,
-  PhoneOff,
-  ScreenShare,
-  MessageSquare,
-  Users,
-  Settings,
-  MoreVertical,
-  Copy,
-  Disc,
-  StopCircle,
-} from 'lucide-react';
+import Head from 'next/head';
+import dynamic from 'next/dynamic';
+import { motion, AnimatePresence } from 'framer-motion';
+import PreJoinScreen from '@/components/meet/PreJoinScreen';
+import ChatPanel from '@/components/meet/ChatPanel';
+import ParticipantsPanel from '@/components/meet/ParticipantsPanel';
+import VideoGrid from '@/components/meet/VideoGrid';
+import ControlBar from '@/components/meet/ControlBar';
+import EndMeetingModal from '@/components/meet/EndMeetingModal';
+import ScreenSharePicker from '@/components/meet/ScreenSharePicker';
+import SettingsModal from '@/components/meet/SettingsModal';
+import { useMeetStore } from '@/stores/meetStore';
+import { useAuthStore } from '@/stores/authStore';
+import type { ChatMessage } from '@/types/meet';
 
-interface RoomConfig {
-  token: string;
-  serverUrl: string;
-  roomName: string;
-  participantName: string;
-}
+// Dynamically import LiveKit components to avoid SSR issues
+const LiveKitComponents = dynamic(
+  () => import('@/components/meet/LiveKitWrapper'),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="w-full h-full flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500 mx-auto mb-2" />
+          <p className="text-gray-400 text-sm">Loading video...</p>
+        </div>
+      </div>
+    )
+  }
+);
 
 export default function MeetingRoom() {
   const router = useRouter();
   const { roomName } = router.query;
-  const [config, setConfig] = useState<RoomConfig | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
 
+  const { user } = useAuthStore();
+  const {
+    roomToken,
+    wsUrl,
+    roomCode,
+    roomName: meetingName,
+    isChatPanelOpen,
+    isParticipantsPanelOpen,
+    isMicEnabled,
+    isCameraEnabled,
+    isScreenSharing,
+    recordingSession,
+    joinRoom,
+    leaveRoom,
+    getRoomInfo,
+    toggleChatPanel,
+    toggleParticipantsPanel,
+    toggleMic,
+    toggleCamera,
+    addChatMessage,
+    error,
+    loading,
+    chatMessages,
+  } = useMeetStore();
+
+  const [isPreJoin, setIsPreJoin] = useState(true);
+  const [participantName, setParticipantName] = useState('');
+  const [hasCamera, setHasCamera] = useState(false);
+  const [hasMic, setHasMic] = useState(false);
+  const [devicesChecked, setDevicesChecked] = useState(false);
+  const [liveKitFailed, setLiveKitFailed] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [viewMode, setViewMode] = useState<'grid' | 'speaker' | 'spotlight'>('grid');
+  const [isHandRaised, setIsHandRaised] = useState(false);
+  const [unreadMessages, setUnreadMessages] = useState(0);
+  const [showEndMeetingModal, setShowEndMeetingModal] = useState(false);
+  const [showScreenSharePicker, setShowScreenSharePicker] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+
+  // Mock participants for demo (in real app, this comes from LiveKit)
+  const [participants, setParticipants] = useState([
+    { id: 'local', name: participantName || 'You', isLocal: true, isMuted: !isMicEnabled, isVideoOff: !isCameraEnabled }
+  ]);
+
+  // Check available devices
   useEffect(() => {
-    if (!roomName) return;
-
-    // Get token from API
-    const fetchToken = async () => {
+    const checkDevices = async () => {
       try {
-        // Would call API to get token
-        // const response = await api.post('/meet/join', {
-        //   room_name: roomName,
-        //   user_id: 'user-123',
-        //   user_name: 'John Doe',
-        //   tenant_id: 'tenant-123'
-        // });
+        if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
+          const devices = await navigator.mediaDevices.enumerateDevices();
+          const videoDevices = devices.filter(d => d.kind === 'videoinput');
+          const audioDevices = devices.filter(d => d.kind === 'audioinput');
 
-        // Mock for now
-        setConfig({
-          token: 'mock-token',
-          serverUrl: process.env.NEXT_PUBLIC_LIVEKIT_URL || 'wss://meet.bheem.cloud',
-          roomName: roomName as string,
-          participantName: 'John Doe',
-        });
-        setLoading(false);
+          setHasCamera(videoDevices.length > 0);
+          setHasMic(audioDevices.length > 0);
+        } else {
+          setHasCamera(false);
+          setHasMic(false);
+        }
       } catch (err) {
-        setError('Failed to join meeting');
-        setLoading(false);
+        console.error('Failed to enumerate devices:', err);
+        setHasCamera(false);
+        setHasMic(false);
+      } finally {
+        setDevicesChecked(true);
+      }
+    };
+    checkDevices();
+  }, []);
+
+  // Get room info on mount
+  useEffect(() => {
+    if (roomName && typeof roomName === 'string') {
+      getRoomInfo(roomName);
+    }
+  }, [roomName]);
+
+  // Set default name from user
+  useEffect(() => {
+    if (user?.username) {
+      setParticipantName(user.username);
+    }
+  }, [user]);
+
+  // Update local participant
+  useEffect(() => {
+    setParticipants(prev => prev.map(p =>
+      p.isLocal ? { ...p, name: participantName || 'You', isMuted: !isMicEnabled, isVideoOff: !isCameraEnabled } : p
+    ));
+  }, [participantName, isMicEnabled, isCameraEnabled]);
+
+  // Track unread messages
+  useEffect(() => {
+    if (!isChatPanelOpen && chatMessages.length > 0) {
+      setUnreadMessages(prev => prev + 1);
+    }
+  }, [chatMessages.length, isChatPanelOpen]);
+
+  // Reset unread when chat opens
+  useEffect(() => {
+    if (isChatPanelOpen) {
+      setUnreadMessages(0);
+    }
+  }, [isChatPanelOpen]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) {
+        return;
+      }
+
+      switch (e.key.toLowerCase()) {
+        case 'm':
+          e.preventDefault();
+          toggleMic();
+          break;
+        case 'v':
+          e.preventDefault();
+          toggleCamera();
+          break;
+        case 'c':
+          e.preventDefault();
+          toggleChatPanel();
+          break;
+        case 'p':
+          e.preventDefault();
+          toggleParticipantsPanel();
+          break;
+        case 'f':
+          if (!e.ctrlKey && !e.metaKey) {
+            e.preventDefault();
+            handleToggleFullscreen();
+          }
+          break;
       }
     };
 
-    fetchToken();
-  }, [roomName]);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [toggleMic, toggleCamera, toggleChatPanel, toggleParticipantsPanel]);
 
-  const handleDisconnect = () => {
+  const handleJoin = async (name: string) => {
+    if (!roomName || typeof roomName !== 'string') return;
+
+    setParticipantName(name);
+    const success = await joinRoom(roomName, name);
+
+    if (success) {
+      setIsPreJoin(false);
+    }
+  };
+
+  const handleLeave = () => {
+    leaveRoom();
     router.push('/meet');
   };
 
-  const copyMeetingLink = () => {
-    navigator.clipboard.writeText(window.location.href);
-    // Show toast
+  const handleEndForAll = () => {
+    // In a real app, this would end the meeting for all participants
+    leaveRoom();
+    router.push('/meet');
   };
 
-  const toggleRecording = () => {
-    setIsRecording(!isRecording);
-    // Would call API to start/stop recording
+  const handleSendMessage = (content: string) => {
+    const message: ChatMessage = {
+      id: Date.now().toString(),
+      senderId: 'local',
+      senderName: participantName,
+      content,
+      timestamp: new Date().toISOString(),
+      type: 'text',
+      isLocal: true,
+    };
+    addChatMessage(message);
   };
 
-  if (loading) {
+  const handleToggleFullscreen = useCallback(() => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen();
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen();
+      setIsFullscreen(false);
+    }
+  }, []);
+
+  const handleToggleScreenShare = useCallback(() => {
+    if (isScreenSharing) {
+      // Stop sharing
+      console.log('Stop screen share');
+    } else {
+      // Open screen share picker
+      setShowScreenSharePicker(true);
+    }
+  }, [isScreenSharing]);
+
+  const handleScreenShare = useCallback((sourceId: string, withAudio: boolean) => {
+    // In a real app, this would start screen sharing via LiveKit
+    console.log('Start screen share:', sourceId, 'with audio:', withAudio);
+  }, []);
+
+  const handleToggleRecording = useCallback(() => {
+    // In a real app, this would toggle recording
+    console.log('Toggle recording');
+  }, []);
+
+  const handleToggleHand = useCallback(() => {
+    setIsHandRaised(prev => !prev);
+  }, []);
+
+  const handleOpenSettings = useCallback(() => {
+    setShowSettingsModal(true);
+  }, []);
+
+  const handleSaveSettings = useCallback((settings: any) => {
+    console.log('Save settings:', settings);
+    // In a real app, this would apply the settings
+  }, []);
+
+  const handleLeaveClick = useCallback(() => {
+    if (participants.length > 1) {
+      setShowEndMeetingModal(true);
+    } else {
+      handleLeave();
+    }
+  }, [participants.length]);
+
+  const handleLiveKitError = () => {
+    console.log('LiveKit failed, falling back to simple UI');
+    setLiveKitFailed(true);
+  };
+
+  // Show pre-join screen
+  if (isPreJoin) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
-          <p className="text-white">Joining meeting...</p>
-        </div>
-      </div>
+      <>
+        <Head>
+          <title>Join Meeting | Bheem Meet</title>
+        </Head>
+        <PreJoinScreen
+          roomCode={roomName as string}
+          roomName={meetingName || undefined}
+          onJoin={handleJoin}
+          userName={participantName || user?.username}
+        />
+      </>
     );
   }
 
+  // Show error
   if (error) {
     return (
       <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <div className="text-center">
-          <p className="text-red-500 mb-4">{error}</p>
+        <motion.div
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="text-center max-w-md mx-auto p-8 bg-gray-800 rounded-3xl border border-gray-700"
+        >
+          <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
+            <span className="text-3xl text-red-400">!</span>
+          </div>
+          <h2 className="text-xl font-semibold text-white mb-3">
+            Unable to join meeting
+          </h2>
+          <p className="text-gray-400 mb-8">{error}</p>
           <button
             onClick={() => router.push('/meet')}
-            className="px-4 py-2 bg-white text-gray-900 rounded-lg"
+            className="px-8 py-3 bg-emerald-500 text-white font-medium rounded-xl hover:bg-emerald-600 transition-colors"
           >
             Back to Meetings
           </button>
-        </div>
+        </motion.div>
       </div>
     );
   }
 
-  if (!config) return null;
+  // Show loading
+  if (loading.joining) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="text-center"
+        >
+          <div className="w-16 h-16 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-6" />
+          <p className="text-white text-lg">Joining meeting...</p>
+        </motion.div>
+      </div>
+    );
+  }
 
+  // TEMPORARILY DISABLED: LiveKit is causing crashes due to server configuration issues
+  const LIVEKIT_ENABLED = false;
+  const hasDevices = hasCamera || hasMic;
+  const useLiveKit = LIVEKIT_ENABLED && hasDevices && roomToken && wsUrl && !liveKitFailed;
+
+  // Main meeting room UI
   return (
-    <div className="min-h-screen bg-gray-900">
-      {/* Custom Meeting UI wrapping LiveKit */}
-      <div className="h-screen flex flex-col">
-        {/* Top Bar */}
-        <div className="h-14 bg-gray-800 flex items-center justify-between px-4">
-          <div className="flex items-center space-x-4">
-            <div className="w-8 h-8 bg-bheem-primary rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold">B</span>
-            </div>
-            <div>
-              <h1 className="text-white font-medium">{config.roomName}</h1>
-              <p className="text-gray-400 text-xs">Bheem Meet</p>
-            </div>
-          </div>
+    <>
+      <Head>
+        <title>{meetingName || roomName} | Bheem Meet</title>
+      </Head>
 
-          <div className="flex items-center space-x-2">
-            {isRecording && (
-              <span className="flex items-center px-2 py-1 bg-red-500/20 text-red-400 text-xs rounded-full">
-                <span className="w-2 h-2 bg-red-500 rounded-full mr-1 animate-pulse" />
-                Recording
+      <div className="h-screen bg-gray-900 flex flex-col overflow-hidden">
+        {/* Header */}
+        <motion.header
+          initial={{ y: -20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="flex-shrink-0 h-12 sm:h-14 bg-gray-900/80 backdrop-blur-lg border-b border-gray-800 flex items-center justify-between px-3 sm:px-4 z-10 meet-safe-area-top"
+        >
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <h1 className="text-white font-medium text-sm sm:text-base truncate">{meetingName || 'Meeting'}</h1>
+            <span className="text-gray-500 text-xs sm:text-sm font-mono hidden sm:inline">{roomCode || roomName}</span>
+          </div>
+          <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-400 flex-shrink-0">
+            <span className="flex items-center gap-1.5">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
               </span>
+              <span className="hidden sm:inline">{participants.length} participant{participants.length !== 1 ? 's' : ''}</span>
+              <span className="sm:hidden">{participants.length}</span>
+            </span>
+          </div>
+        </motion.header>
+
+        {/* Main content area */}
+        <div className="flex-1 flex overflow-hidden relative">
+          {/* Video grid / Meeting area */}
+          <div className="flex-1 relative">
+            {/* Device check */}
+            {!devicesChecked ? (
+              <div className="w-full h-full flex items-center justify-center">
+                <div className="text-center">
+                  <div className="w-10 h-10 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-4" />
+                  <p className="text-gray-400 text-sm">Checking devices...</p>
+                </div>
+              </div>
+            ) : useLiveKit ? (
+              <LiveKitComponents
+                token={roomToken}
+                serverUrl={wsUrl}
+                hasCamera={hasCamera}
+                hasMic={hasMic}
+                onLeave={handleLeave}
+                onError={handleLiveKitError}
+              />
+            ) : (
+              <VideoGrid
+                participants={participants}
+                viewMode={viewMode}
+                activeSpeakerId={null}
+                pinnedParticipantId={null}
+              />
             )}
-            <button
-              onClick={copyMeetingLink}
-              className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg"
-              title="Copy link"
-            >
-              <Copy size={18} />
-            </button>
-            <button
-              onClick={toggleRecording}
-              className={`p-2 rounded-lg ${
-                isRecording
-                  ? 'text-red-400 hover:bg-red-500/20'
-                  : 'text-gray-400 hover:text-white hover:bg-gray-700'
-              }`}
-              title={isRecording ? 'Stop recording' : 'Start recording'}
-            >
-              {isRecording ? <StopCircle size={18} /> : <Disc size={18} />}
-            </button>
-            <button className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg">
-              <Settings size={18} />
-            </button>
-          </div>
-        </div>
 
-        {/* Video Area - Would use LiveKit components */}
-        <div className="flex-1 relative">
-          {/* Placeholder for LiveKit VideoConference */}
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center">
-              <Video size={64} className="text-gray-600 mx-auto mb-4" />
-              <p className="text-gray-400">
-                LiveKit video conference will render here
-              </p>
-              <p className="text-gray-500 text-sm mt-2">
-                Connect to: {config.serverUrl}
-              </p>
-            </div>
+            {/* LiveKit failed banner */}
+            <AnimatePresence>
+              {liveKitFailed && hasDevices && (
+                <motion.div
+                  initial={{ opacity: 0, y: -20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -20 }}
+                  className="absolute top-4 left-4 right-4 z-10 bg-amber-500/90 text-amber-900 px-4 py-2 rounded-xl text-sm flex items-center gap-2"
+                >
+                  <span>Video conferencing unavailable. Using basic meeting mode.</span>
+                  <button
+                    onClick={() => setLiveKitFailed(false)}
+                    className="ml-auto hover:text-amber-700"
+                  >
+                    &times;
+                  </button>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
 
-          {/* Participants Sidebar (would be toggled) */}
-          <div className="absolute right-0 top-0 bottom-0 w-72 bg-gray-800 border-l border-gray-700 p-4 hidden">
-            <h2 className="text-white font-medium mb-4 flex items-center">
-              <Users size={18} className="mr-2" />
-              Participants (1)
-            </h2>
-            <div className="space-y-2">
-              <div className="flex items-center space-x-3 p-2 rounded-lg hover:bg-gray-700">
-                <div className="w-8 h-8 bg-bheem-primary rounded-full flex items-center justify-center">
-                  <span className="text-white text-sm">JD</span>
-                </div>
-                <div className="flex-1">
-                  <p className="text-white text-sm">{config.participantName}</p>
-                  <p className="text-gray-400 text-xs">Host</p>
-                </div>
-                <Mic size={16} className="text-green-400" />
-              </div>
-            </div>
-          </div>
-
-          {/* Chat Sidebar (would be toggled) */}
-          <div className="absolute right-0 top-0 bottom-0 w-80 bg-gray-800 border-l border-gray-700 hidden">
-            <div className="h-full flex flex-col">
-              <div className="p-4 border-b border-gray-700">
-                <h2 className="text-white font-medium flex items-center">
-                  <MessageSquare size={18} className="mr-2" />
-                  Chat
-                </h2>
-              </div>
-              <div className="flex-1 p-4 overflow-y-auto">
-                {/* Messages would go here */}
-              </div>
-              <div className="p-4 border-t border-gray-700">
-                <input
-                  type="text"
-                  placeholder="Type a message..."
-                  className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:outline-none focus:border-bheem-primary"
+          {/* Side panels - responsive: full screen on mobile, side panel on desktop */}
+          <AnimatePresence>
+            {isChatPanelOpen && (
+              <>
+                {/* Mobile backdrop */}
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 bg-black/50 z-20 sm:hidden"
+                  onClick={toggleChatPanel}
                 />
-              </div>
-            </div>
-          </div>
+                <motion.div
+                  initial={{ x: '100%', opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  exit={{ x: '100%', opacity: 0 }}
+                  transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                  className="fixed inset-0 z-30 sm:relative sm:inset-auto sm:w-80 sm:h-full sm:border-l sm:border-gray-800"
+                >
+                  <ChatPanel
+                    onClose={toggleChatPanel}
+                    onSendMessage={handleSendMessage}
+                  />
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {isParticipantsPanelOpen && (
+              <>
+                {/* Mobile backdrop */}
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 bg-black/50 z-20 sm:hidden"
+                  onClick={toggleParticipantsPanel}
+                />
+                <motion.div
+                  initial={{ x: '100%', opacity: 0 }}
+                  animate={{ x: 0, opacity: 1 }}
+                  exit={{ x: '100%', opacity: 0 }}
+                  transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                  className="fixed inset-0 z-30 sm:relative sm:inset-auto sm:w-80 sm:h-full sm:border-l sm:border-gray-800"
+                >
+                  <ParticipantsPanel
+                    onClose={toggleParticipantsPanel}
+                    roomCode={roomCode || undefined}
+                  />
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
         </div>
 
-        {/* Control Bar */}
-        <div className="h-20 bg-gray-800 flex items-center justify-center space-x-4">
-          <button className="p-4 bg-gray-700 text-white rounded-full hover:bg-gray-600">
-            <Mic size={24} />
-          </button>
-          <button className="p-4 bg-gray-700 text-white rounded-full hover:bg-gray-600">
-            <Video size={24} />
-          </button>
-          <button className="p-4 bg-gray-700 text-white rounded-full hover:bg-gray-600">
-            <ScreenShare size={24} />
-          </button>
-          <button className="p-4 bg-gray-700 text-gray-400 rounded-full hover:bg-gray-600">
-            <MessageSquare size={24} />
-          </button>
-          <button className="p-4 bg-gray-700 text-gray-400 rounded-full hover:bg-gray-600">
-            <Users size={24} />
-          </button>
-          <button
-            onClick={handleDisconnect}
-            className="p-4 bg-red-500 text-white rounded-full hover:bg-red-600"
-          >
-            <PhoneOff size={24} />
-          </button>
-        </div>
-      </div>
+        {/* Control bar */}
+        <ControlBar
+          isMicEnabled={isMicEnabled}
+          isCameraEnabled={isCameraEnabled}
+          isScreenSharing={isScreenSharing}
+          isRecording={recordingSession?.isRecording || false}
+          isHandRaised={isHandRaised}
+          isChatOpen={isChatPanelOpen}
+          isParticipantsOpen={isParticipantsPanelOpen}
+          participantCount={participants.length}
+          unreadMessages={unreadMessages}
+          viewMode={viewMode}
+          roomCode={roomCode || roomName as string}
+          onToggleMic={toggleMic}
+          onToggleCamera={toggleCamera}
+          onToggleScreenShare={handleToggleScreenShare}
+          onToggleRecording={handleToggleRecording}
+          onToggleHand={handleToggleHand}
+          onToggleChat={toggleChatPanel}
+          onToggleParticipants={toggleParticipantsPanel}
+          onChangeViewMode={setViewMode}
+          onToggleFullscreen={handleToggleFullscreen}
+          onOpenSettings={handleOpenSettings}
+          onLeave={handleLeaveClick}
+          onEndForAll={handleEndForAll}
+        />
 
-      {/* Watermark overlay (for anti-piracy) */}
-      <div className="fixed inset-0 pointer-events-none flex items-center justify-center opacity-10">
-        <div className="text-white text-4xl font-bold transform -rotate-45">
-          {config.participantName} • {new Date().toLocaleDateString()}
-        </div>
+        {/* Modals */}
+        <EndMeetingModal
+          isOpen={showEndMeetingModal}
+          onClose={() => setShowEndMeetingModal(false)}
+          onLeave={handleLeave}
+          onEndForAll={handleEndForAll}
+          isHost={true}
+          participantCount={participants.length}
+        />
+
+        <ScreenSharePicker
+          isOpen={showScreenSharePicker}
+          onClose={() => setShowScreenSharePicker(false)}
+          onShare={handleScreenShare}
+        />
+
+        <SettingsModal
+          isOpen={showSettingsModal}
+          onClose={() => setShowSettingsModal(false)}
+          onSave={handleSaveSettings}
+        />
       </div>
-    </div>
+    </>
   );
 }

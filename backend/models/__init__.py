@@ -11,12 +11,31 @@ from .admin_models import (
     ActivityLog
 )
 
+from .meet_models import (
+    MeetingRoom,
+    MeetingRecording,
+    MeetingTranscript,
+    MeetingChatMessage,
+    MeetingParticipant,
+    WaitingRoom,
+    MeetingSettings
+)
+
 __all__ = [
+    # Admin models
     "Tenant",
     "TenantUser",
     "Domain",
     "DomainDNSRecord",
     "Developer",
     "DeveloperProject",
-    "ActivityLog"
+    "ActivityLog",
+    # Meet models
+    "MeetingRoom",
+    "MeetingRecording",
+    "MeetingTranscript",
+    "MeetingChatMessage",
+    "MeetingParticipant",
+    "WaitingRoom",
+    "MeetingSettings"
 ]

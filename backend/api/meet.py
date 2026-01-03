@@ -77,30 +77,30 @@ async def create_room(
         is_host=True
     )
     
-    # Store room in ERP database
+    # Store room in database
     try:
         await db.execute(
             text("""
-                INSERT INTO project_management.pm_meeting_rooms 
-                (id, name, room_code, created_by, company_id, status, 
+                INSERT INTO workspace.meet_rooms
+                (id, room_name, room_code, host_id, host_name, status,
                  scheduled_start, max_participants, created_at, updated_at)
-                VALUES (:id, :name, :room_code, :created_by, :company_id, 
+                VALUES (:id, :room_name, :room_code, :host_id, :host_name,
                         'scheduled', :scheduled_start, :max_participants, NOW(), NOW())
             """),
             {
                 "id": room_id,
-                "name": request.name,
+                "room_name": request.name,
                 "room_code": room_code,
-                "created_by": current_user["id"],
-                "company_id": current_user.get("company_id"),
+                "host_id": current_user["id"],
+                "host_name": current_user.get("username"),
                 "scheduled_start": request.scheduled_time,
                 "max_participants": request.max_participants or 100
             }
         )
         await db.commit()
     except Exception as e:
-        print(f"Warning: Could not save room to ERP: {e}")
-        # Continue even if ERP save fails
+        print(f"Warning: Could not save room to DB: {e}")
+        # Continue even if DB save fails
     
     join_url = livekit_service.get_join_url(room_code)
 
@@ -154,12 +154,12 @@ async def get_join_token(
     room_name = request.room_code  # Default to room code
     try:
         result = await db.execute(
-            text("SELECT name FROM project_management.pm_meeting_rooms WHERE room_code = :room_code"),
+            text("SELECT room_name FROM workspace.meet_rooms WHERE room_code = :room_code"),
             {"room_code": room_code}
         )
         room = result.fetchone()
         if room:
-            room_name = room.name
+            room_name = room.room_name
     except:
         pass
     
@@ -197,32 +197,31 @@ async def list_rooms(
     """List meeting rooms for current user"""
     try:
         query = """
-            SELECT id, room_code, name, status, created_by, created_at, scheduled_start
-            FROM project_management.pm_meeting_rooms
-            WHERE (created_by = :user_id OR company_id = :company_id)
+            SELECT id, room_code, room_name, status, host_id, created_at, scheduled_start
+            FROM workspace.meet_rooms
+            WHERE host_id = :user_id
         """
         params = {
-            "user_id": current_user["id"],
-            "company_id": current_user.get("company_id")
+            "user_id": current_user["id"]
         }
-        
+
         if status:
             query += " AND status = :status"
             params["status"] = status
-        
+
         query += " ORDER BY created_at DESC LIMIT 50"
-        
+
         result = await db.execute(text(query), params)
         rooms = result.fetchall()
-        
+
         return [
             RoomInfo(
                 id=str(room.id),
                 room_code=room.room_code,
-                name=room.name,
+                name=room.room_name,
                 status=room.status,
                 join_url=livekit_service.get_join_url(room.room_code),
-                created_by=str(room.created_by) if room.created_by else None,
+                created_by=str(room.host_id) if room.host_id else None,
                 created_at=room.created_at,
                 scheduled_time=room.scheduled_start,
                 participant_count=0
@@ -243,14 +242,14 @@ async def get_room(
     try:
         result = await db.execute(
             text("""
-                SELECT id, room_code, name, status, created_by, created_at, scheduled_start, max_participants
-                FROM project_management.pm_meeting_rooms 
+                SELECT id, room_code, room_name, status, host_id, created_at, scheduled_start, max_participants
+                FROM workspace.meet_rooms
                 WHERE room_code = :room_code
             """),
             {"room_code": room_code}
         )
         room = result.fetchone()
-        
+
         if not room:
             # Room not in DB, but might exist in LiveKit
             return {
@@ -260,11 +259,11 @@ async def get_room(
                 "join_url": livekit_service.get_join_url(room_code),
                 "ws_url": livekit_service.get_ws_url()
             }
-        
+
         return {
             "id": str(room.id),
             "room_code": room.room_code,
-            "name": room.name,
+            "name": room.room_name,
             "status": room.status,
             "join_url": livekit_service.get_join_url(room.room_code),
             "ws_url": livekit_service.get_ws_url(),
@@ -292,16 +291,16 @@ async def end_room(
     try:
         await db.execute(
             text("""
-                UPDATE project_management.pm_meeting_rooms 
-                SET status = 'ended', updated_at = NOW()
-                WHERE room_code = :room_code AND created_by = :user_id
+                UPDATE workspace.meet_rooms
+                SET status = 'ended', actual_end = NOW(), updated_at = NOW()
+                WHERE room_code = :room_code AND host_id = :user_id
             """),
             {"room_code": room_code, "user_id": current_user["id"]}
         )
         await db.commit()
     except Exception as e:
         print(f"Error ending room: {e}")
-    
+
     return {"message": "Room ended", "room_code": room_code}
 
 @router.get("/config")

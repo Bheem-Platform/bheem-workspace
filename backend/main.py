@@ -169,6 +169,18 @@ except Exception as e:
     print(f"Could not load recordings router: {e}")
 
 try:
+    from api.chat import router as chat_router
+    app.include_router(chat_router, prefix="/api/v1", tags=["Meet Chat"])
+except Exception as e:
+    print(f"Could not load chat router: {e}")
+
+try:
+    from api.waiting_room import router as waiting_room_router
+    app.include_router(waiting_room_router, prefix="/api/v1", tags=["Waiting Room"])
+except Exception as e:
+    print(f"Could not load waiting_room router: {e}")
+
+try:
     from api.admin import router as admin_router
     app.include_router(admin_router, prefix="/api/v1/admin", tags=["Admin"])
 except Exception as e:

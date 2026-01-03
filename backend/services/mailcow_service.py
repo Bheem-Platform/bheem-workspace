@@ -144,9 +144,9 @@ class MailcowService:
     def get_inbox(self, email: str, password: str, folder: str = "INBOX", limit: int = 50) -> List[Dict[str, Any]]:
         """Get emails from inbox via IMAP (sync for simplicity)"""
         messages = []
-        
+
         try:
-            mail = imaplib.IMAP4_SSL(self.imap_host, self.imap_port)
+            mail = imaplib.IMAP4_SSL(self.imap_host, self.imap_port, timeout=30)
             mail.login(email, password)
             mail.select(folder)
             
@@ -202,7 +202,7 @@ class MailcowService:
     def get_email(self, email_addr: str, password: str, message_id: str, folder: str = "INBOX") -> Optional[Dict[str, Any]]:
         """Get a single email by ID"""
         try:
-            mail = imaplib.IMAP4_SSL(self.imap_host, self.imap_port)
+            mail = imaplib.IMAP4_SSL(self.imap_host, self.imap_port, timeout=30)
             mail.login(email_addr, password)
             mail.select(folder)
             
@@ -283,7 +283,7 @@ class MailcowService:
             else:
                 msg.attach(MIMEText(body, "plain"))
             
-            with smtplib.SMTP_SSL(self.smtp_host, self.smtp_port) as server:
+            with smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=30) as server:
                 server.login(from_email, password)
                 recipients = to + (cc or [])
                 server.sendmail(from_email, recipients, msg.as_string())
@@ -297,7 +297,7 @@ class MailcowService:
         """Get list of mail folders"""
         folders = []
         try:
-            mail = imaplib.IMAP4_SSL(self.imap_host, self.imap_port)
+            mail = imaplib.IMAP4_SSL(self.imap_host, self.imap_port, timeout=30)
             mail.login(email, password)
             
             _, folder_list = mail.list()
@@ -316,7 +316,7 @@ class MailcowService:
     def move_email(self, email: str, password: str, message_id: str, from_folder: str, to_folder: str) -> bool:
         """Move email to another folder"""
         try:
-            mail = imaplib.IMAP4_SSL(self.imap_host, self.imap_port)
+            mail = imaplib.IMAP4_SSL(self.imap_host, self.imap_port, timeout=30)
             mail.login(email, password)
             mail.select(from_folder)
             

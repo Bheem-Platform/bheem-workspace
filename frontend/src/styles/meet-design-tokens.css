@@ -1,0 +1,507 @@
+/* Bheem Meet Design Tokens */
+/* Modern UI inspired by Google Meet & Zoho Meeting */
+
+:root {
+  /* Primary Colors */
+  --meet-primary: #10b981;
+  --meet-primary-hover: #059669;
+  --meet-primary-light: rgba(16, 185, 129, 0.1);
+  --meet-primary-glow: rgba(16, 185, 129, 0.4);
+
+  /* Surface Colors */
+  --meet-background: #111827;
+  --meet-surface: #1f2937;
+  --meet-surface-elevated: #374151;
+  --meet-surface-hover: #4b5563;
+
+  /* Text Colors */
+  --meet-text-primary: #ffffff;
+  --meet-text-secondary: #9ca3af;
+  --meet-text-muted: #6b7280;
+
+  /* Control Colors */
+  --meet-control-bg: rgba(55, 65, 81, 0.8);
+  --meet-control-hover: rgba(75, 85, 99, 0.9);
+  --meet-control-active: rgba(16, 185, 129, 0.2);
+  --meet-control-danger: #ef4444;
+  --meet-control-danger-hover: #dc2626;
+  --meet-control-warning: #f59e0b;
+
+  /* Glassmorphism */
+  --glass-bg: rgba(31, 41, 55, 0.85);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-blur: blur(16px);
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.5);
+  --shadow-glow-green: 0 0 20px rgba(16, 185, 129, 0.3);
+  --shadow-glow-red: 0 0 20px rgba(239, 68, 68, 0.3);
+
+  /* Border Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+  --radius-full: 9999px;
+
+  /* Animation Durations */
+  --duration-fast: 150ms;
+  --duration-normal: 200ms;
+  --duration-slow: 300ms;
+  --duration-slower: 500ms;
+
+  /* Animation Easings */
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+  /* Spacing Scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* Z-Index Scale */
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-modal: 300;
+  --z-popover: 400;
+  --z-tooltip: 500;
+}
+
+/* Animation Keyframes */
+@keyframes meet-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes meet-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes meet-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes meet-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes meet-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+@keyframes meet-speaking-glow {
+  0%, 100% {
+    box-shadow: 0 0 0 2px var(--meet-primary);
+  }
+  50% {
+    box-shadow: 0 0 0 4px var(--meet-primary-glow);
+  }
+}
+
+@keyframes meet-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Utility Classes */
+.meet-animate-fade-in {
+  animation: meet-fade-in var(--duration-normal) var(--ease-out);
+}
+
+.meet-animate-slide-up {
+  animation: meet-slide-up var(--duration-normal) var(--ease-out);
+}
+
+.meet-animate-scale-in {
+  animation: meet-scale-in var(--duration-normal) var(--ease-out);
+}
+
+.meet-animate-pulse {
+  animation: meet-pulse 2s var(--ease-in-out) infinite;
+}
+
+.meet-animate-speaking {
+  animation: meet-speaking-glow 2s var(--ease-in-out) infinite;
+}
+
+.meet-animate-spin {
+  animation: meet-spin 1s linear infinite;
+}
+
+/* Glassmorphism Panel */
+.meet-glass {
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+}
+
+/* Focus Styles */
+.meet-focus-ring:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--meet-background), 0 0 0 4px var(--meet-primary);
+}
+
+/* Scrollbar Styles */
+.meet-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.meet-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.meet-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--meet-surface-hover);
+  border-radius: var(--radius-full);
+}
+
+.meet-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: var(--meet-text-muted);
+}
+
+/* Additional Keyframes */
+@keyframes meet-bounce-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  70% {
+    transform: scale(0.9);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes meet-shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  10%, 30%, 50%, 70%, 90% {
+    transform: translateX(-4px);
+  }
+  20%, 40%, 60%, 80% {
+    transform: translateX(4px);
+  }
+}
+
+@keyframes meet-hand-wave {
+  0%, 100% {
+    transform: rotate(0deg);
+  }
+  25% {
+    transform: rotate(20deg);
+  }
+  50% {
+    transform: rotate(-10deg);
+  }
+  75% {
+    transform: rotate(15deg);
+  }
+}
+
+@keyframes meet-recording-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.1);
+  }
+}
+
+.meet-animate-bounce-in {
+  animation: meet-bounce-in 0.6s var(--ease-bounce);
+}
+
+.meet-animate-shake {
+  animation: meet-shake 0.5s ease-in-out;
+}
+
+.meet-animate-hand-wave {
+  animation: meet-hand-wave 0.8s ease-in-out infinite;
+}
+
+.meet-animate-recording {
+  animation: meet-recording-pulse 1.5s ease-in-out infinite;
+}
+
+/* Responsive Breakpoints */
+/* Mobile: < 640px */
+/* Tablet: 640px - 1024px */
+/* Desktop: > 1024px */
+
+/* Mobile-First Responsive Utilities */
+@media (max-width: 639px) {
+  /* Mobile: Hide side panels by default, use bottom sheet */
+  .meet-hide-mobile {
+    display: none !important;
+  }
+
+  /* Mobile: Full-width panels */
+  .meet-panel-mobile {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100% !important;
+    z-index: var(--z-modal) !important;
+  }
+
+  /* Mobile: Smaller control buttons */
+  .meet-control-mobile {
+    padding: 0.5rem !important;
+  }
+
+  /* Mobile: Simplified video grid */
+  .meet-grid-mobile {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: 1fr !important;
+  }
+
+  /* Mobile: Hide secondary controls */
+  .meet-hide-on-mobile {
+    display: none !important;
+  }
+
+  /* Mobile: Bottom sheet style panels */
+  .meet-bottom-sheet {
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    max-height: 80vh !important;
+    border-radius: var(--radius-2xl) var(--radius-2xl) 0 0 !important;
+    animation: meet-slide-up var(--duration-slow) var(--ease-out);
+  }
+}
+
+@media (min-width: 640px) and (max-width: 1023px) {
+  /* Tablet: Compact layout */
+  .meet-compact-tablet {
+    padding: var(--space-3) !important;
+  }
+
+  /* Tablet: Side panel overlay */
+  .meet-panel-tablet {
+    position: absolute !important;
+    right: 0 !important;
+    width: 320px !important;
+    box-shadow: var(--shadow-lg) !important;
+  }
+}
+
+@media (min-width: 1024px) {
+  /* Desktop: Full layout */
+  .meet-show-desktop {
+    display: flex !important;
+  }
+
+  /* Desktop: Larger video tiles */
+  .meet-grid-desktop {
+    gap: var(--space-4) !important;
+  }
+}
+
+/* Touch Device Optimizations */
+@media (hover: none) and (pointer: coarse) {
+  /* Remove hover states on touch devices */
+  .meet-no-hover:hover {
+    background: inherit !important;
+    transform: none !important;
+  }
+
+  /* Larger touch targets */
+  .meet-touch-target {
+    min-width: 44px !important;
+    min-height: 44px !important;
+  }
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .meet-animate-speaking {
+    animation: none !important;
+    box-shadow: 0 0 0 3px var(--meet-primary) !important;
+  }
+
+  .meet-animate-recording {
+    animation: none !important;
+  }
+}
+
+/* Dark Mode Enhancements (forced colors) */
+@media (forced-colors: active) {
+  .meet-glass {
+    border: 2px solid CanvasText !important;
+  }
+
+  .meet-control-active {
+    forced-color-adjust: none;
+    background: Highlight !important;
+    color: HighlightText !important;
+  }
+}
+
+/* High Contrast Mode */
+@media (prefers-contrast: high) {
+  :root {
+    --meet-primary: #00ff88;
+    --glass-border: rgba(255, 255, 255, 0.3);
+  }
+
+  .meet-glass {
+    border-width: 2px;
+  }
+}
+
+/* Print Styles */
+@media print {
+  .meet-no-print {
+    display: none !important;
+  }
+}
+
+/* Landscape Mobile */
+@media (max-width: 896px) and (orientation: landscape) {
+  .meet-control-bar-landscape {
+    padding: var(--space-2) !important;
+  }
+
+  .meet-video-landscape {
+    height: calc(100vh - 60px) !important;
+  }
+}
+
+/* Safe Area Insets (for notched devices) */
+@supports (padding: max(0px)) {
+  .meet-safe-area-bottom {
+    padding-bottom: max(var(--space-4), env(safe-area-inset-bottom)) !important;
+  }
+
+  .meet-safe-area-top {
+    padding-top: max(var(--space-4), env(safe-area-inset-top)) !important;
+  }
+}
+
+/* Transition Utilities */
+.meet-transition-all {
+  transition-property: all;
+  transition-timing-function: var(--ease-in-out);
+  transition-duration: var(--duration-normal);
+}
+
+.meet-transition-transform {
+  transition-property: transform;
+  transition-timing-function: var(--ease-in-out);
+  transition-duration: var(--duration-fast);
+}
+
+.meet-transition-opacity {
+  transition-property: opacity;
+  transition-timing-function: var(--ease-in-out);
+  transition-duration: var(--duration-fast);
+}
+
+.meet-transition-colors {
+  transition-property: color, background-color, border-color;
+  transition-timing-function: var(--ease-in-out);
+  transition-duration: var(--duration-fast);
+}
+
+/* Hover Lift Effect */
+.meet-hover-lift {
+  transition: transform var(--duration-fast) var(--ease-out),
+              box-shadow var(--duration-fast) var(--ease-out);
+}
+
+.meet-hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Active Press Effect */
+.meet-active-press:active {
+  transform: scale(0.98);
+}
+
+/* Skeleton Loading */
+@keyframes meet-skeleton {
+  0% {
+    background-position: -200px 0;
+  }
+  100% {
+    background-position: calc(200px + 100%) 0;
+  }
+}
+
+.meet-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--meet-surface) 0px,
+    var(--meet-surface-elevated) 40px,
+    var(--meet-surface) 80px
+  );
+  background-size: 200px 100%;
+  animation: meet-skeleton 1.5s ease-in-out infinite;
+}
