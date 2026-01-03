@@ -262,25 +262,68 @@ async def dashboard():
             return HTMLResponse(content=f.read())
     return HTMLResponse(content="<h1>Dashboard</h1>")
 
-# Bheem Meet - Main page with meeting creation
-@app.get("/meet", response_class=HTMLResponse)
-async def meet_page():
-    path = os.path.join(FRONTEND_PATH, "bheem-meet.html")
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>Bheem Meet</h1>")
+# Bheem Meet - Proxy to Next.js server
+@app.api_route("/meet", methods=["GET"])
+async def meet_page(request: Request):
+    """Proxy meet page to Next.js server"""
+    target_url = f"{NEXTJS_URL}/meet"
 
-# Meeting room - for joining meetings via link
-@app.get("/meet/room/{room_name}", response_class=HTMLResponse)
-async def meet_room(room_name: str):
-    path = os.path.join(FRONTEND_PATH, "meeting-room.html")
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            content = f.read()
-            content = content.replace("{{ROOM_NAME}}", room_name)
-            return HTMLResponse(content=content)
-    return HTMLResponse(content=f"<h1>Meeting Room: {room_name}</h1>")
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Meet service unavailable</h1><p>{str(e)}</p>", status_code=503)
+
+# Meeting room - Proxy to Next.js server
+@app.api_route("/meet/room/{room_name}", methods=["GET"])
+async def meet_room(request: Request, room_name: str):
+    """Proxy meet room to Next.js server"""
+    target_url = f"{NEXTJS_URL}/meet/room/{room_name}"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Meet room unavailable</h1><p>{str(e)}</p>", status_code=503)
+
+# Meet recordings - Proxy to Next.js server
+@app.api_route("/meet/recordings", methods=["GET"])
+async def meet_recordings(request: Request):
+    """Proxy meet recordings to Next.js server"""
+    target_url = f"{NEXTJS_URL}/meet/recordings"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Recordings unavailable</h1><p>{str(e)}</p>", status_code=503)
 
 # Bheem Mail
 @app.get("/mail", response_class=HTMLResponse)

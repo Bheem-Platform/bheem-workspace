@@ -328,8 +328,8 @@ export default function MeetingRoom() {
     );
   }
 
-  // TEMPORARILY DISABLED: LiveKit is causing crashes due to server configuration issues
-  const LIVEKIT_ENABLED = false;
+  // LiveKit enabled for real-time video conferencing
+  const LIVEKIT_ENABLED = true;
   const hasDevices = hasCamera || hasMic;
   const useLiveKit = LIVEKIT_ENABLED && hasDevices && roomToken && wsUrl && !liveKitFailed;
 
