@@ -55,6 +55,7 @@ export default function MeetingRoom() {
     toggleParticipantsPanel,
     toggleMic,
     toggleCamera,
+    toggleScreenShare,
     addChatMessage,
     updateParticipants,
     error,
@@ -75,6 +76,7 @@ export default function MeetingRoom() {
   const [showEndMeetingModal, setShowEndMeetingModal] = useState(false);
   const [showScreenSharePicker, setShowScreenSharePicker] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [messageToSend, setMessageToSend] = useState<{ id: string; content: string } | null>(null);
 
   // Mock participants for demo (in real app, this comes from LiveKit)
   const [participants, setParticipants] = useState([
@@ -202,8 +204,9 @@ export default function MeetingRoom() {
   };
 
   const handleSendMessage = (content: string) => {
+    const messageId = Date.now().toString();
     const message: ChatMessage = {
-      id: Date.now().toString(),
+      id: messageId,
       senderId: 'local',
       senderName: participantName,
       content,
@@ -212,6 +215,8 @@ export default function MeetingRoom() {
       isLocal: true,
     };
     addChatMessage(message);
+    // Send via LiveKit data channel
+    setMessageToSend({ id: messageId, content });
   };
 
   const handleToggleFullscreen = useCallback(() => {
@@ -225,14 +230,9 @@ export default function MeetingRoom() {
   }, []);
 
   const handleToggleScreenShare = useCallback(() => {
-    if (isScreenSharing) {
-      // Stop sharing
-      console.log('Stop screen share');
-    } else {
-      // Open screen share picker
-      setShowScreenSharePicker(true);
-    }
-  }, [isScreenSharing]);
+    // Toggle screen share via the store - LiveKitWrapper will handle the actual sharing
+    toggleScreenShare();
+  }, [toggleScreenShare]);
 
   const handleScreenShare = useCallback((sourceId: string, withAudio: boolean) => {
     // In a real app, this would start screen sharing via LiveKit
@@ -265,10 +265,38 @@ export default function MeetingRoom() {
     }
   }, [participants.length]);
 
-  const handleLiveKitError = () => {
+  const handleLiveKitError = useCallback(() => {
     console.log('LiveKit failed, falling back to simple UI');
     setLiveKitFailed(true);
-  };
+  }, []);
+
+  // Memoize LiveKit callbacks to prevent unnecessary re-renders/reconnections
+  const handleParticipantsChange = useCallback((lkParticipants: any[]) => {
+    // Update both local state and store
+    const mapped = lkParticipants.map(p => ({
+      id: p.id,
+      name: p.name,
+      isLocal: p.isLocal ?? false,
+      isMuted: p.isMuted ?? false,
+      isVideoOff: p.isVideoOff ?? false,
+      isHandRaised: p.isHandRaised ?? false,
+    }));
+    setParticipants(mapped);
+    updateParticipants(lkParticipants);
+  }, [updateParticipants]);
+
+  const handleChatMessage = useCallback((msg: { senderId: string; senderName: string; content: string }) => {
+    const message: ChatMessage = {
+      id: Date.now().toString(),
+      senderId: msg.senderId,
+      senderName: msg.senderName,
+      content: msg.content,
+      timestamp: new Date().toISOString(),
+      type: 'text',
+      isLocal: false,
+    };
+    addChatMessage(message);
+  }, [addChatMessage]);
 
   // Show pre-join screen
   if (isPreJoin) {
@@ -380,37 +408,20 @@ export default function MeetingRoom() {
               </div>
             ) : useLiveKit ? (
               <LiveKitComponents
+                key="livekit-room"
                 token={roomToken}
                 serverUrl={wsUrl}
                 hasCamera={hasCamera}
                 hasMic={hasMic}
+                isHandRaised={isHandRaised}
+                isScreenSharing={isScreenSharing}
+                isMicEnabled={isMicEnabled}
+                isCameraEnabled={isCameraEnabled}
+                messageToSend={messageToSend}
                 onLeave={handleLeave}
                 onError={handleLiveKitError}
-                onParticipantsChange={(lkParticipants) => {
-                  // Update both local state and store
-                  const mapped = lkParticipants.map(p => ({
-                    id: p.id,
-                    name: p.name,
-                    isLocal: p.isLocal ?? false,
-                    isMuted: p.isMuted ?? false,
-                    isVideoOff: p.isVideoOff ?? false,
-                    isHandRaised: p.isHandRaised ?? false,
-                  }));
-                  setParticipants(mapped);
-                  updateParticipants(lkParticipants);
-                }}
-                onChatMessage={(msg) => {
-                  const message: ChatMessage = {
-                    id: Date.now().toString(),
-                    senderId: msg.senderId,
-                    senderName: msg.senderName,
-                    content: msg.content,
-                    timestamp: new Date().toISOString(),
-                    type: 'text',
-                    isLocal: false,
-                  };
-                  addChatMessage(message);
-                }}
+                onParticipantsChange={handleParticipantsChange}
+                onChatMessage={handleChatMessage}
               />
             ) : (
               <VideoGrid
