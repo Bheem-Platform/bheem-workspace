@@ -9,11 +9,14 @@ import {
   useTracks,
   TrackRefContext,
   useRoomContext,
-  ControlBar,
+  useParticipants,
+  useDataChannel,
+  ControlBar as LKControlBar,
 } from '@livekit/components-react';
 import '@livekit/components-styles';
-import { Track, RoomEvent } from 'livekit-client';
+import { Track, RoomEvent, DataPacket_Kind, RemoteParticipant, LocalParticipant } from 'livekit-client';
 import { User, AlertTriangle } from 'lucide-react';
+import type { Participant } from '@/types/meet';
 
 interface LiveKitWrapperProps {
   token: string;
@@ -22,41 +25,83 @@ interface LiveKitWrapperProps {
   hasMic: boolean;
   onLeave: () => void;
   onError?: () => void;
+  onParticipantsChange?: (participants: Participant[]) => void;
+  onChatMessage?: (message: { senderId: string; senderName: string; content: string }) => void;
 }
 
-// Simple stage that shows participants
-function SimpleStage() {
+// Stage component that shows participants and syncs data
+function MeetingStage({
+  onParticipantsChange,
+  onChatMessage,
+}: {
+  onParticipantsChange?: (participants: Participant[]) => void;
+  onChatMessage?: (message: { senderId: string; senderName: string; content: string }) => void;
+}) {
   const room = useRoomContext();
-  const [participants, setParticipants] = useState<string[]>([]);
+  const lkParticipants = useParticipants();
 
-  useEffect(() => {  
-    if (!room) return;
+  // Convert LiveKit participants to our Participant type and notify parent
+  useEffect(() => {
+    if (!room || !onParticipantsChange) return;
 
-    const updateParticipants = () => {
-      const names = Array.from(room.remoteParticipants.values()).map(
-        (p) => p.identity || p.name || 'Unknown'
-      );
-      // Add local participant
-      if (room.localParticipant) {
-        names.unshift(room.localParticipant.identity || 'You');
+    const convertedParticipants: Participant[] = lkParticipants.map((p) => {
+      const isLocal = p instanceof LocalParticipant;
+      const isMuted = p.isMicrophoneEnabled === false;
+      const isVideoOff = p.isCameraEnabled === false;
+      let metadata: any = {};
+      try {
+        metadata = p.metadata ? JSON.parse(p.metadata) : {};
+      } catch (e) {
+        metadata = {};
       }
-      setParticipants(names);
+
+      return {
+        id: p.identity,
+        name: p.name || p.identity || 'Guest',
+        isLocal,
+        isHost: metadata.isHost || false,
+        isModerator: metadata.isModerator || false,
+        isMuted,
+        isVideoOff,
+        isSpeaking: p.isSpeaking || false,
+        isHandRaised: metadata.handRaised || false,
+        isScreenSharing: p.isScreenShareEnabled || false,
+        joinedAt: new Date().toISOString(),
+        connectionQuality: 'good',
+      };
+    });
+
+    onParticipantsChange(convertedParticipants);
+  }, [lkParticipants, room, onParticipantsChange]);
+
+  // Listen for data messages (chat)
+  useEffect(() => {
+    if (!room || !onChatMessage) return;
+
+    const handleDataReceived = (payload: Uint8Array, participant?: RemoteParticipant) => {
+      try {
+        const decoder = new TextDecoder();
+        const data = JSON.parse(decoder.decode(payload));
+
+        if (data.type === 'chat') {
+          onChatMessage({
+            senderId: participant?.identity || 'unknown',
+            senderName: participant?.name || 'Guest',
+            content: data.message,
+          });
+        }
+      } catch (e) {
+        console.error('Failed to parse data message:', e);
+      }
     };
 
-    updateParticipants();
-
-    room.on(RoomEvent.ParticipantConnected, updateParticipants);
-    room.on(RoomEvent.ParticipantDisconnected, updateParticipants);
-    room.on(RoomEvent.Connected, updateParticipants);
-
+    room.on(RoomEvent.DataReceived, handleDataReceived);
     return () => {
-      room.off(RoomEvent.ParticipantConnected, updateParticipants);
-      room.off(RoomEvent.ParticipantDisconnected, updateParticipants);
-      room.off(RoomEvent.Connected, updateParticipants);
+      room.off(RoomEvent.DataReceived, handleDataReceived);
     };
-  }, [room]);
+  }, [room, onChatMessage]);
 
-  // Try to get video tracks
+  // Get video tracks
   const tracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: true },
@@ -67,7 +112,7 @@ function SimpleStage() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className="flex-1 p-4">
+      <div className="flex-1 p-2 sm:p-4">
         {tracks && tracks.length > 0 ? (
           <GridLayout tracks={tracks} style={{ height: '100%' }}>
             <ParticipantTile />
@@ -76,27 +121,29 @@ function SimpleStage() {
           <div className="h-full flex items-center justify-center">
             <div className="text-center">
               <div className="flex flex-wrap justify-center gap-4 mb-6">
-                {participants.map((name, i) => (
-                  <div key={i} className="flex flex-col items-center">
-                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center mb-2">
+                {lkParticipants.map((p) => (
+                  <div key={p.identity} className="flex flex-col items-center">
+                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center mb-2 shadow-lg">
                       <span className="text-2xl text-white font-bold">
-                        {name.charAt(0).toUpperCase()}
+                        {(p.name || p.identity || 'G').charAt(0).toUpperCase()}
                       </span>
                     </div>
-                    <span className="text-gray-400 text-sm">{name}</span>
+                    <span className="text-gray-300 text-sm font-medium">
+                      {p.name || p.identity}
+                      {p instanceof LocalParticipant && ' (You)'}
+                    </span>
                   </div>
                 ))}
               </div>
               <p className="text-gray-500 text-sm">
-                {participants.length === 1
+                {lkParticipants.length === 1
                   ? 'Waiting for others to join...'
-                  : `${participants.length} participants in meeting`}
+                  : `${lkParticipants.length} participants in meeting`}
               </p>
             </div>
           </div>
         )}
       </div>
-      <ControlBar variation="minimal" />
     </div>
   );
 }
@@ -134,6 +181,8 @@ export default function LiveKitWrapper({
   hasMic,
   onLeave,
   onError,
+  onParticipantsChange,
+  onChatMessage,
 }: LiveKitWrapperProps) {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -196,7 +245,10 @@ export default function LiveKitWrapper({
         },
       }}
     >
-      <SimpleStage />
+      <MeetingStage
+        onParticipantsChange={onParticipantsChange}
+        onChatMessage={onChatMessage}
+      />
       <RoomAudioRenderer />
     </LiveKitRoom>
   );

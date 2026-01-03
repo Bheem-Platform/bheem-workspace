@@ -41,6 +41,7 @@ export default function MeetingRoom() {
     wsUrl,
     roomCode,
     roomName: meetingName,
+    participants: storeParticipants,
     isChatPanelOpen,
     isParticipantsPanelOpen,
     isMicEnabled,
@@ -55,6 +56,7 @@ export default function MeetingRoom() {
     toggleMic,
     toggleCamera,
     addChatMessage,
+    updateParticipants,
     error,
     loading,
     chatMessages,
@@ -384,6 +386,31 @@ export default function MeetingRoom() {
                 hasMic={hasMic}
                 onLeave={handleLeave}
                 onError={handleLiveKitError}
+                onParticipantsChange={(lkParticipants) => {
+                  // Update both local state and store
+                  const mapped = lkParticipants.map(p => ({
+                    id: p.id,
+                    name: p.name,
+                    isLocal: p.isLocal ?? false,
+                    isMuted: p.isMuted ?? false,
+                    isVideoOff: p.isVideoOff ?? false,
+                    isHandRaised: p.isHandRaised ?? false,
+                  }));
+                  setParticipants(mapped);
+                  updateParticipants(lkParticipants);
+                }}
+                onChatMessage={(msg) => {
+                  const message: ChatMessage = {
+                    id: Date.now().toString(),
+                    senderId: msg.senderId,
+                    senderName: msg.senderName,
+                    content: msg.content,
+                    timestamp: new Date().toISOString(),
+                    type: 'text',
+                    isLocal: false,
+                  };
+                  addChatMessage(message);
+                }}
               />
             ) : (
               <VideoGrid
