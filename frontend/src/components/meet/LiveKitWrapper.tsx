@@ -141,11 +141,15 @@ export default function LiveKitWrapper({
   const handleError = useCallback((error: Error) => {
     console.error('LiveKit error:', error);
 
-    // Check for common errors and call onError to fall back
+    // Device not found errors are OK - user can still join and see others
     if (error.name === 'NotFoundError' || error.message.includes('device not found')) {
-      setConnectionError('Camera or microphone not found. Please check your device settings.');
+      console.log('Device not found, but continuing with room connection');
+      // Don't set error - just continue without camera/mic
+      return;
     } else if (error.message.includes('Permission denied')) {
-      setConnectionError('Camera/microphone permission denied. Please allow access in your browser.');
+      console.log('Permission denied, but continuing with room connection');
+      // Don't set error - just continue without camera/mic
+      return;
     } else if (error.message.includes('size') || error.message.includes('values') || error.message.includes('undefined')) {
       // Internal LiveKit error - fall back to simple UI
       console.log('LiveKit internal error, triggering fallback');
@@ -155,7 +159,7 @@ export default function LiveKitWrapper({
       setConnectionError(error.message || 'Failed to connect to meeting');
     }
 
-    // For any error, also notify parent after a delay
+    // For connection errors only, notify parent after a delay
     setTimeout(() => {
       if (!isConnected) {
         onError?.();

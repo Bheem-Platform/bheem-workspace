@@ -329,9 +329,10 @@ export default function MeetingRoom() {
   }
 
   // LiveKit enabled for real-time video conferencing
+  // Connect to LiveKit even without camera/mic - users can still see others
   const LIVEKIT_ENABLED = true;
   const hasDevices = hasCamera || hasMic;
-  const useLiveKit = LIVEKIT_ENABLED && hasDevices && roomToken && wsUrl && !liveKitFailed;
+  const useLiveKit = LIVEKIT_ENABLED && roomToken && wsUrl && !liveKitFailed;
 
   // Main meeting room UI
   return (
