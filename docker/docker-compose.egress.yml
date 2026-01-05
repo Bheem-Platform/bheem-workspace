@@ -1,0 +1,44 @@
+version: '3.8'
+
+# LiveKit Egress for Bheem Meet Recording
+# Run with: docker-compose -f docker-compose.egress.yml up -d
+
+services:
+  # Redis (required for Egress)
+  redis:
+    image: redis:7-alpine
+    container_name: bheem-egress-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - egress-redis:/data
+    command: redis-server --appendonly yes
+    networks:
+      - bheem-egress
+
+  # LiveKit Egress Service
+  egress:
+    image: livekit/egress:latest
+    container_name: bheem-egress
+    restart: unless-stopped
+    environment:
+      - EGRESS_CONFIG_FILE=/etc/egress.yaml
+    volumes:
+      - ./egress-config.yaml:/etc/egress.yaml:ro
+      - /tmp/bheem-recordings:/tmp/recordings
+    cap_add:
+      - SYS_ADMIN
+    # Required for Chrome headless
+    shm_size: 2gb
+    networks:
+      - bheem-egress
+    depends_on:
+      - redis
+
+networks:
+  bheem-egress:
+    driver: bridge
+
+volumes:
+  egress-redis:

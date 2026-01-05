@@ -1,0 +1,35 @@
+# LiveKit Egress Configuration for Bheem Meet Recording
+# This service captures video from LiveKit rooms and saves to local storage
+
+log_level: info
+
+# LiveKit Server Credentials (must match your LiveKit server)
+api_key: BheemMeetAPI
+api_secret: BheemMeet2024SecretKey
+
+# WebSocket URL to your LiveKit server
+# Use the internal/public URL that Egress can reach
+ws_url: wss://meet.bheem.cloud
+
+# Redis for job queue (required)
+redis:
+  address: redis:6379
+
+# File output (saves recordings to local filesystem)
+# The backend will then upload to Nextcloud
+file_output:
+  local: true
+  # Recordings will be saved to /tmp/recordings/{recording_id}.mp4
+  # This is mounted from the host at /tmp/bheem-recordings
+
+# Health check port
+health_port: 9090
+
+# CPU limit (optional - prevents egress from consuming all CPU)
+# cpu_cost:
+#   room_composite_cpu_cost: 3.0
+
+# Logging
+logging:
+  json: false
+  level: info
