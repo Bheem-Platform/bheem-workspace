@@ -12,11 +12,42 @@ import {
   useParticipants,
   useDataChannel,
   ControlBar as LKControlBar,
+  useTrackRefContext,
 } from '@livekit/components-react';
 import '@livekit/components-styles';
 import { Track, RoomEvent, DataPacket_Kind, RemoteParticipant, LocalParticipant, ParticipantEvent } from 'livekit-client';
-import { User, AlertTriangle } from 'lucide-react';
+import { User, AlertTriangle, Hand } from 'lucide-react';
 import type { Participant } from '@/types/meet';
+
+// Custom ParticipantTile with raised hand indicator
+function CustomParticipantTile() {
+  const trackRef = useTrackRefContext();
+  const participant = trackRef?.participant;
+
+  // Parse metadata to check if hand is raised
+  let isHandRaised = false;
+  try {
+    if (participant?.metadata) {
+      const metadata = JSON.parse(participant.metadata);
+      isHandRaised = metadata.handRaised || false;
+    }
+  } catch (e) {
+    // Ignore parse errors
+  }
+
+  return (
+    <div className="relative w-full h-full">
+      <ParticipantTile />
+      {isHandRaised && (
+        <div className="absolute top-2 right-2 z-10 animate-bounce">
+          <div className="bg-amber-500 rounded-full p-2 shadow-lg">
+            <Hand size={24} className="text-white" />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface LiveKitWrapperProps {
   token: string;
@@ -322,7 +353,7 @@ function MeetingStage({
       <div className="flex-1 p-2 sm:p-4">
         {tracks && tracks.length > 0 ? (
           <GridLayout tracks={tracks} style={{ height: '100%' }}>
-            <ParticipantTile />
+            <CustomParticipantTile />
           </GridLayout>
         ) : (
           <div className="h-full flex items-center justify-center">
