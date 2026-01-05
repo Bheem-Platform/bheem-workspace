@@ -22,6 +22,7 @@ interface PreJoinScreenProps {
   roomName?: string;
   onJoin: (participantName: string) => void;
   userName?: string;
+  isAuthenticated?: boolean;
 }
 
 export default function PreJoinScreen({
@@ -29,11 +30,22 @@ export default function PreJoinScreen({
   roomName,
   onJoin,
   userName,
+  isAuthenticated = false,
 }: PreJoinScreenProps) {
   const { isMicEnabled, isCameraEnabled, toggleMic, toggleCamera, loading } = useMeetStore();
 
   const [name, setName] = useState(userName || '');
   const [videoStream, setVideoStream] = useState<MediaStream | null>(null);
+
+  // Debug logging
+  console.log('PreJoinScreen props:', { userName, isAuthenticated, name });
+
+  // Sync name with userName prop when it changes (e.g., after auth loads)
+  useEffect(() => {
+    if (userName && !name) {
+      setName(userName);
+    }
+  }, [userName]);
   const [hasCamera, setHasCamera] = useState(true);
   const [hasMic, setHasMic] = useState(true);
   const [deviceError, setDeviceError] = useState<string | null>(null);
@@ -185,8 +197,10 @@ export default function PreJoinScreen({
   }, [isMicEnabled, hasMic, selectedMic]);
 
   const handleJoin = () => {
-    if (!name.trim()) return;
-    onJoin(name.trim());
+    // For authenticated users, use their username; for guests, require a name
+    const joinName = isAuthenticated ? (userName || name) : name.trim();
+    if (!joinName) return;
+    onJoin(joinName);
   };
 
   return (
@@ -422,14 +436,30 @@ export default function PreJoinScreen({
                 </label>
                 <div className="flex items-center gap-3">
                   <MeetAvatar name={name || 'You'} size="lg" />
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Enter your name"
-                    className="flex-1 px-4 py-3.5 bg-gray-700/50 border border-gray-600 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
-                    onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
-                  />
+                  {isAuthenticated ? (
+                    // Authenticated users - show their username as read-only
+                    <div className="flex-1 flex items-center gap-2">
+                      <div className="flex-1 px-4 py-3.5 bg-gray-700/30 border border-gray-600 rounded-xl text-white">
+                        {name || userName}
+                      </div>
+                      <div className="flex items-center gap-1 text-xs text-emerald-400">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                        </svg>
+                        <span>Signed in</span>
+                      </div>
+                    </div>
+                  ) : (
+                    // Guests - allow name input
+                    <input
+                      type="text"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      placeholder="Enter your name"
+                      className="flex-1 px-4 py-3.5 bg-gray-700/50 border border-gray-600 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                      onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
+                    />
+                  )}
                 </div>
               </div>
 
@@ -438,7 +468,7 @@ export default function PreJoinScreen({
                 variant="primary"
                 size="lg"
                 onClick={handleJoin}
-                disabled={!name.trim() || loading.joining}
+                disabled={(isAuthenticated ? !userName : !name.trim()) || loading.joining}
                 isLoading={loading.joining}
                 className="w-full py-4 text-base"
               >

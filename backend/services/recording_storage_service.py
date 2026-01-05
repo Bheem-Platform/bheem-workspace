@@ -4,8 +4,11 @@ Saves recordings to Bheem Workspace (Nextcloud) and manages storage
 """
 import os
 import aiofiles
+import hmac
+import hashlib
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timedelta
+from urllib.parse import quote
 from services.nextcloud_service import nextcloud_service
 from core.config import settings
 
@@ -224,6 +227,83 @@ class RecordingStorageService:
         except Exception:
             return False
 
+    def _generate_s3_signed_url(
+        self,
+        bucket: str,
+        key: str,
+        expires_in: int = 3600
+    ) -> str:
+        """
+        Generate a pre-signed S3 URL for accessing private objects.
+        Uses AWS Signature Version 4.
+        """
+        s3_endpoint = getattr(settings, 'S3_ENDPOINT', 'https://hel1.your-objectstorage.com')
+        access_key = getattr(settings, 'S3_ACCESS_KEY', '')
+        secret_key = getattr(settings, 'S3_SECRET_KEY', '')
+        region = getattr(settings, 'S3_REGION', 'hel1')
+
+        # Parse endpoint
+        host = s3_endpoint.replace('https://', '').replace('http://', '').rstrip('/')
+
+        # Current time
+        t = datetime.utcnow()
+        amz_date = t.strftime('%Y%m%dT%H%M%SZ')
+        date_stamp = t.strftime('%Y%m%d')
+
+        # Canonical request components
+        method = 'GET'
+        canonical_uri = f'/{bucket}/{key}'
+        signed_headers = 'host'
+
+        # Query string parameters for signed URL
+        credential_scope = f'{date_stamp}/{region}/s3/aws4_request'
+        canonical_querystring = (
+            f'X-Amz-Algorithm=AWS4-HMAC-SHA256'
+            f'&X-Amz-Credential={quote(access_key + "/" + credential_scope, safe="")}'
+            f'&X-Amz-Date={amz_date}'
+            f'&X-Amz-Expires={expires_in}'
+            f'&X-Amz-SignedHeaders={signed_headers}'
+        )
+
+        # Canonical headers
+        canonical_headers = f'host:{host}\n'
+
+        # Payload hash for unsigned payload
+        payload_hash = 'UNSIGNED-PAYLOAD'
+
+        # Create canonical request
+        canonical_request = (
+            f'{method}\n'
+            f'{canonical_uri}\n'
+            f'{canonical_querystring}\n'
+            f'{canonical_headers}\n'
+            f'{signed_headers}\n'
+            f'{payload_hash}'
+        )
+
+        # Create string to sign
+        string_to_sign = (
+            f'AWS4-HMAC-SHA256\n'
+            f'{amz_date}\n'
+            f'{credential_scope}\n'
+            f'{hashlib.sha256(canonical_request.encode()).hexdigest()}'
+        )
+
+        # Calculate signature
+        def sign(key, msg):
+            return hmac.new(key, msg.encode('utf-8'), hashlib.sha256).digest()
+
+        k_date = sign(('AWS4' + secret_key).encode('utf-8'), date_stamp)
+        k_region = sign(k_date, region)
+        k_service = sign(k_region, 's3')
+        k_signing = sign(k_service, 'aws4_request')
+        signature = hmac.new(k_signing, string_to_sign.encode('utf-8'), hashlib.sha256).hexdigest()
+
+        # Construct signed URL
+        signed_url = f'{s3_endpoint}/{bucket}/{key}?{canonical_querystring}&X-Amz-Signature={signature}'
+
+        return signed_url
+
     async def get_recording_url(
         self,
         storage_type: str,
@@ -234,7 +314,7 @@ class RecordingStorageService:
         Get download/stream URL for a recording.
 
         Args:
-            storage_type: 'nextcloud' or 'local'
+            storage_type: 's3', 'nextcloud', or 'local'
             storage_path: Full path to the file
             username: Nextcloud username (if nextcloud storage)
 
@@ -242,7 +322,15 @@ class RecordingStorageService:
             Download URL or None
         """
         try:
-            if storage_type == "nextcloud":
+            if storage_type == "s3":
+                # Generate pre-signed S3 URL (valid for 1 hour)
+                s3_bucket = getattr(settings, 'S3_BUCKET', 'bheem')
+                return self._generate_s3_signed_url(
+                    bucket=s3_bucket,
+                    key=storage_path,
+                    expires_in=3600  # 1 hour
+                )
+            elif storage_type == "nextcloud":
                 return await nextcloud_service.get_download_url(
                     username=username or settings.NEXTCLOUD_ADMIN_USER,
                     password=settings.NEXTCLOUD_ADMIN_PASSWORD,
@@ -255,7 +343,8 @@ class RecordingStorageService:
             else:
                 return None
 
-        except Exception:
+        except Exception as e:
+            print(f"Error generating recording URL: {e}")
             return None
 
     async def delete_recording(

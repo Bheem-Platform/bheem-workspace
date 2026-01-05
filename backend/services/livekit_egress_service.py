@@ -1,6 +1,7 @@
 """
 Bheem Meet - LiveKit Egress Service
 Handles room recording capture using LiveKit's Egress API
+Now uses S3 for storage instead of local files
 """
 import httpx
 import jwt
@@ -19,6 +20,8 @@ class LiveKitEgressService:
     - Room composite (all participants in a layout)
     - Track composite (specific tracks)
     - Individual tracks
+
+    Storage: S3 bucket (bheemcloud)
     """
 
     def __init__(self):
@@ -27,7 +30,14 @@ class LiveKitEgressService:
         self.livekit_url = settings.LIVEKIT_URL.replace("wss://", "https://").replace("ws://", "http://")
         self.temp_dir = "/tmp/recordings"
 
-        # Ensure temp directory exists
+        # S3 configuration
+        self.s3_bucket = getattr(settings, 'S3_BUCKET', 'bheem')
+        self.s3_region = getattr(settings, 'S3_REGION', 'hel1')
+        self.s3_endpoint = getattr(settings, 'S3_ENDPOINT', 'https://hel1.your-objectstorage.com')
+        self.s3_access_key = getattr(settings, 'S3_ACCESS_KEY', 'E8OBSHD5J85G0DQXAACX')
+        self.s3_secret_key = getattr(settings, 'S3_SECRET_KEY', 'O171vuUctulQfPRoz1W4ulfHOan3bXKuztnSgJDV')
+
+        # Ensure temp directory exists (for fallback)
         os.makedirs(self.temp_dir, exist_ok=True)
 
     def _create_egress_token(self) -> str:
@@ -54,6 +64,7 @@ class LiveKitEgressService:
     ) -> Dict[str, Any]:
         """
         Start recording a room with composite layout (all participants).
+        Recordings are saved directly to S3 bucket.
 
         Args:
             room_name: The LiveKit room name (room code)
@@ -65,12 +76,9 @@ class LiveKitEgressService:
                 - resolution: 720p, 1080p, 1440p
 
         Returns:
-            Dict with egress_id, status, or error
+            Dict with egress_id, status, s3_path, or error
         """
         options = options or {}
-
-        # Configure output file
-        output_path = f"{self.temp_dir}/{recording_id}.mp4"
 
         # Build egress request
         layout = options.get("layout", "grid")
@@ -84,17 +92,27 @@ class LiveKitEgressService:
         }
         res = resolutions.get(resolution, resolutions["1080p"])
 
+        # S3 output path: recordings/{room_code}/{recording_id}.mp4
+        s3_path = f"recordings/{room_name}/{recording_id}.mp4"
+
+        # LiveKit Egress API - use 'file' with nested 's3' for S3 output
         request_body = {
             "room_name": room_name,
             "layout": layout,
             "audio_only": options.get("audio_only", False),
             "video_only": options.get("video_only", False),
-            "custom_base_url": "",
-            "file_outputs": [{
-                "file_type": "mp4",
-                "filepath": output_path,
-                "disable_manifest": True
-            }],
+            "file": {
+                "filepath": s3_path,
+                "disable_manifest": True,
+                "s3": {
+                    "access_key": self.s3_access_key,
+                    "secret": self.s3_secret_key,
+                    "region": self.s3_region,
+                    "endpoint": self.s3_endpoint,
+                    "bucket": self.s3_bucket,
+                    "force_path_style": True
+                }
+            },
             "options": {
                 "width": res["width"],
                 "height": res["height"],
@@ -126,7 +144,9 @@ class LiveKitEgressService:
                         "egress_id": data.get("egress_id"),
                         "status": data.get("status", "active"),
                         "room_name": room_name,
-                        "output_path": output_path
+                        "s3_path": s3_path,
+                        "s3_bucket": self.s3_bucket,
+                        "storage_type": "s3"
                     }
                 else:
                     return {
@@ -275,23 +295,33 @@ class LiveKitEgressService:
             return []
 
     def get_recording_file_path(self, recording_id: str) -> str:
-        """Get the local file path for a recording"""
+        """Get the local file path for a recording (legacy, for fallback)"""
         return f"{self.temp_dir}/{recording_id}.mp4"
 
+    def get_s3_path(self, room_name: str, recording_id: str) -> str:
+        """Get the S3 path for a recording"""
+        return f"recordings/{room_name}/{recording_id}.mp4"
+
+    def get_s3_url(self, s3_path: str) -> str:
+        """Get the full S3 URL for a recording"""
+        # Format: https://endpoint/bucket/path
+        endpoint = self.s3_endpoint.rstrip('/')
+        return f"{endpoint}/{self.s3_bucket}/{s3_path}"
+
     def recording_file_exists(self, recording_id: str) -> bool:
-        """Check if recording file exists locally"""
+        """Check if recording file exists locally (legacy)"""
         path = self.get_recording_file_path(recording_id)
         return os.path.exists(path)
 
     def get_recording_file_size(self, recording_id: str) -> Optional[int]:
-        """Get file size of recording in bytes"""
+        """Get file size of recording in bytes (local files only)"""
         path = self.get_recording_file_path(recording_id)
         if os.path.exists(path):
             return os.path.getsize(path)
         return None
 
     def delete_local_recording(self, recording_id: str) -> bool:
-        """Delete local recording file after upload"""
+        """Delete local recording file after upload (legacy cleanup)"""
         path = self.get_recording_file_path(recording_id)
         if os.path.exists(path):
             os.remove(path)

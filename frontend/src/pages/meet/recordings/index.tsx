@@ -44,6 +44,7 @@ export default function RecordingsPage() {
   const [showTranscript, setShowTranscript] = useState(false);
   const [processingTranscript, setProcessingTranscript] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -52,11 +53,17 @@ export default function RecordingsPage() {
 
   const loadRecordings = async () => {
     setLoading(true);
+    setError(null);
     try {
       const data = await meetApi.listRecordings();
       setRecordings(data);
-    } catch (error) {
-      console.error('Failed to load recordings:', error);
+    } catch (err: any) {
+      console.error('Failed to load recordings:', err);
+      if (err?.response?.status === 401 || err?.response?.status === 403) {
+        setError('Please log in to view recordings');
+      } else {
+        setError('Failed to load recordings. Please try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -97,10 +104,26 @@ export default function RecordingsPage() {
 
     try {
       const result = await meetApi.createShareLink(selectedRecording.id);
-      setShareUrl(result.shareUrl);
-      navigator.clipboard.writeText(result.shareUrl);
+      const url = result.shareUrl;
+      setShareUrl(url);
+
+      // Try to copy to clipboard
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(url);
+      } else {
+        // Fallback for older browsers or non-HTTPS
+        const textArea = document.createElement('textarea');
+        textArea.value = url;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-9999px';
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      }
     } catch (error) {
       console.error('Failed to create share link:', error);
+      alert('Failed to create share link. Please try again.');
     }
   };
 
@@ -168,6 +191,19 @@ export default function RecordingsPage() {
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
+                  </div>
+                ) : error ? (
+                  <div className="p-8 text-center">
+                    <svg className="w-12 h-12 mx-auto mb-3 text-red-400 opacity-75" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <p className="text-red-400">{error}</p>
+                    <button
+                      onClick={loadRecordings}
+                      className="mt-4 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm"
+                    >
+                      Retry
+                    </button>
                   </div>
                 ) : recordings.length === 0 ? (
                   <div className="p-8 text-center text-gray-400">
@@ -306,11 +342,30 @@ export default function RecordingsPage() {
                     </div>
 
                     {shareUrl && (
-                      <div className="mt-3 p-2 bg-green-600/20 text-green-400 rounded-lg text-sm flex items-center gap-2">
-                        <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                        <span className="truncate">Link copied to clipboard</span>
+                      <div className="mt-3 p-3 bg-green-600/20 rounded-lg">
+                        <div className="flex items-center gap-2 text-green-400 text-sm mb-2">
+                          <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                          <span>Link copied to clipboard!</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            readOnly
+                            value={shareUrl}
+                            className="flex-1 px-2 py-1 bg-gray-700 text-gray-300 text-xs rounded border border-gray-600"
+                            onClick={(e) => (e.target as HTMLInputElement).select()}
+                          />
+                          <button
+                            onClick={() => {
+                              navigator.clipboard?.writeText(shareUrl);
+                            }}
+                            className="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-gray-300 text-xs rounded"
+                          >
+                            Copy
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>

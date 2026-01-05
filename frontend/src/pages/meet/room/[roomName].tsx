@@ -36,7 +36,7 @@ export default function MeetingRoom() {
   const router = useRouter();
   const { roomName } = router.query;
 
-  const { user } = useAuthStore();
+  const { user, isLoading: isAuthLoading } = useAuthStore();
   const {
     roomToken,
     wsUrl,
@@ -81,6 +81,7 @@ export default function MeetingRoom() {
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [messageToSend, setMessageToSend] = useState<{ id: string; content: string } | null>(null);
   const [recordingNotification, setRecordingNotification] = useState<string | null>(null);
+  const [isAutoRejoining, setIsAutoRejoining] = useState(false);
 
   // Mock participants for demo (in real app, this comes from LiveKit)
   const [participants, setParticipants] = useState([
@@ -119,6 +120,58 @@ export default function MeetingRoom() {
       getRoomInfo(roomName);
     }
   }, [roomName]);
+
+  // Auto-rejoin on page refresh - check sessionStorage for active meeting session
+  useEffect(() => {
+    // Wait for auth loading to complete before checking session
+    if (isAuthLoading) return;
+    if (!roomName || typeof roomName !== 'string') return;
+
+    const sessionKey = `meet_session_${roomName}`;
+    const savedSession = sessionStorage.getItem(sessionKey);
+
+    if (savedSession) {
+      try {
+        const session = JSON.parse(savedSession);
+        // Check if session is still valid (not older than 6 hours)
+        const sessionAge = Date.now() - session.joinedAt;
+        const maxAge = 6 * 60 * 60 * 1000; // 6 hours (matches token TTL)
+
+        if (sessionAge < maxAge) {
+          console.log('Auto-rejoining meeting after page refresh');
+          setIsAutoRejoining(true);
+
+          // For authenticated users, always use their username
+          // Backend uses user.username from token, not the provided name
+          const rejoinName = user?.username || session.participantName;
+          setParticipantName(rejoinName);
+
+          // Auto-rejoin the meeting
+          joinRoom(roomName, rejoinName).then((success) => {
+            if (success) {
+              setIsPreJoin(false);
+              // Update session with new timestamp
+              sessionStorage.setItem(sessionKey, JSON.stringify({
+                ...session,
+                participantName: rejoinName,
+                joinedAt: Date.now(),
+              }));
+            } else {
+              // If rejoin fails, clear session and show pre-join
+              sessionStorage.removeItem(sessionKey);
+            }
+            setIsAutoRejoining(false);
+          });
+        } else {
+          // Session expired, clear it
+          sessionStorage.removeItem(sessionKey);
+        }
+      } catch (e) {
+        console.error('Failed to parse meeting session:', e);
+        sessionStorage.removeItem(sessionKey);
+      }
+    }
+  }, [roomName, user?.username, isAuthLoading]);
 
   // Set default name from user
   useEffect(() => {
@@ -188,20 +241,38 @@ export default function MeetingRoom() {
   const handleJoin = async (name: string) => {
     if (!roomName || typeof roomName !== 'string') return;
 
-    setParticipantName(name);
-    const success = await joinRoom(roomName, name);
+    // For authenticated users, always use their username from the store
+    // Backend ignores the name parameter for authenticated users anyway
+    const joinName = user?.username || name;
+    setParticipantName(joinName);
+    const success = await joinRoom(roomName, joinName);
 
     if (success) {
       setIsPreJoin(false);
+      // Save session to sessionStorage for auto-rejoin on page refresh
+      const sessionKey = `meet_session_${roomName}`;
+      sessionStorage.setItem(sessionKey, JSON.stringify({
+        participantName: joinName,
+        joinedAt: Date.now(),
+        roomName: roomName,
+      }));
     }
   };
 
   const handleLeave = () => {
+    // Clear meeting session from sessionStorage
+    if (roomName && typeof roomName === 'string') {
+      sessionStorage.removeItem(`meet_session_${roomName}`);
+    }
     leaveRoom();
     router.push('/meet');
   };
 
   const handleEndForAll = () => {
+    // Clear meeting session from sessionStorage
+    if (roomName && typeof roomName === 'string') {
+      sessionStorage.removeItem(`meet_session_${roomName}`);
+    }
     // In a real app, this would end the meeting for all participants
     leaveRoom();
     router.push('/meet');
@@ -329,8 +400,80 @@ export default function MeetingRoom() {
     addChatMessage(message);
   }, [addChatMessage]);
 
+  // Show loading while auth is initializing
+  if (isAuthLoading) {
+    // Debug: check if auth token exists
+    const hasToken = typeof window !== 'undefined' && !!localStorage.getItem('auth_token');
+    console.log('Auth loading, hasToken:', hasToken);
+
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="text-center"
+        >
+          <div className="w-16 h-16 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-6" />
+          <p className="text-white text-lg">Loading...</p>
+        </motion.div>
+      </div>
+    );
+  }
+
+  // Show auto-rejoin loading screen
+  if (isAutoRejoining) {
+    return (
+      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="text-center"
+        >
+          <div className="w-16 h-16 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-6" />
+          <p className="text-white text-lg">Reconnecting to meeting...</p>
+          <p className="text-gray-400 text-sm mt-2">Please wait while we restore your session</p>
+        </motion.div>
+      </div>
+    );
+  }
+
   // Show pre-join screen
   if (isPreJoin) {
+    // Check for auth token in localStorage as a fallback
+    let hasAuthToken = false;
+    let tokenUsername: string | null = null;
+
+    if (typeof window !== 'undefined') {
+      const token = localStorage.getItem('auth_token');
+      if (token) {
+        hasAuthToken = true;
+        // Try to decode token to get username
+        try {
+          const base64Url = token.split('.')[1];
+          const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+          const payload = JSON.parse(atob(base64));
+          tokenUsername = payload.username || payload.name || payload.email?.split('@')[0] || null;
+        } catch (e) {
+          console.error('Failed to decode token:', e);
+        }
+      }
+    }
+
+    // User is authenticated if they have a user object with a username OR a valid auth token
+    const isUserAuthenticated = !!(user && user.username) || (hasAuthToken && !!tokenUsername);
+    const displayName = user?.username || tokenUsername || participantName || '';
+
+    // Debug logging
+    console.log('PreJoin auth state:', {
+      isAuthLoading,
+      user,
+      username: user?.username,
+      hasAuthToken,
+      tokenUsername,
+      isUserAuthenticated,
+      displayName,
+    });
+
     return (
       <>
         <Head>
@@ -340,7 +483,8 @@ export default function MeetingRoom() {
           roomCode={roomName as string}
           roomName={meetingName || undefined}
           onJoin={handleJoin}
-          userName={participantName || user?.username}
+          userName={displayName}
+          isAuthenticated={isUserAuthenticated}
         />
       </>
     );

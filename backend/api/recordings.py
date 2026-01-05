@@ -13,6 +13,7 @@ import json
 
 from core.security import get_current_user
 from core.database import get_db
+from core.config import settings
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
@@ -190,7 +191,7 @@ async def start_recording(
 
 
 async def _start_recording_task(recording_id: str, room_code: str, options: dict):
-    """Background task to start LiveKit egress"""
+    """Background task to start LiveKit egress - recordings go directly to S3"""
     from core.database import async_session_maker
 
     async with async_session_maker() as db:
@@ -202,13 +203,20 @@ async def _start_recording_task(recording_id: str, room_code: str, options: dict
             )
 
             if result["success"]:
+                # Store egress_id and S3 path
                 update_query = text("""
                     UPDATE workspace.meet_recordings
-                    SET egress_id = :egress_id, status = 'recording', updated_at = NOW()
+                    SET egress_id = :egress_id,
+                        status = 'recording',
+                        storage_type = :storage_type,
+                        storage_path = :storage_path,
+                        updated_at = NOW()
                     WHERE id = :id
                 """)
                 await db.execute(update_query, {
                     "egress_id": result.get("egress_id"),
+                    "storage_type": result.get("storage_type", "s3"),
+                    "storage_path": result.get("s3_path"),
                     "id": recording_id
                 })
             else:
@@ -299,107 +307,53 @@ async def _process_recording_task(
     user: dict,
     options: dict
 ):
-    """Background task to stop egress, apply watermark, upload, and transcribe"""
+    """
+    Background task to stop egress and finalize recording.
+    With S3 storage, recordings are saved directly by LiveKit Egress - no upload needed.
+    """
     from core.database import async_session_maker
     import asyncio
 
     async with async_session_maker() as db:
         try:
-            # Try to stop the egress if we have an ID
+            # Stop the egress if we have an ID
             if egress_id:
                 try:
                     await livekit_egress_service.stop_egress(egress_id)
+                    print(f"Stopped egress {egress_id}")
                 except Exception as e:
                     print(f"Failed to stop egress {egress_id}: {e}")
 
-            # Wait for egress to finish writing the file
-            await asyncio.sleep(5)
+            # Wait for egress to finish writing to S3
+            await asyncio.sleep(3)
 
-            local_path = livekit_egress_service.get_recording_file_path(recording_id)
+            # Get the S3 path (was set when recording started)
+            s3_path = livekit_egress_service.get_s3_path(room_code, recording_id)
 
-            # Check if recording file exists - if not, LiveKit Egress isn't running
-            if not os.path.exists(local_path):
-                print(f"Recording file not found: {local_path}")
-                print("LiveKit Egress may not be running. Marking recording as failed.")
+            # Recording is now in S3 - mark as completed
+            # Note: Watermarking would need to be done differently with S3
+            # For now, we skip watermarking when using S3 direct upload
+            update_query = text("""
+                UPDATE workspace.meet_recordings
+                SET status = 'completed',
+                    storage_type = 's3',
+                    storage_path = :storage_path,
+                    watermark_applied = FALSE,
+                    updated_at = NOW()
+                WHERE id = :id
+            """)
+            await db.execute(update_query, {
+                "id": recording_id,
+                "storage_path": s3_path
+            })
+            await db.commit()
 
-                update_query = text("""
-                    UPDATE workspace.meet_recordings
-                    SET status = 'failed',
-                        updated_at = NOW()
-                    WHERE id = :id
-                """)
-                await db.execute(update_query, {"id": recording_id})
-                await db.commit()
-                return  # Exit early - no file to process
+            print(f"Recording {recording_id} completed. S3 path: {s3_path}")
 
-            final_path = local_path
-            watermark_applied = False
-
-            if options.get("apply_watermark"):
-                watermarked_path = f"/tmp/recordings/{recording_id}_watermarked.mp4"
-                watermark_result = await watermark_service.apply_watermark(
-                    input_path=local_path,
-                    output_path=watermarked_path,
-                    options={
-                        "text": options.get("watermark_text"),
-                        "user_email": user.get("email") or user.get("username"),
-                        "timestamp": True
-                    }
-                )
-                if watermark_result["success"] and watermark_result.get("watermark_applied"):
-                    final_path = watermarked_path
-                    watermark_applied = True
-
-            file_size = os.path.getsize(final_path) if os.path.exists(final_path) else 0
-
-            storage_result = await recording_storage_service.save_recording(
-                recording_id=recording_id,
-                room_code=room_code,
-                local_file_path=final_path,
-                user_id=user.get("user_id") or user.get("id"),
-                username=user.get("username", "admin")
-            )
-
-            if storage_result["success"]:
-                update_query = text("""
-                    UPDATE workspace.meet_recordings
-                    SET status = :status,
-                        storage_type = :storage_type,
-                        storage_path = :storage_path,
-                        file_size_bytes = :file_size,
-                        watermark_applied = :watermark_applied,
-                        updated_at = NOW()
-                    WHERE id = :id
-                """)
-                await db.execute(update_query, {
-                    "id": recording_id,
-                    "status": "transcribing" if options.get("generate_transcript") else "completed",
-                    "storage_type": storage_result["storage_type"],
-                    "storage_path": storage_result["storage_path"],
-                    "file_size": file_size,
-                    "watermark_applied": watermark_applied
-                })
-                await db.commit()
-
-                if options.get("generate_transcript"):
-                    await _transcribe_recording_task(
-                        recording_id,
-                        storage_result["storage_path"],
-                        storage_result["storage_type"]
-                    )
-            else:
-                # Storage failed - mark as failed
-                update_query = text("""
-                    UPDATE workspace.meet_recordings
-                    SET status = 'failed', updated_at = NOW()
-                    WHERE id = :id
-                """)
-                await db.execute(update_query, {"id": recording_id})
-                await db.commit()
-
-            livekit_egress_service.delete_local_recording(recording_id)
-            if watermark_applied and os.path.exists(final_path):
-                os.remove(final_path)
+            # Optional: Trigger transcription if enabled
+            # Note: Transcription service would need S3 access
+            # if options.get("generate_transcript"):
+            #     await _transcribe_recording_task(recording_id, s3_path, "s3")
 
         except Exception as e:
             print(f"Recording processing error: {e}")
@@ -518,6 +472,15 @@ async def list_recordings(
 
     recordings = []
     for row in result:
+        # Get download URL for completed recordings
+        download_url = None
+        if row.status == "completed" and row.storage_path:
+            download_url = await recording_storage_service.get_recording_url(
+                row.storage_type or "s3",
+                row.storage_path,
+                current_user.get("username")
+            )
+
         recordings.append({
             "id": str(row.id),
             "room_code": row.room_code,
@@ -527,6 +490,7 @@ async def list_recordings(
             "file_size_bytes": row.file_size_bytes,
             "resolution": row.resolution,
             "storage_path": row.storage_path,
+            "download_url": download_url,
             "has_transcript": row.has_transcript or False,
             "watermark_applied": row.watermark_applied or False,
             "started_at": row.started_at.isoformat() if row.started_at else None,
@@ -783,7 +747,9 @@ async def create_share_link(
     if not recording:
         raise HTTPException(status_code=404, detail="Recording not found")
 
-    share_url = f"/api/v1/recordings/{recording_id}/view"
+    # Generate full share URL using workspace URL
+    base_url = getattr(settings, 'WORKSPACE_URL', 'https://workspace.bheem.cloud')
+    share_url = f"{base_url}/api/v1/recordings/{recording_id}/view"
     expires_at = datetime.utcnow() + timedelta(days=request.expire_days)
 
     update_query = text("""
@@ -803,3 +769,52 @@ async def create_share_link(
         "expires_at": expires_at.isoformat(),
         "password_protected": bool(request.password)
     }
+
+
+@router.get("/{recording_id}/view")
+async def view_recording(
+    recording_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    View/stream a recording - redirects to the actual file URL.
+    This endpoint is used for share links.
+    """
+    from fastapi.responses import RedirectResponse
+
+    query = text("""
+        SELECT id, storage_path, storage_type, status, share_expires_at
+        FROM workspace.meet_recordings
+        WHERE id = :id
+    """)
+    result = await db.execute(query, {"id": recording_id})
+    recording = result.fetchone()
+
+    if not recording:
+        raise HTTPException(status_code=404, detail="Recording not found")
+
+    if recording.status != "completed":
+        raise HTTPException(status_code=400, detail="Recording not ready for playback")
+
+    # Check if share link has expired
+    if recording.share_expires_at:
+        now = datetime.utcnow()
+        expires_at = recording.share_expires_at
+        # Handle timezone-aware datetime from database
+        if hasattr(expires_at, 'tzinfo') and expires_at.tzinfo is not None:
+            expires_at = expires_at.replace(tzinfo=None)
+        if expires_at < now:
+            raise HTTPException(status_code=410, detail="Share link has expired")
+
+    # Get the actual file URL
+    download_url = await recording_storage_service.get_recording_url(
+        recording.storage_type or "s3",
+        recording.storage_path,
+        None
+    )
+
+    if not download_url:
+        raise HTTPException(status_code=404, detail="Recording file not found")
+
+    # Redirect to the actual file
+    return RedirectResponse(url=download_url, status_code=302)

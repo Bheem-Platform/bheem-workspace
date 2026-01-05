@@ -47,12 +47,12 @@ class Settings(BaseSettings):
     MAILCOW_MYSQL_USER: str = "root"
     MAILCOW_MYSQL_PASSWORD: Optional[str] = None
     
-    # S3
-    S3_ENDPOINT: str
-    S3_ACCESS_KEY: str
-    S3_SECRET_KEY: str
-    S3_BUCKET: str
-    S3_REGION: str
+    # S3 Storage for Recordings
+    S3_ENDPOINT: str = "https://hel1.your-objectstorage.com"
+    S3_ACCESS_KEY: str = "E8OBSHD5J85G0DQXAACX"
+    S3_SECRET_KEY: str = "O171vuUctulQfPRoz1W4ulfHOan3bXKuztnSgJDV"
+    S3_BUCKET: str = "bheem"
+    S3_REGION: str = "hel1"
     
     # Recording
     RECORDING_ENCRYPTION_KEY: Optional[str] = None

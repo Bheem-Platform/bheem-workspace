@@ -32,7 +32,7 @@ export default function LoginPage() {
   });
 
   // Get redirect URL and plan from query params
-  const redirectTo = (router.query.redirect as string) || '/admin';
+  const redirectTo = router.query.redirect as string;
   const selectedPlan = router.query.plan as string;
 
   // Set mode based on URL or plan selection
@@ -45,7 +45,7 @@ export default function LoginPage() {
   // If already authenticated, redirect
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      router.push(redirectTo);
+      router.push(redirectTo || '/dashboard');
     }
   }, [isAuthenticated, isLoading, router, redirectTo]);
 
@@ -90,7 +90,7 @@ export default function LoginPage() {
       }
 
       // Use redirect param if specified, otherwise use role-based redirect
-      const finalRedirect = router.query.redirect ? redirectTo : targetUrl;
+      const finalRedirect = redirectTo || targetUrl;
       router.push(finalRedirect);
     } catch (err: any) {
       console.error('Login error:', err);
@@ -177,7 +177,7 @@ export default function LoginPage() {
       setSuccess('Account created successfully! Redirecting...');
 
       setTimeout(() => {
-        router.push(redirectTo);
+        router.push(redirectTo || '/admin');
       }, 1000);
 
     } catch (err: any) {
