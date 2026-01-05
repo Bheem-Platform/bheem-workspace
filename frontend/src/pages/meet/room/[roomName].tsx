@@ -11,6 +11,7 @@ import ControlBar from '@/components/meet/ControlBar';
 import EndMeetingModal from '@/components/meet/EndMeetingModal';
 import ScreenSharePicker from '@/components/meet/ScreenSharePicker';
 import SettingsModal from '@/components/meet/SettingsModal';
+import RecordingIndicator from '@/components/meet/RecordingIndicator';
 import { useMeetStore } from '@/stores/meetStore';
 import { useAuthStore } from '@/stores/authStore';
 import type { ChatMessage } from '@/types/meet';
@@ -56,6 +57,8 @@ export default function MeetingRoom() {
     toggleMic,
     toggleCamera,
     toggleScreenShare,
+    startRecording,
+    stopRecording,
     addChatMessage,
     updateParticipants,
     error,
@@ -77,6 +80,7 @@ export default function MeetingRoom() {
   const [showScreenSharePicker, setShowScreenSharePicker] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [messageToSend, setMessageToSend] = useState<{ id: string; content: string } | null>(null);
+  const [recordingNotification, setRecordingNotification] = useState<string | null>(null);
 
   // Mock participants for demo (in real app, this comes from LiveKit)
   const [participants, setParticipants] = useState([
@@ -239,10 +243,25 @@ export default function MeetingRoom() {
     console.log('Start screen share:', sourceId, 'with audio:', withAudio);
   }, []);
 
-  const handleToggleRecording = useCallback(() => {
-    // In a real app, this would toggle recording
-    console.log('Toggle recording');
-  }, []);
+  const handleToggleRecording = useCallback(async () => {
+    console.log('Toggle recording', recordingSession.isRecording);
+
+    if (recordingSession.isRecording) {
+      // Stop recording
+      const success = await stopRecording();
+      if (success) {
+        setRecordingNotification('Recording stopped');
+        setTimeout(() => setRecordingNotification(null), 3000);
+      }
+    } else {
+      // Start recording
+      const success = await startRecording({ layout: 'grid', resolution: '1080p' });
+      if (success) {
+        setRecordingNotification('Recording started - All participants will be notified');
+        setTimeout(() => setRecordingNotification(null), 5000);
+      }
+    }
+  }, [recordingSession.isRecording, startRecording, stopRecording]);
 
   const handleToggleHand = useCallback(() => {
     setIsHandRaised(prev => !prev);
@@ -381,6 +400,8 @@ export default function MeetingRoom() {
           <div className="flex items-center gap-2 sm:gap-3 min-w-0">
             <h1 className="text-white font-medium text-sm sm:text-base truncate">{meetingName || 'Meeting'}</h1>
             <span className="text-gray-500 text-xs sm:text-sm font-mono hidden sm:inline">{roomCode || roomName}</span>
+            {/* Recording Indicator */}
+            <RecordingIndicator />
           </div>
           <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-400 flex-shrink-0">
             <span className="flex items-center gap-1.5">
@@ -393,6 +414,23 @@ export default function MeetingRoom() {
             </span>
           </div>
         </motion.header>
+
+        {/* Recording notification toast */}
+        <AnimatePresence>
+          {recordingNotification && (
+            <motion.div
+              initial={{ opacity: 0, y: -50 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -50 }}
+              className="absolute top-16 left-1/2 transform -translate-x-1/2 z-50"
+            >
+              <div className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-full shadow-lg">
+                <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+                <span className="text-sm font-medium">{recordingNotification}</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Main content area */}
         <div className="flex-1 flex overflow-hidden relative">
