@@ -105,49 +105,69 @@ async def start_recording(
     username = current_user.get("username", "unknown")
 
     # Verify room exists
-    room_query = text("""
-        SELECT id, room_code, created_by, status
-        FROM workspace.meet_rooms
-        WHERE room_code = :room_code
-    """)
-    result = await db.execute(room_query, {"room_code": request.room_code})
-    room = result.fetchone()
+    try:
+        room_query = text("""
+            SELECT id, room_code, host_id, status
+            FROM workspace.meet_rooms
+            WHERE room_code = :room_code
+        """)
+        result = await db.execute(room_query, {"room_code": request.room_code})
+        room = result.fetchone()
+    except Exception as e:
+        error_msg = str(e)
+        if "does not exist" in error_msg or "UndefinedTable" in error_msg:
+            raise HTTPException(
+                status_code=503,
+                detail="Recording feature not available. Please run database migrations first."
+            )
+        raise HTTPException(status_code=500, detail=f"Database error: {error_msg}")
 
     if not room:
         raise HTTPException(status_code=404, detail="Meeting room not found")
 
     # Check if already recording
-    active_query = text("""
-        SELECT id FROM workspace.meet_recordings
-        WHERE room_code = :room_code AND status = 'recording'
-    """)
-    active_result = await db.execute(active_query, {"room_code": request.room_code})
-    if active_result.fetchone():
-        raise HTTPException(status_code=400, detail="Recording already in progress")
+    try:
+        active_query = text("""
+            SELECT id FROM workspace.meet_recordings
+            WHERE room_code = :room_code AND status = 'recording'
+        """)
+        active_result = await db.execute(active_query, {"room_code": request.room_code})
+        if active_result.fetchone():
+            raise HTTPException(status_code=400, detail="Recording already in progress")
 
-    # Create recording record
-    recording_id = str(uuid.uuid4())
-    watermark_text = request.watermark_text or f"{username} | Bheem Meet"
+        # Create recording record
+        recording_id = str(uuid.uuid4())
+        watermark_text = request.watermark_text or f"{username} | Bheem Meet"
 
-    insert_query = text("""
-        INSERT INTO workspace.meet_recordings
-        (id, room_id, room_code, status, resolution, user_id, user_name,
-         watermark_applied, watermark_text, has_transcript, started_at, created_at, updated_at)
-        VALUES (:id, :room_id, :room_code, 'pending', :resolution, :user_id, :user_name,
-                :watermark_applied, :watermark_text, FALSE, NOW(), NOW(), NOW())
-    """)
+        insert_query = text("""
+            INSERT INTO workspace.meet_recordings
+            (id, room_id, room_code, status, resolution, user_id, user_name,
+             watermark_applied, watermark_text, has_transcript, started_at, created_at, updated_at)
+            VALUES (:id, :room_id, :room_code, 'pending', :resolution, :user_id, :user_name,
+                    :watermark_applied, :watermark_text, FALSE, NOW(), NOW(), NOW())
+        """)
 
-    await db.execute(insert_query, {
-        "id": recording_id,
-        "room_id": str(room.id) if room else None,
-        "room_code": request.room_code,
-        "resolution": request.resolution,
-        "user_id": user_id,
-        "user_name": username,
-        "watermark_applied": request.watermark_enabled,
-        "watermark_text": watermark_text
-    })
-    await db.commit()
+        await db.execute(insert_query, {
+            "id": recording_id,
+            "room_id": str(room.id) if room else None,
+            "room_code": request.room_code,
+            "resolution": request.resolution,
+            "user_id": user_id,
+            "user_name": username,
+            "watermark_applied": request.watermark_enabled,
+            "watermark_text": watermark_text
+        })
+        await db.commit()
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = str(e)
+        if "does not exist" in error_msg or "UndefinedTable" in error_msg:
+            raise HTTPException(
+                status_code=503,
+                detail="Recording feature not available. Database table 'meet_recordings' does not exist. Please run: psql -f backend/migrations/001_meet_recordings.sql"
+            )
+        raise HTTPException(status_code=500, detail=f"Failed to start recording: {error_msg}")
 
     # Start LiveKit egress in background
     background_tasks.add_task(

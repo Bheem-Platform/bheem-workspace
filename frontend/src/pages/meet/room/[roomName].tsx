@@ -252,12 +252,24 @@ export default function MeetingRoom() {
       if (success) {
         setRecordingNotification('Recording stopped');
         setTimeout(() => setRecordingNotification(null), 3000);
+      } else {
+        setRecordingNotification('Failed to stop recording');
+        setTimeout(() => setRecordingNotification(null), 3000);
       }
     } else {
       // Start recording
-      const success = await startRecording({ layout: 'grid', resolution: '1080p' });
-      if (success) {
-        setRecordingNotification('Recording started - All participants will be notified');
+      try {
+        const success = await startRecording({ layout: 'grid', resolution: '1080p' });
+        if (success) {
+          setRecordingNotification('Recording started - All participants will be notified');
+          setTimeout(() => setRecordingNotification(null), 5000);
+        } else {
+          setRecordingNotification('Recording not available - Contact admin');
+          setTimeout(() => setRecordingNotification(null), 5000);
+        }
+      } catch (err: any) {
+        const message = err?.message || 'Failed to start recording';
+        setRecordingNotification(message);
         setTimeout(() => setRecordingNotification(null), 5000);
       }
     }
