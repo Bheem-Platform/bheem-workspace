@@ -14,7 +14,7 @@ import {
   ControlBar as LKControlBar,
 } from '@livekit/components-react';
 import '@livekit/components-styles';
-import { Track, RoomEvent, DataPacket_Kind, RemoteParticipant, LocalParticipant } from 'livekit-client';
+import { Track, RoomEvent, DataPacket_Kind, RemoteParticipant, LocalParticipant, ParticipantEvent } from 'livekit-client';
 import { User, AlertTriangle } from 'lucide-react';
 import type { Participant } from '@/types/meet';
 
@@ -61,16 +61,24 @@ function MeetingStage({
   const [currentlyScreenSharing, setCurrentlyScreenSharing] = useState(false);
   const [prevHandRaised, setPrevHandRaised] = useState<boolean | undefined>(undefined);
   const [isRoomConnected, setIsRoomConnected] = useState(false);
+  const [metadataVersion, setMetadataVersion] = useState(0); // Force re-render on metadata changes
 
-  // Track room connection state
+  // Track room connection state and participant metadata changes
   useEffect(() => {
     if (!room) return;
 
     const handleConnected = () => setIsRoomConnected(true);
     const handleDisconnected = () => setIsRoomConnected(false);
 
+    // Listen for metadata changes on any participant to trigger re-render
+    const handleMetadataChanged = () => {
+      setMetadataVersion(v => v + 1);
+    };
+
     room.on(RoomEvent.Connected, handleConnected);
     room.on(RoomEvent.Disconnected, handleDisconnected);
+    room.on(RoomEvent.ParticipantMetadataChanged, handleMetadataChanged);
+    room.on(RoomEvent.LocalTrackPublished, handleMetadataChanged);
 
     // Check initial state
     if (room.state === 'connected') {
@@ -80,6 +88,8 @@ function MeetingStage({
     return () => {
       room.off(RoomEvent.Connected, handleConnected);
       room.off(RoomEvent.Disconnected, handleDisconnected);
+      room.off(RoomEvent.ParticipantMetadataChanged, handleMetadataChanged);
+      room.off(RoomEvent.LocalTrackPublished, handleMetadataChanged);
     };
   }, [room]);
 
@@ -262,7 +272,7 @@ function MeetingStage({
     });
 
     onParticipantsChange(convertedParticipants);
-  }, [lkParticipants, room, onParticipantsChange]);
+  }, [lkParticipants, room, onParticipantsChange, metadataVersion]);
 
   // Listen for data messages (chat) - only from remote participants
   useEffect(() => {

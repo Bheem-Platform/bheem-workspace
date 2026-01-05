@@ -727,6 +727,13 @@ export const useMeetStore = create<MeetState>((set, get) => ({
 
   // Legacy chat message support
   addChatMessage: (message: ChatMessage) => {
+    // Check for duplicate messages by ID
+    const existingMessages = get().chatMessages;
+    if (existingMessages.some(m => m.id === message.id)) {
+      console.log('Skipping duplicate chat message:', message.id);
+      return;
+    }
+
     const enhanced: EnhancedChatMessage = {
       id: message.id,
       roomCode: get().roomCode || '',
