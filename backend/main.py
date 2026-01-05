@@ -254,13 +254,26 @@ async def login_proxy(request: Request):
         except httpx.RequestError as e:
             return HTMLResponse(content=f"<h1>Login service unavailable</h1><p>{str(e)}</p>", status_code=503)
 
-@app.get("/dashboard", response_class=HTMLResponse)
-async def dashboard():
-    path = os.path.join(FRONTEND_PATH, "dashboard.html")
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>Dashboard</h1>")
+# Dashboard - Proxy to Next.js server
+@app.api_route("/dashboard", methods=["GET"])
+async def dashboard_proxy(request: Request):
+    """Proxy dashboard to Next.js server"""
+    target_url = f"{NEXTJS_URL}/dashboard"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Dashboard unavailable</h1><p>{str(e)}</p>", status_code=503)
 
 # Bheem Meet - Proxy to Next.js server
 @app.api_route("/meet", methods=["GET"])
@@ -325,36 +338,70 @@ async def meet_recordings(request: Request):
         except httpx.RequestError as e:
             return HTMLResponse(content=f"<h1>Recordings unavailable</h1><p>{str(e)}</p>", status_code=503)
 
-# Bheem Mail
-@app.get("/mail", response_class=HTMLResponse)
-async def mail_page():
-    path = os.path.join(FRONTEND_PATH, "bheem-mail.html")
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>Bheem Mail</h1>")
+# Bheem Mail - Proxy to Next.js server
+@app.api_route("/mail/{path:path}", methods=["GET"])
+@app.api_route("/mail", methods=["GET"])
+async def mail_proxy(request: Request, path: str = ""):
+    """Proxy mail routes to Next.js server"""
+    target_url = f"{NEXTJS_URL}/mail/{path}" if path else f"{NEXTJS_URL}/mail"
 
-# Bheem Docs
-@app.get("/docs-app", response_class=HTMLResponse)
-async def docs_app():
-    path = os.path.join(FRONTEND_PATH, "bheem-docs.html")
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return HTMLResponse(content=f.read())
-    path = os.path.join(FRONTEND_PATH, "dashboard.html")
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>Bheem Docs</h1>")
+    if request.query_params:
+        target_url += f"?{request.query_params}"
 
-# Recordings
-@app.get("/recordings", response_class=HTMLResponse)
-async def recordings_page():
-    path = os.path.join(FRONTEND_PATH, "bheem-meet.html")
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>Recordings</h1>")
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Mail service unavailable</h1><p>{str(e)}</p>", status_code=503)
+
+# Bheem Docs - Proxy to Next.js server
+@app.api_route("/docs/{path:path}", methods=["GET"])
+@app.api_route("/docs", methods=["GET"])
+async def docs_proxy(request: Request, path: str = ""):
+    """Proxy docs routes to Next.js server"""
+    target_url = f"{NEXTJS_URL}/docs/{path}" if path else f"{NEXTJS_URL}/docs"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Docs service unavailable</h1><p>{str(e)}</p>", status_code=503)
+
+# Recordings - Proxy to Next.js server (redirects to /meet/recordings)
+@app.api_route("/recordings", methods=["GET"])
+async def recordings_proxy(request: Request):
+    """Proxy recordings to Next.js server"""
+    target_url = f"{NEXTJS_URL}/meet/recordings"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Recordings unavailable</h1><p>{str(e)}</p>", status_code=503)
 
 # Admin - Proxy to Next.js server
 @app.api_route("/admin/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
@@ -451,14 +498,27 @@ async def settings_page():
             return HTMLResponse(content=f.read())
     return HTMLResponse(content="<h1>Settings</h1>")
 
-# Bheem Calendar
-@app.get("/calendar", response_class=HTMLResponse)
-async def calendar_page():
-    path = os.path.join(FRONTEND_PATH, "bheem-calendar.html")
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>Bheem Calendar</h1>")
+# Bheem Calendar - Proxy to Next.js server
+@app.api_route("/calendar/{path:path}", methods=["GET"])
+@app.api_route("/calendar", methods=["GET"])
+async def calendar_proxy(request: Request, path: str = ""):
+    """Proxy calendar routes to Next.js server"""
+    target_url = f"{NEXTJS_URL}/calendar/{path}" if path else f"{NEXTJS_URL}/calendar"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Calendar service unavailable</h1><p>{str(e)}</p>", status_code=503)
 
 if __name__ == "__main__":
     import uvicorn
