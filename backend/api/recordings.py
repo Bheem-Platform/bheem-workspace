@@ -143,7 +143,7 @@ async def start_recording(
             INSERT INTO workspace.meet_recordings
             (id, room_id, room_code, status, resolution, user_id, user_name,
              watermark_applied, watermark_text, has_transcript, started_at, created_at, updated_at)
-            VALUES (:id, :room_id, :room_code, 'pending', :resolution, :user_id, :user_name,
+            VALUES (:id, :room_id, :room_code, 'recording', :resolution, :user_id, :user_name,
                     :watermark_applied, :watermark_text, FALSE, NOW(), NOW(), NOW())
         """)
 
