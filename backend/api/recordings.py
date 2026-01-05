@@ -305,16 +305,37 @@ async def _process_recording_task(
 
     async with async_session_maker() as db:
         try:
+            # Try to stop the egress if we have an ID
             if egress_id:
-                await livekit_egress_service.stop_egress(egress_id)
+                try:
+                    await livekit_egress_service.stop_egress(egress_id)
+                except Exception as e:
+                    print(f"Failed to stop egress {egress_id}: {e}")
 
+            # Wait for egress to finish writing the file
             await asyncio.sleep(5)
 
             local_path = livekit_egress_service.get_recording_file_path(recording_id)
-            final_path = local_path
 
+            # Check if recording file exists - if not, LiveKit Egress isn't running
+            if not os.path.exists(local_path):
+                print(f"Recording file not found: {local_path}")
+                print("LiveKit Egress may not be running. Marking recording as failed.")
+
+                update_query = text("""
+                    UPDATE workspace.meet_recordings
+                    SET status = 'failed',
+                        updated_at = NOW()
+                    WHERE id = :id
+                """)
+                await db.execute(update_query, {"id": recording_id})
+                await db.commit()
+                return  # Exit early - no file to process
+
+            final_path = local_path
             watermark_applied = False
-            if options.get("apply_watermark") and os.path.exists(local_path):
+
+            if options.get("apply_watermark"):
                 watermarked_path = f"/tmp/recordings/{recording_id}_watermarked.mp4"
                 watermark_result = await watermark_service.apply_watermark(
                     input_path=local_path,
@@ -346,7 +367,7 @@ async def _process_recording_task(
                         storage_type = :storage_type,
                         storage_path = :storage_path,
                         file_size_bytes = :file_size,
-                        watermark_enabled = :watermark_applied,
+                        watermark_applied = :watermark_applied,
                         updated_at = NOW()
                     WHERE id = :id
                 """)
@@ -366,6 +387,15 @@ async def _process_recording_task(
                         storage_result["storage_path"],
                         storage_result["storage_type"]
                     )
+            else:
+                # Storage failed - mark as failed
+                update_query = text("""
+                    UPDATE workspace.meet_recordings
+                    SET status = 'failed', updated_at = NOW()
+                    WHERE id = :id
+                """)
+                await db.execute(update_query, {"id": recording_id})
+                await db.commit()
 
             livekit_egress_service.delete_local_recording(recording_id)
             if watermark_applied and os.path.exists(final_path):
@@ -699,6 +729,38 @@ async def get_recording_status(
         "has_transcript": recording.has_transcript or False,
         "file_size_bytes": recording.file_size_bytes,
         "duration_seconds": recording.duration_seconds
+    }
+
+
+@router.post("/fix-stuck")
+async def fix_stuck_recordings(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Fix recordings stuck in 'processing' or 'recording' status.
+    Marks them as 'failed' since LiveKit Egress likely wasn't running.
+    """
+    user_id = current_user.get("user_id") or current_user.get("id") or current_user.get("sub")
+
+    # Find and update stuck recordings for this user
+    update_query = text("""
+        UPDATE workspace.meet_recordings
+        SET status = 'failed', updated_at = NOW()
+        WHERE user_id::text = :user_id
+          AND status IN ('processing', 'recording')
+          AND created_at < NOW() - INTERVAL '5 minutes'
+        RETURNING id
+    """)
+
+    result = await db.execute(update_query, {"user_id": str(user_id)})
+    fixed_ids = [str(row.id) for row in result.fetchall()]
+    await db.commit()
+
+    return {
+        "fixed_count": len(fixed_ids),
+        "fixed_recordings": fixed_ids,
+        "message": f"Marked {len(fixed_ids)} stuck recordings as failed"
     }
 
 
