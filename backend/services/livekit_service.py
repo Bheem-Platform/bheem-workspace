@@ -47,20 +47,20 @@ class LiveKitService:
         # Set TTL
         token.with_ttl(timedelta(seconds=ttl_seconds))
 
-        # Build video grants
+        # Build video grants - all participants can update their own metadata (for raise hand, etc.)
         grants = api.VideoGrants(
             room_join=True,
             room=room_name,
             can_publish=True,
             can_subscribe=True,
             can_publish_data=True,
+            can_update_own_metadata=True,  # Allow all participants to update their metadata
         )
 
         # Host gets additional permissions
         if is_host:
             grants.room_admin = True
             grants.room_record = True
-            grants.can_update_own_metadata = True
 
         token.with_grants(grants)
 

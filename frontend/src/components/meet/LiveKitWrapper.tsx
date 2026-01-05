@@ -264,19 +264,26 @@ function MeetingStage({
     onParticipantsChange(convertedParticipants);
   }, [lkParticipants, room, onParticipantsChange]);
 
-  // Listen for data messages (chat)
+  // Listen for data messages (chat) - only from remote participants
   useEffect(() => {
     if (!room || !onChatMessage) return;
 
     const handleDataReceived = (payload: Uint8Array, participant?: RemoteParticipant) => {
+      // Only process messages from remote participants (not our own)
+      // If participant is undefined, it might be our own message echoed back - skip it
+      if (!participant) {
+        console.log('Skipping data message without participant (likely own message)');
+        return;
+      }
+
       try {
         const decoder = new TextDecoder();
         const data = JSON.parse(decoder.decode(payload));
 
         if (data.type === 'chat') {
           onChatMessage({
-            senderId: participant?.identity || 'unknown',
-            senderName: participant?.name || 'Guest',
+            senderId: participant.identity,
+            senderName: participant.name || 'Guest',
             content: data.message,
           });
         }
