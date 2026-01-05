@@ -1,4 +1,7 @@
-# LiveKit Server Configuration for Bheem Workspace
+# LiveKit Server Configuration for Bheem Meet
+# Server: 37.27.89.140
+# URL: wss://meet.bheem.cloud
+
 port: 7880
 bind_addresses:
   - ""
@@ -9,16 +12,23 @@ rtc:
   tcp_port: 7881
   use_external_ip: true
 
+# Redis - Required for Egress to work
 redis:
   address: redis:6379
 
+# API Keys
 keys:
   BheemMeetAPI: BheemMeet2024SecretKey
 
 logging:
   level: info
+  json: false
 
 room:
   auto_create: true
   empty_timeout: 300
   max_participants: 100
+
+# Enable room recording
+egress:
+  enable_local_egress: true

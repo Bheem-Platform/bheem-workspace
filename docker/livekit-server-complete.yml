@@ -1,0 +1,65 @@
+# Complete LiveKit Stack for Bheem Meet
+# Deploy on: 37.27.89.140
+# Run: docker-compose -f livekit-server-complete.yml up -d
+
+version: '3.8'
+
+services:
+  # Redis - Required for LiveKit + Egress communication
+  redis:
+    image: redis:7-alpine
+    container_name: livekit-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - livekit-redis:/data
+    command: redis-server --appendonly yes
+    networks:
+      - livekit
+
+  # LiveKit Server
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: livekit-server
+    restart: unless-stopped
+    ports:
+      - "7880:7880"      # HTTP/WebSocket
+      - "7881:7881"      # TCP (TURN)
+      - "7882:7882/udp"  # UDP (WebRTC)
+      - "50000-50100:50000-50100/udp"  # RTC media
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    command: --config /etc/livekit.yaml
+    networks:
+      - livekit
+    depends_on:
+      - redis
+
+  # LiveKit Egress - Recording Service
+  egress:
+    image: livekit/egress:latest
+    container_name: livekit-egress
+    restart: unless-stopped
+    environment:
+      - EGRESS_CONFIG_FILE=/etc/egress.yaml
+    ports:
+      - "9090:9090"  # Health check
+    volumes:
+      - ./egress.yaml:/etc/egress.yaml:ro
+      - /opt/livekit/recordings:/tmp/recordings
+    cap_add:
+      - SYS_ADMIN  # Required for Chrome sandbox
+    shm_size: 2gb   # Required for Chrome
+    networks:
+      - livekit
+    depends_on:
+      - redis
+      - livekit
+
+networks:
+  livekit:
+    driver: bridge
+
+volumes:
+  livekit-redis:

@@ -1,0 +1,26 @@
+# LiveKit Egress Configuration
+# Deploy on: 37.27.89.140 (same server as LiveKit)
+
+log_level: info
+
+# Must match LiveKit server credentials
+api_key: BheemMeetAPI
+api_secret: BheemMeet2024SecretKey
+
+# Connect to LiveKit via Docker network
+ws_url: ws://livekit:7880
+
+# Redis for job queue (via Docker network)
+redis:
+  address: redis:6379
+
+# File output - recordings saved here
+file_output:
+  local: true
+
+# Health check endpoint
+health_port: 9090
+
+# Resource limits
+cpu_cost:
+  room_composite_cpu_cost: 3.0
