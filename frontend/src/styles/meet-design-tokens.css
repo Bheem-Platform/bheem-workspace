@@ -505,3 +505,96 @@
   background-size: 200px 100%;
   animation: meet-skeleton 1.5s ease-in-out infinite;
 }
+
+/* LiveKit Video Grid Styles */
+.lk-grid-layout {
+  --lk-grid-gap: 8px !important;
+  gap: var(--lk-grid-gap) !important;
+  padding: 0 !important;
+}
+
+.lk-grid-layout > * {
+  border-radius: 12px !important;
+  overflow: hidden !important;
+  background: var(--meet-surface) !important;
+}
+
+/* Equal sizing for participant tiles */
+.lk-participant-tile {
+  aspect-ratio: 16/9;
+  border-radius: 12px !important;
+  overflow: hidden !important;
+  background: var(--meet-surface) !important;
+}
+
+/* Video element styling */
+.lk-participant-tile video {
+  object-fit: cover !important;
+  border-radius: 12px !important;
+}
+
+/* Participant name label */
+.lk-participant-tile .lk-participant-metadata,
+.lk-participant-tile .lk-participant-name {
+  background: rgba(0, 0, 0, 0.6) !important;
+  backdrop-filter: blur(4px) !important;
+  border-radius: 6px !important;
+  padding: 4px 8px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+}
+
+/* Speaking indicator */
+.lk-participant-tile.lk-speaking {
+  box-shadow: 0 0 0 3px var(--meet-primary) !important;
+}
+
+/* Screen share takes full width */
+.lk-focus-layout .lk-focus-layout-container {
+  flex: 1 !important;
+  min-width: 0 !important;
+}
+
+/* Carousel for small participant tiles */
+.lk-focus-layout .lk-carousel {
+  flex-shrink: 0 !important;
+  width: 200px !important;
+}
+
+/* Connection quality indicator */
+.lk-connection-quality {
+  position: absolute !important;
+  top: 8px !important;
+  left: 8px !important;
+  background: rgba(0, 0, 0, 0.5) !important;
+  border-radius: 4px !important;
+  padding: 2px 4px !important;
+}
+
+/* Muted indicator */
+.lk-participant-tile .lk-muted-indicator {
+  background: rgba(239, 68, 68, 0.8) !important;
+  border-radius: 50% !important;
+  padding: 4px !important;
+}
+
+/* Audio visualizer */
+.lk-audio-visualizer {
+  height: 4px !important;
+  background: var(--meet-primary) !important;
+  border-radius: 2px !important;
+}
+
+/* Placeholder for no video */
+.lk-participant-placeholder {
+  background: linear-gradient(135deg, var(--meet-surface) 0%, var(--meet-surface-elevated) 100%) !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.lk-participant-placeholder svg {
+  width: 48px !important;
+  height: 48px !important;
+  color: var(--meet-text-muted) !important;
+}

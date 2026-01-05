@@ -489,13 +489,23 @@ export const useMeetStore = create<MeetState>((set, get) => ({
     const { roomCode } = get();
     if (!roomCode) return;
 
+    // Skip loading chat history for guest users (no auth token)
+    // Guests can still use real-time chat via LiveKit data channel
+    if (typeof window !== 'undefined' && !localStorage.getItem('auth_token')) {
+      console.log('Skipping chat history load for guest user - using real-time chat only');
+      return;
+    }
+
     set((state) => ({ loading: { ...state.loading, chat: true } }));
 
     try {
       const messages = await meetApi.getChatMessages(roomCode);
       set({ chatMessages: messages });
     } catch (error: any) {
-      console.error('Failed to load chat messages:', error);
+      // Silently ignore 403 errors for guests who might have expired tokens
+      if (error.response?.status !== 403) {
+        console.error('Failed to load chat messages:', error);
+      }
     } finally {
       set((state) => ({ loading: { ...state.loading, chat: false } }));
     }
@@ -505,13 +515,23 @@ export const useMeetStore = create<MeetState>((set, get) => ({
     const { roomCode } = get();
     if (!roomCode || !content.trim()) return;
 
+    // For guest users (no auth token), skip the backend API
+    // The message will be sent via LiveKit data channel in ChatPanel
+    if (typeof window !== 'undefined' && !localStorage.getItem('auth_token')) {
+      console.log('Guest user - skipping backend chat API, using LiveKit data channel');
+      return;
+    }
+
     try {
       const message = await meetApi.sendChatMessage(roomCode, content, { replyToId });
       set((state) => ({
         chatMessages: [...state.chatMessages, message],
       }));
     } catch (error: any) {
-      set({ error: error.response?.data?.detail || 'Failed to send message' });
+      // Silently ignore 403 errors for guests
+      if (error.response?.status !== 403) {
+        set({ error: error.response?.data?.detail || 'Failed to send message' });
+      }
     }
   },
 

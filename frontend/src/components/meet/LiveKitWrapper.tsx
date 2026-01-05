@@ -339,8 +339,8 @@ function MeetingStage({
     };
   }, [room, onChatMessage]);
 
-  // Get video tracks
-  const tracks = useTracks(
+  // Get video tracks - separate camera and screen share
+  const allTracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: true },
       { source: Track.Source.ScreenShare, withPlaceholder: false },
@@ -348,13 +348,62 @@ function MeetingStage({
     { onlySubscribed: false }
   );
 
+  // Separate screen share tracks from camera tracks
+  const screenShareTracks = allTracks.filter(
+    (track) => track.source === Track.Source.ScreenShare
+  );
+  const cameraTracks = allTracks.filter(
+    (track) => track.source === Track.Source.Camera
+  );
+
+  const hasScreenShare = screenShareTracks.length > 0;
+
   return (
     <div className="h-full flex flex-col">
       <div className="flex-1 p-2 sm:p-4">
-        {tracks && tracks.length > 0 ? (
-          <GridLayout tracks={tracks} style={{ height: '100%' }}>
-            <CustomParticipantTile />
-          </GridLayout>
+        {allTracks && allTracks.length > 0 ? (
+          hasScreenShare ? (
+            // Screen share layout - show screen share prominently with participants in sidebar
+            <div className="h-full flex gap-3">
+              {/* Main screen share area */}
+              <div className="flex-1 min-w-0">
+                <GridLayout tracks={screenShareTracks} style={{ height: '100%' }}>
+                  <ParticipantTile />
+                </GridLayout>
+              </div>
+              {/* Participants sidebar - vertical strip on the right */}
+              {cameraTracks.length > 0 && (
+                <div className="w-48 flex-shrink-0 flex flex-col gap-2 overflow-y-auto">
+                  {cameraTracks.map((track) => (
+                    <div
+                      key={track.participant.identity}
+                      className="aspect-video rounded-lg overflow-hidden bg-gray-800"
+                    >
+                      <TrackRefContext.Provider value={track}>
+                        <CustomParticipantTile />
+                      </TrackRefContext.Provider>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            // Normal grid layout - equal sized tiles
+            <div className="h-full">
+              <style jsx global>{`
+                .lk-grid-layout {
+                  --lk-grid-gap: 8px;
+                }
+                .lk-grid-layout > .lk-participant-tile {
+                  border-radius: 12px;
+                  overflow: hidden;
+                }
+              `}</style>
+              <GridLayout tracks={cameraTracks} style={{ height: '100%' }}>
+                <CustomParticipantTile />
+              </GridLayout>
+            </div>
+          )
         ) : (
           <div className="h-full flex items-center justify-center">
             <div className="text-center">
