@@ -439,6 +439,7 @@ async def _transcribe_recording_task(recording_id: str, storage_path: str, stora
             print(f"Transcription error: {e}")
 
 
+@router.get("")
 @router.get("/")
 async def list_recordings(
     room_code: Optional[str] = None,
@@ -452,8 +453,9 @@ async def list_recordings(
     user_id = current_user.get("user_id") or current_user.get("id") or current_user.get("sub")
     offset = (page - 1) * limit
 
-    where_clauses = ["user_id = :user_id"]
-    params = {"user_id": user_id, "limit": limit, "offset": offset}
+    # Use text cast for UUID comparison to handle different formats
+    where_clauses = ["user_id::text = :user_id"]
+    params = {"user_id": str(user_id), "limit": limit, "offset": offset}
 
     if room_code:
         where_clauses.append("room_code = :room_code")
@@ -468,8 +470,10 @@ async def list_recordings(
     query = text(f"""
         SELECT r.id, r.room_code, r.status, r.duration_seconds, r.file_size_bytes,
                r.resolution, r.storage_path, r.storage_type, r.watermark_applied,
-               r.has_transcript, r.started_at, r.ended_at, r.created_at
+               r.has_transcript, r.started_at, r.ended_at, r.created_at,
+               m.room_name
         FROM workspace.meet_recordings r
+        LEFT JOIN workspace.meet_rooms m ON r.room_code = m.room_code
         WHERE {where_sql}
         ORDER BY r.created_at DESC
         LIMIT :limit OFFSET :offset
@@ -487,6 +491,7 @@ async def list_recordings(
         recordings.append({
             "id": str(row.id),
             "room_code": row.room_code,
+            "room_name": row.room_name or row.room_code,
             "status": row.status,
             "duration_seconds": row.duration_seconds,
             "file_size_bytes": row.file_size_bytes,
