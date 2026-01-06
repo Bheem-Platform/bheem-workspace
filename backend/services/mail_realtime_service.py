@@ -30,7 +30,7 @@ class MailConnectionManager:
 
     async def connect(self, websocket, user_id: str, credentials: Optional[dict] = None):
         """
-        Register a new WebSocket connection.
+        Register a new WebSocket connection (accepts websocket internally).
 
         Args:
             websocket: FastAPI WebSocket connection
@@ -38,7 +38,17 @@ class MailConnectionManager:
             credentials: Mail credentials for IMAP monitoring
         """
         await websocket.accept()
+        await self.register(websocket, user_id, credentials)
 
+    async def register(self, websocket, user_id: str, credentials: Optional[dict] = None):
+        """
+        Register an already-accepted WebSocket connection.
+
+        Args:
+            websocket: FastAPI WebSocket connection (already accepted)
+            user_id: User ID
+            credentials: Mail credentials for IMAP monitoring
+        """
         if user_id not in self.active_connections:
             self.active_connections[user_id] = set()
 

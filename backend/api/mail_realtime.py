@@ -57,6 +57,9 @@ async def mail_websocket(
     - {"type": "ping"} - keep-alive ping
     - {"type": "subscribe_folder", "folder": "INBOX"} - subscribe to folder updates
     """
+    # Accept connection first to avoid 1006 errors
+    await websocket.accept()
+
     # Validate token
     user = await validate_ws_token(token)
     if not user:
@@ -65,12 +68,16 @@ async def mail_websocket(
 
     user_id = user["id"]
 
-    # Get mail credentials for IMAP monitoring
-    credentials = mail_session_service.get_credentials(user_id)
+    # Get mail credentials for IMAP monitoring (optional, don't fail if unavailable)
+    credentials = None
+    try:
+        credentials = mail_session_service.get_credentials(user_id)
+    except Exception as e:
+        logger.warning(f"Could not get mail credentials for WebSocket: {e}")
 
     try:
-        # Register connection
-        await mail_connection_manager.connect(websocket, user_id, credentials)
+        # Register connection (websocket already accepted)
+        await mail_connection_manager.register(websocket, user_id, credentials)
 
         # Send connection confirmation
         await websocket.send_json({
