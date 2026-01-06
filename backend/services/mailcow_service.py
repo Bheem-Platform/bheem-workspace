@@ -174,16 +174,18 @@ class MailcowService:
                         # Get date
                         date_str = msg.get("Date", "")
                         
-                        # Get body preview
+                        # Get body preview and check for attachments
                         body = ""
+                        has_attachments = False
                         if msg.is_multipart():
                             for part in msg.walk():
-                                if part.get_content_type() == "text/plain":
+                                if part.get_content_type() == "text/plain" and not body:
                                     body = part.get_payload(decode=True).decode("utf-8", errors="ignore")[:200]
-                                    break
+                                elif part.get_filename():
+                                    has_attachments = True
                         else:
                             body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")[:200]
-                        
+
                         # Extract threading headers
                         message_id_header = msg.get("Message-ID", "")
                         in_reply_to = msg.get("In-Reply-To", "")
@@ -197,6 +199,7 @@ class MailcowService:
                             "date": date_str,
                             "preview": body.strip(),
                             "read": True,  # TODO: Check flags
+                            "has_attachments": has_attachments,
                             # Threading headers
                             "message_id": message_id_header,
                             "in_reply_to": in_reply_to,
@@ -236,20 +239,44 @@ class MailcowService:
                     if msg.is_multipart():
                         for part in msg.walk():
                             content_type = part.get_content_type()
-                            if content_type == "text/plain":
-                                body_text = part.get_payload(decode=True).decode("utf-8", errors="ignore")
-                            elif content_type == "text/html":
-                                body_html = part.get_payload(decode=True).decode("utf-8", errors="ignore")
-                            elif part.get_filename():
+                            content_disposition = str(part.get("Content-Disposition") or "")
+                            filename = part.get_filename()
+
+                            # Check if this is an attachment
+                            is_attachment = (
+                                filename or
+                                "attachment" in content_disposition.lower() or
+                                (content_type and not content_type.startswith("text/") and
+                                 not content_type.startswith("multipart/"))
+                            )
+
+                            if content_type == "text/plain" and not is_attachment:
+                                payload = part.get_payload(decode=True)
+                                if payload:
+                                    body_text = payload.decode("utf-8", errors="ignore")
+                            elif content_type == "text/html" and not is_attachment:
+                                payload = part.get_payload(decode=True)
+                                if payload:
+                                    body_html = payload.decode("utf-8", errors="ignore")
+                            elif is_attachment:
+                                payload = part.get_payload(decode=True)
                                 attachments.append({
-                                    "filename": part.get_filename(),
-                                    "content_type": content_type,
-                                    "size": len(part.get_payload(decode=True))
+                                    "id": str(len(attachments)),
+                                    "filename": filename or f"attachment_{len(attachments)}",
+                                    "contentType": content_type,
+                                    "size": len(payload) if payload else 0,
+                                    "contentId": part.get("Content-ID", "")
                                 })
                     else:
                         body_text = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
                     
                     mail.logout()
+
+                    # Debug: Log attachments found
+                    if attachments:
+                        print(f"DEBUG: Found {len(attachments)} attachments in message {message_id}: {[a['filename'] for a in attachments]}")
+                    else:
+                        print(f"DEBUG: No attachments found in message {message_id}")
 
                     return {
                         "id": message_id,
@@ -270,9 +297,91 @@ class MailcowService:
             mail.logout()
         except Exception as e:
             print(f"IMAP Error: {e}")
-        
+
         return None
-    
+
+    def get_email_with_attachments(self, email_addr: str, password: str, message_id: str, folder: str = "INBOX") -> Optional[Dict[str, Any]]:
+        """Get a single email with full attachment content (binary)"""
+        try:
+            mail = imaplib.IMAP4_SSL(self.imap_host, self.imap_port, timeout=30)
+            mail.login(email_addr, password)
+            mail.select(folder)
+
+            _, msg_data = mail.fetch(message_id.encode(), "(RFC822)")
+
+            for response_part in msg_data:
+                if isinstance(response_part, tuple):
+                    msg = email_lib.message_from_bytes(response_part[1])
+
+                    # Decode subject
+                    subject = ""
+                    if msg["Subject"]:
+                        decoded = email_lib.header.decode_header(msg["Subject"])[0]
+                        subject = decoded[0] if isinstance(decoded[0], str) else decoded[0].decode(decoded[1] or "utf-8")
+
+                    # Get body and attachments with content
+                    body_html = ""
+                    body_text = ""
+                    attachments = []
+
+                    if msg.is_multipart():
+                        for part in msg.walk():
+                            content_type = part.get_content_type()
+                            content_disposition = str(part.get("Content-Disposition") or "")
+                            filename = part.get_filename()
+
+                            is_attachment = (
+                                filename or
+                                "attachment" in content_disposition.lower() or
+                                (content_type and not content_type.startswith("text/") and
+                                 not content_type.startswith("multipart/"))
+                            )
+
+                            if content_type == "text/plain" and not is_attachment:
+                                payload = part.get_payload(decode=True)
+                                if payload:
+                                    body_text = payload.decode("utf-8", errors="ignore")
+                            elif content_type == "text/html" and not is_attachment:
+                                payload = part.get_payload(decode=True)
+                                if payload:
+                                    body_html = payload.decode("utf-8", errors="ignore")
+                            elif is_attachment:
+                                payload = part.get_payload(decode=True)
+                                if payload:
+                                    attachments.append({
+                                        "id": str(len(attachments)),
+                                        "filename": filename or f"attachment_{len(attachments)}",
+                                        "contentType": content_type,
+                                        "size": len(payload),
+                                        "content": payload,  # Binary content
+                                        "contentId": part.get("Content-ID", "")
+                                    })
+                    else:
+                        body_text = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
+
+                    mail.logout()
+
+                    return {
+                        "id": message_id,
+                        "subject": subject,
+                        "from": msg.get("From", ""),
+                        "to": msg.get("To", ""),
+                        "cc": msg.get("Cc", ""),
+                        "date": msg.get("Date", ""),
+                        "body_html": body_html,
+                        "body_text": body_text,
+                        "attachments": attachments,
+                        "message_id": msg.get("Message-ID", ""),
+                        "in_reply_to": msg.get("In-Reply-To", ""),
+                        "references": msg.get("References", "")
+                    }
+
+            mail.logout()
+        except Exception as e:
+            print(f"IMAP Error in get_email_with_attachments: {e}")
+
+        return None
+
     def send_email(
         self,
         from_email: str,
@@ -282,38 +391,127 @@ class MailcowService:
         body: str,
         cc: List[str] = None,
         bcc: List[str] = None,
-        is_html: bool = True
+        is_html: bool = True,
+        save_to_sent: bool = True,
+        attachments: List[dict] = None
     ) -> bool:
-        """Send email via SMTP (supports both port 465 SSL and port 587 STARTTLS)"""
+        """Send email via SMTP (supports both port 465 SSL and port 587 STARTTLS)
+
+        Args:
+            attachments: List of dicts with keys: filename, content_type, content (base64 encoded)
+        """
         try:
-            msg = MIMEMultipart("alternative")
+            import base64
+            from email.mime.base import MIMEBase
+            from email import encoders
+
+            # Use "mixed" when we have attachments, "alternative" otherwise
+            if attachments and len(attachments) > 0:
+                msg = MIMEMultipart("mixed")
+                # Create alternative part for body
+                body_part = MIMEMultipart("alternative")
+                if is_html:
+                    body_part.attach(MIMEText(body, "html"))
+                else:
+                    body_part.attach(MIMEText(body, "plain"))
+                msg.attach(body_part)
+            else:
+                msg = MIMEMultipart("alternative")
+                if is_html:
+                    msg.attach(MIMEText(body, "html"))
+                else:
+                    msg.attach(MIMEText(body, "plain"))
+
             msg["Subject"] = subject
             msg["From"] = from_email
             msg["To"] = ", ".join(to)
+            msg["Date"] = email_lib.utils.formatdate(localtime=True)
+            msg["Message-ID"] = email_lib.utils.make_msgid(domain=from_email.split("@")[1])
             if cc:
                 msg["Cc"] = ", ".join(cc)
 
-            if is_html:
-                msg.attach(MIMEText(body, "html"))
-            else:
-                msg.attach(MIMEText(body, "plain"))
+            # Add attachments
+            if attachments:
+                for attachment in attachments:
+                    filename = attachment.get("filename", "attachment")
+                    content_type = attachment.get("content_type", "application/octet-stream")
+                    content_b64 = attachment.get("content", "")
+
+                    # Decode base64 content
+                    try:
+                        content = base64.b64decode(content_b64)
+                    except Exception:
+                        print(f"Failed to decode attachment: {filename}")
+                        continue
+
+                    maintype, subtype = content_type.split("/", 1) if "/" in content_type else ("application", "octet-stream")
+
+                    part = MIMEBase(maintype, subtype)
+                    part.set_payload(content)
+                    encoders.encode_base64(part)
+                    part.add_header(
+                        "Content-Disposition",
+                        f"attachment; filename=\"{filename}\""
+                    )
+                    msg.attach(part)
 
             recipients = to + (cc or []) + (bcc or [])
+            msg_string = msg.as_string()
 
             # Use STARTTLS for port 587, SSL for port 465
             if self.smtp_port == 587:
                 with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=30) as server:
                     server.starttls()
                     server.login(from_email, password)
-                    server.sendmail(from_email, recipients, msg.as_string())
+                    server.sendmail(from_email, recipients, msg_string)
             else:
                 with smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=30) as server:
                     server.login(from_email, password)
-                    server.sendmail(from_email, recipients, msg.as_string())
+                    server.sendmail(from_email, recipients, msg_string)
+
+            # Save a copy to the Sent folder via IMAP
+            if save_to_sent:
+                self._save_to_sent_folder(from_email, password, msg_string)
 
             return True
         except Exception as e:
             print(f"SMTP Error: {e}")
+            return False
+
+    def _save_to_sent_folder(self, email: str, password: str, msg_string: str) -> bool:
+        """Save sent email to the Sent folder via IMAP"""
+        try:
+            mail = imaplib.IMAP4_SSL(self.imap_host, self.imap_port, timeout=30)
+            mail.login(email, password)
+
+            # Try different Sent folder names (varies by mail server)
+            sent_folders = ["Sent", "INBOX.Sent", "Sent Items", "Sent Messages"]
+
+            # Use timezone-aware datetime for IMAP
+            import time
+            date_time = imaplib.Time2Internaldate(time.time())
+
+            for sent_folder in sent_folders:
+                try:
+                    result = mail.append(
+                        sent_folder,
+                        "\\Seen",  # Mark as read
+                        date_time,
+                        msg_string.encode()
+                    )
+                    if result[0] == "OK":
+                        print(f"Saved email to {sent_folder}")
+                        mail.logout()
+                        return True
+                except Exception as e:
+                    print(f"Failed to save to {sent_folder}: {e}")
+                    continue
+
+            mail.logout()
+            print("Could not save to Sent folder - no valid folder found")
+            return False
+        except Exception as e:
+            print(f"Error saving to Sent folder: {e}")
             return False
     
     def get_folders(self, email: str, password: str) -> List[str]:

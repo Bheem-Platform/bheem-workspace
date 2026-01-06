@@ -232,9 +232,14 @@ export const useCredentialsStore = create<CredentialsState>()(
             isMailAuthenticated: false,
           });
           return false;
-        } catch (error) {
-          // Server check failed - keep local state for now
-          return get().isMailAuthenticated;
+        } catch (error: any) {
+          // If server returns 401 or session check fails, clear the session
+          console.warn('Session verification failed:', error.message || error);
+          set({
+            mailSession: null,
+            isMailAuthenticated: false,
+          });
+          return false;
         }
       },
 

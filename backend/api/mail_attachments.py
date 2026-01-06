@@ -242,7 +242,7 @@ async def get_attachment_preview(
 
 
 @router.get("/{message_id}/download/{attachment_index}")
-async def download_attachment(
+def download_attachment(
     message_id: str,
     attachment_index: int,
     folder: str = Query("INBOX"),
@@ -258,42 +258,29 @@ async def download_attachment(
         raise HTTPException(status_code=401, detail="Mail session expired")
 
     try:
-        # Fetch the email
-        email = await mailcow_service.get_message(
+        # Fetch the email with full attachment content
+        email_content = mailcow_service.get_email_with_attachments(
             credentials["email"],
             credentials["password"],
-            folder,
-            message_id
+            message_id,
+            folder
         )
 
-        if not email:
+        if not email_content:
             raise HTTPException(status_code=404, detail="Email not found")
 
-        attachments = email.get('attachments', [])
+        attachments = email_content.get('attachments', [])
         if attachment_index >= len(attachments):
             raise HTTPException(status_code=404, detail="Attachment not found")
 
         attachment = attachments[attachment_index]
         filename = attachment.get('filename', 'attachment')
-        content_type = attachment.get('content_type', 'application/octet-stream')
+        content_type = attachment.get('contentType', attachment.get('content_type', 'application/octet-stream'))
 
-        # Get attachment content
+        # Get attachment content (already decoded binary)
         content = attachment.get('content')
         if not content:
-            content = await mailcow_service.get_attachment(
-                credentials["email"],
-                credentials["password"],
-                folder,
-                message_id,
-                attachment_index
-            )
-
-        if not content:
             raise HTTPException(status_code=404, detail="Attachment content not found")
-
-        # Decode if base64 encoded
-        if isinstance(content, str):
-            content = base64.b64decode(content)
 
         # Set disposition header
         disposition = 'inline' if inline else 'attachment'

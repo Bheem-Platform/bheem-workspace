@@ -101,7 +101,7 @@ const initialState = {
   // Conversation Threading
   conversations: [],
   selectedConversation: null,
-  viewMode: 'threaded' as const,  // Default to threaded view
+  viewMode: 'list' as const,  // Default to flat list view for reliability
   // Search (Phase 2.2)
   isSearchActive: false,
   searchResults: [] as Email[],
@@ -665,8 +665,14 @@ export const useMailStore = create<MailState>((set, get) => ({
 
   selectEmail: (email: Email | null) => {
     set({ selectedEmail: email });
-    if (email && !email.isRead) {
-      get().markAsRead(email.id, true);
+    if (email) {
+      // Mark as read
+      if (!email.isRead) {
+        get().markAsRead(email.id, true);
+      }
+      // Always fetch full email content to get body, attachments, etc.
+      // The list view only has preview data
+      get().fetchEmail(email.id);
     }
   },
 

@@ -74,12 +74,12 @@ async def detect_calendar_events(
         )
 
     try:
-        # Fetch the email
-        email = await mailcow_service.get_message(
+        # Fetch the email (synchronous method)
+        email = mailcow_service.get_email(
             credentials["email"],
             credentials["password"],
-            folder,
-            message_id
+            message_id,
+            folder
         )
 
         if not email:
@@ -90,7 +90,7 @@ async def detect_calendar_events(
 
         # Detect events
         events = calendar_detection_service.detect_events(
-            email_body=email.get('body', '') or email.get('body_text', ''),
+            email_body=email.get('body_html', '') or email.get('body_text', '') or email.get('body', ''),
             email_subject=email.get('subject', ''),
             attachments=email.get('attachments', [])
         )
@@ -242,12 +242,12 @@ async def add_email_event_to_calendar(
         )
 
     try:
-        # Fetch the email
-        email = await mailcow_service.get_message(
+        # Fetch the email (synchronous method)
+        email = mailcow_service.get_email(
             credentials["email"],
             credentials["password"],
-            folder,
-            message_id
+            message_id,
+            folder
         )
 
         if not email:
@@ -258,7 +258,7 @@ async def add_email_event_to_calendar(
 
         # Detect events
         events = calendar_detection_service.detect_events(
-            email_body=email.get('body', '') or email.get('body_text', ''),
+            email_body=email.get('body_html', '') or email.get('body_text', '') or email.get('body', ''),
             email_subject=email.get('subject', ''),
             attachments=email.get('attachments', [])
         )

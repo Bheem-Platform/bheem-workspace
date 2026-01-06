@@ -185,7 +185,7 @@ export default function MailList({ onSelectEmail, selectedEmailId }: MailListPro
       )}
 
       {/* Email List */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto mail-scrollbar">
         {loading.emails ? (
           <div className="p-4">
             <SkeletonList count={8} />

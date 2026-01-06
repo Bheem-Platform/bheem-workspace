@@ -19,7 +19,7 @@ export default function UndoSendToast({
   recipient,
   onUndo,
   onDismiss,
-  delay = 30,
+  delay = 5,
 }: UndoSendToastProps) {
   const [countdown, setCountdown] = useState(delay);
   const [isUndoing, setIsUndoing] = useState(false);
@@ -152,7 +152,7 @@ export function UndoSendToastManager() {
 
   // Expose method to show toast
   useEffect(() => {
-    (window as any).showUndoSendToast = (queueId: string, recipient: string, delay: number = 30) => {
+    (window as any).showUndoSendToast = (queueId: string, recipient: string, delay: number = 5) => {
       const id = Math.random().toString(36).substr(2, 9);
       setToasts((prev) => [...prev, { id, queueId, recipient, delay }]);
     };

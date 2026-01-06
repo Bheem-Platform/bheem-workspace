@@ -2,9 +2,11 @@
 Bheem Workspace - Undo Send API
 Send emails with undo capability (delayed sending)
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, File, UploadFile, Form
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
+import json
+import base64
 from core.security import get_current_user
 from services.undo_send_service import undo_send_service, DEFAULT_UNDO_DELAY
 
@@ -36,7 +38,7 @@ class SendWithUndoRequest(BaseModel):
     subject: str
     body: str
     is_html: Optional[bool] = True
-    delay_seconds: Optional[int] = DEFAULT_UNDO_DELAY  # Default 30 seconds
+    delay_seconds: Optional[int] = DEFAULT_UNDO_DELAY  # Default 5 seconds
 
 
 class SendWithUndoResponse(BaseModel):
@@ -80,7 +82,7 @@ async def send_with_undo(
     The email is queued and will be sent after the delay period.
     During the delay, the user can cancel the send.
 
-    Default delay is 30 seconds. Maximum allowed is 120 seconds.
+    Default delay is 5 seconds. Maximum allowed is 120 seconds.
     """
     user_id = current_user.get("id") or current_user.get("user_id")
 
@@ -114,6 +116,95 @@ async def send_with_undo(
         return SendWithUndoResponse(
             success=True,
             message=f"Email queued. Will be sent in {delay} seconds unless cancelled.",
+            queue_id=result["queue_id"],
+            send_at=result["send_at"],
+            delay_seconds=result["delay_seconds"],
+            can_undo=result["can_undo"]
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/attachments", response_model=SendWithUndoResponse)
+@limiter.limit(RateLimits.MAIL_SEND)
+async def send_with_undo_attachments(
+    request_obj: Request,
+    to: str = Form(...),
+    subject: str = Form(...),
+    body: str = Form(...),
+    cc: str = Form("[]"),
+    bcc: str = Form("[]"),
+    is_html: str = Form("true"),
+    delay_seconds: str = Form("5"),
+    attachments: List[UploadFile] = File(default=[]),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Send an email with attachments and undo capability.
+
+    Uses multipart form data to accept file attachments.
+    Files are base64 encoded and included in the email.
+    """
+    user_id = current_user.get("id") or current_user.get("user_id")
+
+    # Parse JSON arrays
+    try:
+        to_list = json.loads(to)
+        cc_list = json.loads(cc) if cc else []
+        bcc_list = json.loads(bcc) if bcc else []
+    except json.JSONDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid JSON format for recipients"
+        )
+
+    # Validate recipients
+    if not to_list:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one recipient is required"
+        )
+
+    # Parse other fields
+    is_html_bool = is_html.lower() == "true"
+    delay = min(max(5, int(delay_seconds)), 120)
+
+    # Process attachments
+    attachment_data = []
+    for file in attachments:
+        content = await file.read()
+        attachment_data.append({
+            "filename": file.filename,
+            "content_type": file.content_type or "application/octet-stream",
+            "content": base64.b64encode(content).decode("utf-8"),
+            "size": len(content)
+        })
+
+    # Build email data
+    email_data = {
+        "to": to_list,
+        "cc": cc_list,
+        "bcc": bcc_list,
+        "subject": subject,
+        "body": body,
+        "is_html": is_html_bool,
+        "attachments": attachment_data
+    }
+
+    try:
+        result = await undo_send_service.queue_email(
+            user_id=user_id,
+            email_data=email_data,
+            delay_seconds=delay
+        )
+
+        return SendWithUndoResponse(
+            success=True,
+            message=f"Email with {len(attachment_data)} attachment(s) queued. Will be sent in {delay} seconds.",
             queue_id=result["queue_id"],
             send_at=result["send_at"],
             delay_seconds=result["delay_seconds"],

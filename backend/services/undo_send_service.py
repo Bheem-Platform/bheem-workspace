@@ -11,8 +11,8 @@ from core.logging import get_logger
 
 logger = get_logger("bheem.mail.undo_send")
 
-# Default delay in seconds
-DEFAULT_UNDO_DELAY = 30
+# Default delay in seconds (5 seconds for quick send)
+DEFAULT_UNDO_DELAY = 5
 
 
 class UndoSendService:
@@ -306,7 +306,8 @@ class UndoSendService:
             body=email_data.get('body', ''),
             cc=email_data.get('cc'),
             bcc=email_data.get('bcc'),
-            is_html=email_data.get('is_html', True)
+            is_html=email_data.get('is_html', True),
+            attachments=email_data.get('attachments', [])
         )
 
         if not success:

@@ -31,6 +31,7 @@ interface AttachmentPreviewProps {
   attachments?: Attachment[]; // All attachments for navigation
   messageId: string;
   attachmentIndex?: number;  // Index of the attachment for download URL
+  folder?: string; // Current mail folder (INBOX, Sent, etc.)
   onClose: () => void;
 }
 
@@ -39,6 +40,7 @@ export default function AttachmentPreview({
   attachments = [],
   messageId,
   attachmentIndex = 0,
+  folder = 'INBOX',
   onClose,
 }: AttachmentPreviewProps) {
   const [previewInfo, setPreviewInfo] = useState<any>(null);
@@ -47,6 +49,7 @@ export default function AttachmentPreview({
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [currentIndex, setCurrentIndex] = useState(
     attachments.findIndex((a) => a.id === attachment.id) >= 0
       ? attachments.findIndex((a) => a.id === attachment.id)
@@ -58,6 +61,51 @@ export default function AttachmentPreview({
   useEffect(() => {
     fetchPreviewInfo();
   }, [currentAttachment.id]);
+
+  // Fetch blob URL for preview with authentication
+  useEffect(() => {
+    let cancelled = false;
+
+    const fetchBlobUrl = async () => {
+      // Clean up previous blob URL
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+        setBlobUrl(null);
+      }
+
+      if (!previewInfo?.can_preview) return;
+
+      try {
+        const { blobUrl: newBlobUrl } = await mailApi.downloadAttachment(
+          messageId,
+          currentIndex,
+          folder
+        );
+        if (!cancelled) {
+          setBlobUrl(newBlobUrl);
+        }
+      } catch (err) {
+        console.error('Failed to fetch attachment blob:', err);
+      }
+    };
+
+    if (previewInfo) {
+      fetchBlobUrl();
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [previewInfo, currentIndex, messageId, folder]);
+
+  // Cleanup blob URL on unmount
+  useEffect(() => {
+    return () => {
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+      }
+    };
+  }, []);
 
   const fetchPreviewInfo = async () => {
     setLoading(true);
@@ -76,9 +124,23 @@ export default function AttachmentPreview({
     }
   };
 
-  const handleDownload = () => {
-    const url = mailApi.getAttachmentDownloadUrl(messageId, currentIndex);
-    window.open(url, '_blank');
+  const [downloading, setDownloading] = useState(false);
+
+  const handleDownload = async () => {
+    setDownloading(true);
+    try {
+      await mailApi.downloadAndSaveAttachment(
+        messageId,
+        currentIndex,
+        folder,
+        currentAttachment.filename
+      );
+    } catch (err) {
+      console.error('Download failed:', err);
+      setError('Failed to download attachment');
+    } finally {
+      setDownloading(false);
+    }
   };
 
   const handlePrevious = () => {
@@ -142,10 +204,17 @@ export default function AttachmentPreview({
 
     // Image preview
     if (previewInfo.preview_type === 'image') {
+      if (!blobUrl) {
+        return (
+          <div className="flex items-center justify-center h-full">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500" />
+          </div>
+        );
+      }
       return (
         <div className="flex items-center justify-center h-full overflow-auto p-4">
           <img
-            src={mailApi.getAttachmentDownloadUrl(messageId, currentIndex)}
+            src={blobUrl}
             alt={currentAttachment.filename}
             className="max-w-full max-h-full object-contain transition-transform duration-200"
             style={{
@@ -158,9 +227,16 @@ export default function AttachmentPreview({
 
     // PDF preview
     if (previewInfo.preview_type === 'pdf') {
+      if (!blobUrl) {
+        return (
+          <div className="flex items-center justify-center h-full">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500" />
+          </div>
+        );
+      }
       return (
         <iframe
-          src={`${mailApi.getAttachmentDownloadUrl(messageId, currentIndex)}#toolbar=0`}
+          src={`${blobUrl}#toolbar=0`}
           className="w-full h-full border-0"
           title={currentAttachment.filename}
         />
@@ -169,10 +245,17 @@ export default function AttachmentPreview({
 
     // Video preview
     if (previewInfo.preview_type === 'video') {
+      if (!blobUrl) {
+        return (
+          <div className="flex items-center justify-center h-full">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500" />
+          </div>
+        );
+      }
       return (
         <div className="flex items-center justify-center h-full p-4">
           <video
-            src={mailApi.getAttachmentDownloadUrl(messageId, currentIndex)}
+            src={blobUrl}
             controls
             className="max-w-full max-h-full rounded-lg"
           >
@@ -184,12 +267,19 @@ export default function AttachmentPreview({
 
     // Audio preview
     if (previewInfo.preview_type === 'audio') {
+      if (!blobUrl) {
+        return (
+          <div className="flex items-center justify-center h-full">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500" />
+          </div>
+        );
+      }
       return (
         <div className="flex flex-col items-center justify-center h-full p-8">
           <Music size={64} className="text-pink-500 mb-6" />
           <h3 className="text-lg font-medium text-gray-900 mb-2">{currentAttachment.filename}</h3>
           <audio
-            src={mailApi.getAttachmentDownloadUrl(messageId, currentIndex)}
+            src={blobUrl}
             controls
             className="w-full max-w-md mt-4"
           >
@@ -206,6 +296,7 @@ export default function AttachmentPreview({
           <TextPreview
             messageId={messageId}
             attachmentIndex={currentIndex}
+            folder={folder}
             language={previewInfo.language}
           />
         </div>
@@ -337,17 +428,9 @@ export default function AttachmentPreview({
                   : 'border-transparent hover:border-white/50'
               }`}
             >
-              {att.contentType.startsWith('image/') ? (
-                <img
-                  src={mailApi.getAttachmentDownloadUrl(messageId, idx)}
-                  alt={att.filename}
-                  className="w-full h-full object-cover"
-                />
-              ) : (
-                <div className="w-full h-full bg-gray-800 flex items-center justify-center">
-                  <FileIcon type={att.contentType} size={24} />
-                </div>
-              )}
+              <div className="w-full h-full bg-gray-800 flex items-center justify-center">
+                <FileIcon type={att.contentType} size={24} />
+              </div>
             </button>
           ))}
         </div>
@@ -360,10 +443,12 @@ export default function AttachmentPreview({
 function TextPreview({
   messageId,
   attachmentIndex,
+  folder = 'INBOX',
   language,
 }: {
   messageId: string;
   attachmentIndex: number;
+  folder?: string;
   language?: string;
 }) {
   const [content, setContent] = useState<string>('');
@@ -372,7 +457,20 @@ function TextPreview({
   useEffect(() => {
     const fetchContent = async () => {
       try {
-        const response = await fetch(mailApi.getAttachmentDownloadUrl(messageId, attachmentIndex));
+        // Get auth token for authenticated fetch
+        const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+        const url = mailApi.getAttachmentDownloadUrl(messageId, attachmentIndex, folder);
+
+        const response = await fetch(url, {
+          headers: {
+            'Authorization': token ? `Bearer ${token}` : '',
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
         const text = await response.text();
         setContent(text);
       } catch (error) {
@@ -382,7 +480,7 @@ function TextPreview({
       }
     };
     fetchContent();
-  }, [messageId, attachmentIndex]);
+  }, [messageId, attachmentIndex, folder]);
 
   if (loading) {
     return <div className="text-white/50">Loading...</div>;

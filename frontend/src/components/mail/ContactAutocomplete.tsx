@@ -85,7 +85,7 @@ export default function ContactAutocomplete({
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setSelectedIndex((prev) => Math.max(prev - 1, 0));
-    } else if (e.key === 'Enter') {
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
       e.preventDefault();
       if (suggestions[selectedIndex]) {
         addEmail(suggestions[selectedIndex].email);
@@ -102,6 +102,15 @@ export default function ContactAutocomplete({
         addEmail(inputValue);
       }
     }
+  };
+
+  // Auto-add email when input loses focus
+  const handleBlur = () => {
+    if (inputValue && isValidEmail(inputValue)) {
+      addEmail(inputValue);
+    }
+    // Delay closing to allow click on suggestions
+    setTimeout(() => setIsOpen(false), 200);
   };
 
   const addEmail = (email: string) => {
@@ -179,6 +188,7 @@ export default function ContactAutocomplete({
           onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           onFocus={() => setIsOpen(true)}
+          onBlur={handleBlur}
           className="flex-1 min-w-[120px] py-1 px-1 text-sm border-0 focus:ring-0 focus:outline-none"
           placeholder={value.length === 0 ? placeholder : ''}
         />

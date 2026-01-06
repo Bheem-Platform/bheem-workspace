@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Reply,
   ReplyAll,
@@ -15,10 +15,16 @@ import {
   Printer,
   Tag,
   Mail,
+  Eye,
+  Sparkles,
+  FileText,
+  Loader2,
 } from 'lucide-react';
-import { useMailStore, useReplyToEmail, useReplyAllToEmail, useForwardEmail } from '@/stores/mailStore';
+import * as mailApi from '@/lib/mailApi';
+import { useMailStore } from '@/stores/mailStore';
 import EmptyState from '@/components/shared/EmptyState';
 import CalendarEventDetector, { ICSAttachment } from './CalendarEventDetector';
+import AttachmentPreview from './AttachmentPreview';
 import type { Email, Attachment } from '@/types/mail';
 
 interface MailViewerProps {
@@ -26,9 +32,112 @@ interface MailViewerProps {
 }
 
 export default function MailViewer({ email }: MailViewerProps) {
-  const { deleteEmail, moveEmail, toggleStar, markAsRead } = useMailStore();
+  const { deleteEmail, moveEmail, toggleStar, markAsRead, openCompose, currentFolder } = useMailStore();
   const [showDetails, setShowDetails] = useState(false);
   const [showImages, setShowImages] = useState(false);
+  const [previewAttachment, setPreviewAttachment] = useState<{ attachment: Attachment; index: number } | null>(null);
+
+  // AI Features state
+  const [smartReplies, setSmartReplies] = useState<string[]>([]);
+  const [loadingReplies, setLoadingReplies] = useState(false);
+  const [summary, setSummary] = useState<{ summary: string; key_points: string[]; action_items: string[]; sentiment: string } | null>(null);
+  const [loadingSummary, setLoadingSummary] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
+
+  // Fetch smart replies when email changes
+  useEffect(() => {
+    if (email) {
+      setSmartReplies([]);
+      setSummary(null);
+      setShowSummary(false);
+      fetchSmartReplies();
+    }
+  }, [email?.id]);
+
+  const fetchSmartReplies = async () => {
+    if (!email) return;
+    setLoadingReplies(true);
+    try {
+      const result = await mailApi.aiSmartReplies(
+        email.bodyHtml || email.body || email.bodyText || '',
+        email.from.name || email.from.email,
+        3
+      );
+      setSmartReplies(result.replies || []);
+    } catch (error) {
+      console.error('Failed to fetch smart replies:', error);
+    } finally {
+      setLoadingReplies(false);
+    }
+  };
+
+  const fetchSummary = async () => {
+    if (!email) return;
+    setLoadingSummary(true);
+    try {
+      const result = await mailApi.aiSummarizeEmail(
+        email.bodyHtml || email.body || email.bodyText || ''
+      );
+      setSummary(result);
+      setShowSummary(true);
+    } catch (error) {
+      console.error('Failed to summarize email:', error);
+    } finally {
+      setLoadingSummary(false);
+    }
+  };
+
+  const handleSmartReply = (reply: string) => {
+    if (!email) return;
+    openCompose({
+      to: [email.from.email],
+      subject: email.subject.startsWith('Re:') ? email.subject : `Re: ${email.subject}`,
+      body: reply,
+      inReplyTo: email.messageId,
+      replyType: 'reply',
+      originalEmail: email,
+    });
+  };
+
+  // Handle reply/forward - must be defined before any conditional returns
+  const handleReply = () => {
+    if (!email) return;
+    openCompose({
+      to: [email.from.email],
+      subject: email.subject.startsWith('Re:') ? email.subject : `Re: ${email.subject}`,
+      inReplyTo: email.messageId,
+      replyType: 'reply',
+      originalEmail: email,
+    });
+  };
+
+  const handleReplyAll = () => {
+    if (!email) return;
+    const allRecipients = [
+      email.from.email,
+      ...email.to.map(t => t.email),
+      ...(email.cc?.map(c => c.email) || []),
+    ];
+    // Remove duplicates
+    const uniqueRecipients = Array.from(new Set(allRecipients));
+    openCompose({
+      to: uniqueRecipients,
+      subject: email.subject.startsWith('Re:') ? email.subject : `Re: ${email.subject}`,
+      inReplyTo: email.messageId,
+      replyType: 'replyAll',
+      originalEmail: email,
+    });
+  };
+
+  const handleForward = () => {
+    if (!email) return;
+    openCompose({
+      subject: email.subject.startsWith('Fwd:') ? email.subject : `Fwd: ${email.subject}`,
+      body: email.bodyHtml || email.body || '',
+      replyType: 'forward',
+      originalEmail: email,
+    });
+  };
 
   if (!email) {
     return (
@@ -41,10 +150,6 @@ export default function MailViewer({ email }: MailViewerProps) {
       </div>
     );
   }
-
-  const handleReply = useReplyToEmail(email);
-  const handleReplyAll = useReplyAllToEmail(email);
-  const handleForward = useForwardEmail(email);
 
   const formatDate = (dateStr: string) => {
     const date = new Date(dateStr);
@@ -160,6 +265,19 @@ export default function MailViewer({ email }: MailViewerProps) {
           <button className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
             <Printer size={18} />
           </button>
+          <button
+            onClick={fetchSummary}
+            disabled={loadingSummary}
+            className="flex items-center gap-1 px-3 py-2 text-purple-600 hover:bg-purple-50 rounded-lg"
+            title="AI Summary"
+          >
+            {loadingSummary ? (
+              <Loader2 size={18} className="animate-spin" />
+            ) : (
+              <Sparkles size={18} />
+            )}
+            <span className="text-sm font-medium">Summary</span>
+          </button>
           <button className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
             <MoreHorizontal size={18} />
           </button>
@@ -167,7 +285,56 @@ export default function MailViewer({ email }: MailViewerProps) {
       </div>
 
       {/* Email Content */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto mail-scrollbar">
+        {/* AI Summary Panel */}
+        {showSummary && summary && (
+          <div className="mx-6 mt-4 p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl border border-purple-100">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Sparkles size={16} className="text-purple-600" />
+                <span className="text-sm font-semibold text-purple-900">AI Summary</span>
+                <span className={`px-2 py-0.5 text-xs rounded-full ${
+                  summary.sentiment === 'positive' ? 'bg-green-100 text-green-700' :
+                  summary.sentiment === 'negative' ? 'bg-red-100 text-red-700' :
+                  'bg-gray-100 text-gray-700'
+                }`}>
+                  {summary.sentiment}
+                </span>
+              </div>
+              <button
+                onClick={() => setShowSummary(false)}
+                className="text-purple-400 hover:text-purple-600"
+              >
+                <ChevronUp size={16} />
+              </button>
+            </div>
+            <p className="text-sm text-gray-700 mb-3">{summary.summary}</p>
+            {summary.key_points.length > 0 && (
+              <div className="mb-3">
+                <p className="text-xs font-medium text-purple-700 mb-1">Key Points:</p>
+                <ul className="text-sm text-gray-600 list-disc list-inside space-y-1">
+                  {summary.key_points.map((point, idx) => (
+                    <li key={idx}>{point}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {summary.action_items.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-purple-700 mb-1">Action Items:</p>
+                <ul className="text-sm text-gray-600 space-y-1">
+                  {summary.action_items.map((item, idx) => (
+                    <li key={idx} className="flex items-center gap-2">
+                      <FileText size={12} className="text-purple-500" />
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Subject */}
         <div className="px-6 py-4 border-b border-gray-100">
           <h1 className="text-xl font-semibold text-gray-900">
@@ -317,16 +484,55 @@ export default function MailViewer({ email }: MailViewerProps) {
               </span>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              {email.attachments.map((attachment) => (
-                <AttachmentCard key={attachment.id} attachment={attachment} />
+              {email.attachments.map((attachment, index) => (
+                <AttachmentCard
+                  key={attachment.id}
+                  attachment={attachment}
+                  onClick={() => setPreviewAttachment({ attachment, index })}
+                />
               ))}
             </div>
           </div>
         )}
       </div>
 
-      {/* Quick Reply */}
+      {/* Attachment Preview Modal */}
+      {previewAttachment && email && (
+        <AttachmentPreview
+          attachment={previewAttachment.attachment}
+          attachments={email.attachments}
+          messageId={email.id}
+          attachmentIndex={previewAttachment.index}
+          folder={currentFolder}
+          onClose={() => setPreviewAttachment(null)}
+        />
+      )}
+
+      {/* Smart Replies & Quick Reply */}
       <div className="flex-shrink-0 p-4 border-t border-gray-200 bg-gray-50">
+        {/* Smart Reply Suggestions */}
+        {(smartReplies.length > 0 || loadingReplies) && (
+          <div className="mb-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Sparkles size={14} className="text-purple-500" />
+              <span className="text-xs font-medium text-gray-500">Smart Replies</span>
+              {loadingReplies && <Loader2 size={12} className="animate-spin text-purple-500" />}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {smartReplies.map((reply, idx) => (
+                <button
+                  key={idx}
+                  onClick={() => handleSmartReply(reply)}
+                  className="px-3 py-1.5 text-sm bg-white border border-purple-200 text-purple-700 rounded-full hover:bg-purple-50 hover:border-purple-300 transition-colors"
+                >
+                  {reply.length > 50 ? reply.substring(0, 50) + '...' : reply}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Quick Reply Box */}
         <button
           onClick={handleReply}
           className="w-full px-4 py-3 text-left text-gray-500 bg-white border border-gray-200 rounded-lg hover:border-gray-300 hover:bg-gray-50 transition-colors"
@@ -339,7 +545,7 @@ export default function MailViewer({ email }: MailViewerProps) {
 }
 
 // Attachment Card Component
-function AttachmentCard({ attachment }: { attachment: Attachment }) {
+function AttachmentCard({ attachment, onClick }: { attachment: Attachment; onClick?: () => void }) {
   const formatSize = (bytes: number) => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -357,7 +563,10 @@ function AttachmentCard({ attachment }: { attachment: Attachment }) {
   };
 
   return (
-    <div className="flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-lg hover:border-gray-300 group">
+    <div
+      className="flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-lg hover:border-gray-300 hover:bg-gray-50 cursor-pointer group transition-colors"
+      onClick={onClick}
+    >
       <span className="text-2xl">{getFileIcon()}</span>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-gray-900 truncate">
@@ -365,9 +574,25 @@ function AttachmentCard({ attachment }: { attachment: Attachment }) {
         </p>
         <p className="text-xs text-gray-500">{formatSize(attachment.size)}</p>
       </div>
-      <button className="p-1.5 text-gray-400 hover:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity">
-        <Download size={16} />
-      </button>
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button
+          className="p-1.5 text-gray-400 hover:text-orange-500"
+          title="Preview"
+          onClick={(e) => {
+            e.stopPropagation();
+            onClick?.();
+          }}
+        >
+          <Eye size={16} />
+        </button>
+        <button
+          className="p-1.5 text-gray-400 hover:text-gray-600"
+          title="Download"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Download size={16} />
+        </button>
+      </div>
     </div>
   );
 }

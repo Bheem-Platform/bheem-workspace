@@ -736,8 +736,9 @@ export interface QueuedEmailStatus {
 
 /**
  * Send an email with undo capability.
- * The email will be queued and sent after delay_seconds (default 30s).
+ * The email will be queued and sent after delay_seconds (default 5s).
  * Can be cancelled within the delay window.
+ * Supports file attachments via FormData.
  */
 export const sendEmailWithUndo = async (data: {
   to: string[];
@@ -746,8 +747,34 @@ export const sendEmailWithUndo = async (data: {
   subject: string;
   body: string;
   is_html?: boolean;
-  delay_seconds?: number; // Default 30, max 120
+  delay_seconds?: number; // Default 5, max 120
+  attachments?: File[];
 }): Promise<SendWithUndoResponse> => {
+  // If there are attachments, use FormData
+  if (data.attachments && data.attachments.length > 0) {
+    const formData = new FormData();
+    formData.append('to', JSON.stringify(data.to));
+    formData.append('cc', JSON.stringify(data.cc || []));
+    formData.append('bcc', JSON.stringify(data.bcc || []));
+    formData.append('subject', data.subject);
+    formData.append('body', data.body);
+    formData.append('is_html', String(data.is_html ?? true));
+    formData.append('delay_seconds', String(data.delay_seconds || 5));
+
+    // Append each file
+    data.attachments.forEach((file) => {
+      formData.append('attachments', file);
+    });
+
+    const response = await api.post('/mail/send-with-undo/attachments', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    });
+    return response.data;
+  }
+
+  // No attachments - use regular JSON
   const response = await api.post('/mail/send-with-undo', {
     to: data.to,
     cc: data.cc || [],
@@ -755,7 +782,7 @@ export const sendEmailWithUndo = async (data: {
     subject: data.subject,
     body: data.body,
     is_html: data.is_html ?? true,
-    delay_seconds: data.delay_seconds || 30,
+    delay_seconds: data.delay_seconds || 5,
   });
   return response.data;
 };
@@ -1849,6 +1876,75 @@ export const getAttachmentDownloadUrl = (
 };
 
 /**
+ * Download an attachment with proper authentication.
+ * Returns a blob URL that can be used for download or preview.
+ */
+export const downloadAttachment = async (
+  messageId: string,
+  attachmentIndex: number,
+  folder: string = 'INBOX'
+): Promise<{ blobUrl: string; filename: string }> => {
+  // Get auth token
+  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+
+  // Use fetch directly to ensure proper headers with blob response
+  const url = `/api/v1/mail/attachments/${encodeURIComponent(messageId)}/download/${attachmentIndex}?folder=${encodeURIComponent(folder)}`;
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Authorization': token ? `Bearer ${token}` : '',
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to download: ${response.status} - ${errorText}`);
+  }
+
+  // Get filename from Content-Disposition header or use default
+  const contentDisposition = response.headers.get('content-disposition');
+  let filename = `attachment_${attachmentIndex}`;
+  if (contentDisposition) {
+    const match = contentDisposition.match(/filename="?([^";\n]+)"?/);
+    if (match) {
+      filename = match[1];
+    }
+  }
+
+  const blob = await response.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  return { blobUrl, filename };
+};
+
+/**
+ * Download and save an attachment file.
+ */
+export const downloadAndSaveAttachment = async (
+  messageId: string,
+  attachmentIndex: number,
+  folder: string = 'INBOX',
+  filename?: string
+): Promise<void> => {
+  const { blobUrl, filename: detectedFilename } = await downloadAttachment(
+    messageId,
+    attachmentIndex,
+    folder
+  );
+
+  // Create a temporary link and trigger download
+  const link = document.createElement('a');
+  link.href = blobUrl;
+  link.download = filename || detectedFilename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+
+  // Clean up the blob URL
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+};
+
+/**
  * List all attachments for an email with preview info.
  */
 export const listEmailAttachments = async (
@@ -1891,3 +1987,137 @@ export function parseEmailAddress(str: string): { name: string; email: string } 
   }
   return { name: '', email: str.trim() };
 }
+
+// ===========================================
+// AI Features
+// ===========================================
+
+export interface AIComposeResponse {
+  subject: string;
+  body: string;
+}
+
+export interface AIRewriteResponse {
+  body: string;
+}
+
+export interface AISummarizeResponse {
+  summary: string;
+  key_points: string[];
+  action_items: string[];
+  sentiment: string;
+}
+
+export interface AISmartReplyResponse {
+  replies: string[];
+}
+
+export interface AIGrammarCheckResponse {
+  score: number;
+  tone: string;
+  issues: Array<{ type: string; text: string; suggestion: string }>;
+  suggestions: string[];
+}
+
+export interface AISubjectResponse {
+  subjects: string[];
+}
+
+/**
+ * Generate an email from a natural language prompt
+ */
+export const aiComposeEmail = async (
+  prompt: string,
+  tone: string = 'professional',
+  context?: string
+): Promise<AIComposeResponse> => {
+  const response = await api.post('/mail/ai/compose', {
+    prompt,
+    tone,
+    context,
+  });
+  return response.data;
+};
+
+/**
+ * Rewrite an email with a different tone
+ */
+export const aiRewriteEmail = async (
+  content: string,
+  tone: string = 'professional'
+): Promise<AIRewriteResponse> => {
+  const response = await api.post('/mail/ai/rewrite', {
+    content,
+    tone,
+  });
+  return response.data;
+};
+
+/**
+ * Summarize an email
+ */
+export const aiSummarizeEmail = async (
+  content: string,
+  maxLength: number = 200
+): Promise<AISummarizeResponse> => {
+  const response = await api.post('/mail/ai/summarize', {
+    content,
+    max_length: maxLength,
+  });
+  return response.data;
+};
+
+/**
+ * Generate smart reply suggestions
+ */
+export const aiSmartReplies = async (
+  emailContent: string,
+  senderName: string,
+  count: number = 3
+): Promise<AISmartReplyResponse> => {
+  const response = await api.post('/mail/ai/replies', {
+    email_content: emailContent,
+    sender_name: senderName,
+    count,
+  });
+  return response.data;
+};
+
+/**
+ * Check grammar and tone
+ */
+export const aiGrammarCheck = async (
+  content: string
+): Promise<AIGrammarCheckResponse> => {
+  const response = await api.post('/mail/ai/grammar-check', {
+    content,
+  });
+  return response.data;
+};
+
+/**
+ * Generate subject line suggestions
+ */
+export const aiGenerateSubjects = async (
+  body: string,
+  count: number = 3
+): Promise<AISubjectResponse> => {
+  const response = await api.post('/mail/ai/subjects', {
+    body,
+    count,
+  });
+  return response.data;
+};
+
+/**
+ * Check AI service status
+ */
+export const aiGetStatus = async (): Promise<{
+  status: string;
+  model: string;
+  features: Record<string, boolean>;
+  note?: string;
+}> => {
+  const response = await api.get('/mail/ai/status');
+  return response.data;
+};

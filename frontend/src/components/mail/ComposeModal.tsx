@@ -25,6 +25,11 @@ import {
   Clock,
   FileText,
   MoreHorizontal,
+  Sparkles,
+  Wand2,
+  CheckCircle,
+  Lightbulb,
+  Loader2,
 } from 'lucide-react';
 import { useMailStore } from '@/stores/mailStore';
 import { useCredentialsStore } from '@/stores/credentialsStore';
@@ -56,10 +61,21 @@ export default function ComposeModal({ onClose }: ComposeModalProps) {
   const [signatures, setSignatures] = useState<any[]>([]);
   const [selectedSignature, setSelectedSignature] = useState<string | null>(null);
   const [sendWithUndo, setSendWithUndo] = useState(true);
-  const [undoDelay, setUndoDelay] = useState(30);
+  const [undoDelay, setUndoDelay] = useState(5);
+
+  // AI Features state
+  const [showAIPanel, setShowAIPanel] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiTone, setAiTone] = useState('professional');
+  const [showToneMenu, setShowToneMenu] = useState(false);
+  const [showSubjectSuggestions, setShowSubjectSuggestions] = useState(false);
+  const [subjectSuggestions, setSubjectSuggestions] = useState<string[]>([]);
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [bodyContent, setBodyContent] = useState('');
+  const [bodyInitialized, setBodyInitialized] = useState(false);
 
   // Initialize with prefill data
   useEffect(() => {
@@ -74,7 +90,32 @@ export default function ComposeModal({ onClose }: ComposeModalProps) {
       setBccEmails(composeData.bcc);
       setShowBcc(true);
     }
-  }, [composeData]);
+
+    // Initialize body content only once
+    if (!bodyInitialized) {
+      let initialBody = composeData.body || '';
+      if (!initialBody && composeData.originalEmail) {
+        initialBody = `<br><br><div style="border-left: 2px solid #ccc; padding-left: 12px; margin-left: 0;">
+          <p style="color: #666; font-size: 12px;">On ${new Date(composeData.originalEmail.date).toLocaleString()}, ${composeData.originalEmail.from.name || composeData.originalEmail.from.email} wrote:</p>
+          ${composeData.originalEmail.bodyHtml || composeData.originalEmail.body}
+        </div>`;
+      }
+      setBodyContent(initialBody);
+      setBodyInitialized(true);
+
+      // Set initial content to the contentEditable div
+      if (bodyRef.current) {
+        bodyRef.current.innerHTML = initialBody;
+      }
+    }
+  }, [composeData, bodyInitialized]);
+
+  // Set initial body content when ref becomes available
+  useEffect(() => {
+    if (bodyRef.current && bodyContent && !bodyRef.current.innerHTML) {
+      bodyRef.current.innerHTML = bodyContent;
+    }
+  }, [bodyContent]);
 
   // Fetch templates and signatures
   useEffect(() => {
@@ -109,12 +150,15 @@ export default function ComposeModal({ onClose }: ComposeModalProps) {
       return;
     }
 
+    // Get the latest body content from the ref
+    const currentBody = bodyRef.current?.innerHTML || bodyContent || '';
+
     const email: ComposeEmail = {
       to: toEmails,
       cc: ccEmails.length > 0 ? ccEmails : undefined,
       bcc: bccEmails.length > 0 ? bccEmails : undefined,
       subject: composeData.subject || '',
-      body: bodyRef.current?.innerHTML || '',
+      body: currentBody,
       isHtml: true,
       attachments: attachments.length > 0 ? attachments : undefined,
       inReplyTo: composeData.inReplyTo,
@@ -132,6 +176,7 @@ export default function ComposeModal({ onClose }: ComposeModalProps) {
           body: email.body,
           is_html: email.isHtml,
           delay_seconds: undoDelay,
+          attachments: attachments.length > 0 ? attachments : undefined,
         });
         // Show undo toast
         if ((window as any).showUndoSendToast) {
@@ -160,13 +205,15 @@ export default function ComposeModal({ onClose }: ComposeModalProps) {
       return;
     }
 
+    const currentBody = bodyRef.current?.innerHTML || bodyContent || '';
+
     try {
       await mailApi.scheduleEmail({
         to: toEmails,
         cc: ccEmails.length > 0 ? ccEmails : undefined,
         bcc: bccEmails.length > 0 ? bccEmails : undefined,
         subject: composeData.subject || '',
-        body: bodyRef.current?.innerHTML || '',
+        body: currentBody,
         is_html: true,
         scheduled_at: scheduledTime.toISOString(),
       });
@@ -202,6 +249,68 @@ export default function ComposeModal({ onClose }: ComposeModalProps) {
       bodyRef.current.innerHTML = template.body;
     }
     setShowTemplates(false);
+  };
+
+  // AI Functions
+  const handleAICompose = async () => {
+    if (!aiPrompt.trim()) return;
+    setAiLoading(true);
+    try {
+      const result = await mailApi.aiComposeEmail(aiPrompt, aiTone);
+      updateComposeData({ subject: result.subject });
+      if (bodyRef.current) {
+        bodyRef.current.innerHTML = result.body;
+        setBodyContent(result.body);
+      }
+      setShowAIPanel(false);
+      setAiPrompt('');
+    } catch (error) {
+      console.error('AI compose failed:', error);
+      alert('Failed to generate email. Please try again.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleAIRewrite = async (tone: string) => {
+    const currentBody = bodyRef.current?.innerHTML || bodyContent;
+    if (!currentBody.trim()) {
+      alert('Please write some content first');
+      return;
+    }
+    setAiLoading(true);
+    setShowToneMenu(false);
+    try {
+      const result = await mailApi.aiRewriteEmail(currentBody, tone);
+      if (bodyRef.current) {
+        bodyRef.current.innerHTML = result.body;
+        setBodyContent(result.body);
+      }
+    } catch (error) {
+      console.error('AI rewrite failed:', error);
+      alert('Failed to rewrite email. Please try again.');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleGenerateSubjects = async () => {
+    const currentBody = bodyRef.current?.innerHTML || bodyContent;
+    if (!currentBody.trim()) {
+      alert('Please write some content first');
+      return;
+    }
+    setAiLoading(true);
+    try {
+      const result = await mailApi.aiGenerateSubjects(currentBody, 3);
+      setSubjectSuggestions(result.subjects || []);
+      setShowSubjectSuggestions(true);
+    } catch (error) {
+      console.error('Failed to generate subjects:', error);
+      alert('Failed to generate subject suggestions.');
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   const credentials = getMailCredentials();
@@ -369,6 +478,83 @@ export default function ComposeModal({ onClose }: ComposeModalProps) {
                 <Link size={16} className="text-gray-600" />
               </button>
               <div className="flex-1" />
+
+              {/* AI Features */}
+              <div className="flex items-center gap-1 mr-2">
+                {/* AI Compose */}
+                <button
+                  onClick={() => setShowAIPanel(!showAIPanel)}
+                  className={`flex items-center gap-1 px-2 py-1.5 text-sm rounded transition-colors ${
+                    showAIPanel ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                  title="AI Compose"
+                >
+                  <Sparkles size={16} />
+                  <span className="hidden sm:inline">AI</span>
+                </button>
+
+                {/* AI Rewrite/Tone */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowToneMenu(!showToneMenu)}
+                    disabled={aiLoading}
+                    className="flex items-center gap-1 px-2 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded disabled:opacity-50"
+                    title="Rewrite with different tone"
+                  >
+                    {aiLoading ? <Loader2 size={16} className="animate-spin" /> : <Wand2 size={16} />}
+                  </button>
+                  {showToneMenu && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setShowToneMenu(false)} />
+                      <div className="absolute right-0 top-full mt-1 w-40 bg-white rounded-lg shadow-xl border border-gray-200 z-20 py-1">
+                        <p className="px-3 py-1 text-xs font-medium text-gray-500 uppercase">Rewrite as</p>
+                        {['professional', 'friendly', 'formal', 'casual', 'shorter', 'longer'].map((tone) => (
+                          <button
+                            key={tone}
+                            onClick={() => handleAIRewrite(tone)}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 capitalize"
+                          >
+                            {tone}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Subject Suggestions */}
+                <div className="relative">
+                  <button
+                    onClick={handleGenerateSubjects}
+                    disabled={aiLoading}
+                    className="flex items-center gap-1 px-2 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded disabled:opacity-50"
+                    title="Suggest subject lines"
+                  >
+                    <Lightbulb size={16} />
+                  </button>
+                  {showSubjectSuggestions && subjectSuggestions.length > 0 && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setShowSubjectSuggestions(false)} />
+                      <div className="absolute right-0 top-full mt-1 w-72 bg-white rounded-lg shadow-xl border border-gray-200 z-20 py-1">
+                        <p className="px-3 py-1 text-xs font-medium text-gray-500 uppercase">Subject Suggestions</p>
+                        {subjectSuggestions.map((subject, idx) => (
+                          <button
+                            key={idx}
+                            onClick={() => {
+                              updateComposeData({ subject });
+                              setShowSubjectSuggestions(false);
+                            }}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 truncate"
+                          >
+                            {subject}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
               {/* Templates dropdown */}
               <div className="relative">
                 <button
@@ -402,22 +588,62 @@ export default function ComposeModal({ onClose }: ComposeModalProps) {
               </div>
             </div>
 
+            {/* AI Compose Panel */}
+            {showAIPanel && (
+              <div className="flex-shrink-0 p-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-b border-purple-100">
+                <div className="flex items-center gap-2 mb-2">
+                  <Sparkles size={16} className="text-purple-600" />
+                  <span className="text-sm font-medium text-purple-900">AI Compose</span>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={aiPrompt}
+                    onChange={(e) => setAiPrompt(e.target.value)}
+                    placeholder="Describe the email you want to write... (e.g., 'Thank John for the meeting yesterday')"
+                    className="flex-1 px-3 py-2 text-sm border border-purple-200 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                    onKeyDown={(e) => e.key === 'Enter' && handleAICompose()}
+                  />
+                  <select
+                    value={aiTone}
+                    onChange={(e) => setAiTone(e.target.value)}
+                    className="px-3 py-2 text-sm border border-purple-200 rounded-lg focus:ring-2 focus:ring-purple-500"
+                  >
+                    <option value="professional">Professional</option>
+                    <option value="friendly">Friendly</option>
+                    <option value="formal">Formal</option>
+                    <option value="casual">Casual</option>
+                  </select>
+                  <button
+                    onClick={handleAICompose}
+                    disabled={aiLoading || !aiPrompt.trim()}
+                    className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {aiLoading ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <Sparkles size={16} />
+                    )}
+                    Generate
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-purple-600">
+                  Tip: Be specific about the recipient, purpose, and key points you want to include.
+                </p>
+              </div>
+            )}
+
             {/* Body */}
             <div className="flex-1 overflow-y-auto p-4">
               <div
                 ref={bodyRef}
                 contentEditable
+                suppressContentEditableWarning
                 className="min-h-full text-sm focus:outline-none prose prose-sm max-w-none"
-                dangerouslySetInnerHTML={{
-                  __html: composeData.body || (composeData.originalEmail
-                    ? `<br><br><div style="border-left: 2px solid #ccc; padding-left: 12px; margin-left: 0;">
-                        <p style="color: #666; font-size: 12px;">On ${new Date(composeData.originalEmail.date).toLocaleString()}, ${composeData.originalEmail.from.name || composeData.originalEmail.from.email} wrote:</p>
-                        ${composeData.originalEmail.bodyHtml || composeData.originalEmail.body}
-                      </div>`
-                    : ''
-                  ),
+                style={{ minHeight: '200px' }}
+                onInput={(e) => {
+                  setBodyContent(e.currentTarget.innerHTML);
                 }}
-                onInput={(e) => updateComposeData({ body: e.currentTarget.innerHTML })}
               />
             </div>
 

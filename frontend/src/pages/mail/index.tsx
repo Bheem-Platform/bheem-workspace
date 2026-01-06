@@ -26,7 +26,7 @@ import type { Email } from '@/types/mail';
 export default function MailPage() {
   const { isAuthenticated: isLoggedIn, isLoading: authLoading } = useRequireAuth();
   const { isAuthenticated: isMailAuth } = useRequireMailAuth();
-  const { isMailAuthenticated, mailSession } = useCredentialsStore();
+  const { isMailAuthenticated, mailSession, checkMailSession, destroyMailSession } = useCredentialsStore();
 
   const {
     selectedEmail,
@@ -42,6 +42,8 @@ export default function MailPage() {
     viewMode,
     setViewMode,
     searchEmails,
+    currentFolder,
+    setCurrentFolder,
     // Conversation/threading support
     selectedConversation,
     selectConversation,
@@ -54,6 +56,7 @@ export default function MailPage() {
   const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
   const [showSharedMailbox, setShowSharedMailbox] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'labels' | 'filters' | 'signatures' | 'templates' | 'vacation'>('labels');
+  const [sessionVerified, setSessionVerified] = useState(false);
 
   // WebSocket for real-time updates
   const { isConnected, subscribeFolder, unsubscribeFolder } = useMailWebSocket({
@@ -70,19 +73,39 @@ export default function MailPage() {
     },
   });
 
-  // Check if mail credentials exist
+  // Verify session with backend on mount and when auth state changes
   useEffect(() => {
-    if (!authLoading && isLoggedIn) {
-      if (!isMailAuthenticated) {
-        setShowLoginOverlay(true);
-      } else {
-        // Fetch data if authenticated
-        fetchFolders();
-        fetchEmails();
-        // Subscribe to INBOX for real-time updates
-        subscribeFolder('INBOX');
+    const verifySession = async () => {
+      if (!authLoading && isLoggedIn) {
+        if (!isMailAuthenticated) {
+          setShowLoginOverlay(true);
+          setSessionVerified(true);
+        } else {
+          // Verify session with backend before proceeding
+          try {
+            const isValid = await checkMailSession();
+            if (isValid) {
+              // Session is valid, fetch data
+              fetchFolders();
+              fetchEmails();
+              // Subscribe to INBOX for real-time updates
+              subscribeFolder('INBOX');
+            } else {
+              // Session invalid, show login overlay
+              setShowLoginOverlay(true);
+            }
+          } catch (error) {
+            console.error('Session verification failed:', error);
+            // Clear invalid session and show login
+            destroyMailSession();
+            setShowLoginOverlay(true);
+          }
+          setSessionVerified(true);
+        }
       }
-    }
+    };
+
+    verifySession();
   }, [authLoading, isLoggedIn, isMailAuthenticated]);
 
   // Keyboard shortcuts
@@ -141,11 +164,14 @@ export default function MailPage() {
     setViewMode(viewMode === 'list' ? 'threaded' : 'list');
   };
 
-  // Show loading while checking auth
-  if (authLoading) {
+  // Show loading while checking auth or verifying session
+  if (authLoading || (!sessionVerified && isMailAuthenticated)) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500" />
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto" />
+          <p className="mt-4 text-gray-600 text-sm">Verifying mail session...</p>
+        </div>
       </div>
     );
   }
@@ -175,14 +201,14 @@ export default function MailPage() {
         />
 
         {/* Main Content - offset by header (56px) and app switcher (60px) */}
-        <div className="flex h-[calc(100vh-56px)] mt-14 ml-[60px]">
+        <div className="flex h-[calc(100vh-56px)] pt-14 ml-[60px]">
           {/* Mail Sidebar - Folders */}
-          <div className="w-60 flex-shrink-0 bg-white border-r border-gray-200">
+          <div className="w-60 flex-shrink-0 bg-white border-r border-gray-200 h-full overflow-y-auto mail-scrollbar">
             <MailSidebar onCompose={() => openCompose()} />
           </div>
 
           {/* Email List */}
-          <div className="w-[400px] flex-shrink-0 bg-white border-r border-gray-200">
+          <div className="w-[400px] flex-shrink-0 bg-white border-r border-gray-200 h-full overflow-hidden">
             <MailList
               onSelectEmail={handleSelectEmail}
               selectedEmailId={selectedEmail?.id}
@@ -190,7 +216,7 @@ export default function MailPage() {
           </div>
 
           {/* Email Viewer / Conversation View */}
-          <div className="flex-1 min-w-0 bg-gray-50">
+          <div className="flex-1 min-w-0 bg-gray-50 h-full overflow-hidden">
             {viewMode === 'threaded' && selectedConversation ? (
               <ConversationView
                 conversation={selectedConversation}
