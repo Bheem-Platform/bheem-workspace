@@ -82,6 +82,8 @@ export function useMailWebSocket(options: UseMailWebSocketOptions = {}): UseMail
   const pingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const reconnectAttemptsRef = useRef(0);
+  const isConnectingRef = useRef(false);
+  const isMountedRef = useRef(false);
 
   const [isConnected, setIsConnected] = useState(false);
   const [features, setFeatures] = useState<MailWebSocketMessage['features'] | null>(null);
@@ -147,7 +149,23 @@ export function useMailWebSocket(options: UseMailWebSocketOptions = {}): UseMail
   // Connect to WebSocket
   const connect = useCallback(() => {
     const url = getWebSocketUrl();
-    if (!url || wsRef.current?.readyState === WebSocket.OPEN) {
+    if (!url) {
+      return;
+    }
+
+    // Prevent duplicate connections
+    if (isConnectingRef.current) {
+      console.log('[useMailWebSocket] Already connecting, skipping...');
+      return;
+    }
+
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      console.log('[useMailWebSocket] Already connected, skipping...');
+      return;
+    }
+
+    if (wsRef.current?.readyState === WebSocket.CONNECTING) {
+      console.log('[useMailWebSocket] Connection in progress, skipping...');
       return;
     }
 
@@ -157,45 +175,58 @@ export function useMailWebSocket(options: UseMailWebSocketOptions = {}): UseMail
       wsRef.current = null;
     }
 
+    isConnectingRef.current = true;
     console.log('[useMailWebSocket] Connecting...');
     const ws = new WebSocket(url);
 
     ws.onopen = () => {
       console.log('[useMailWebSocket] Connected');
+      isConnectingRef.current = false;
     };
 
     ws.onmessage = handleMessage;
 
     ws.onclose = (event) => {
       console.log('[useMailWebSocket] Disconnected:', event.code, event.reason);
+      isConnectingRef.current = false;
       setIsConnected(false);
       setFeatures(null);
-      onDisconnect?.();
 
-      // Clear ping interval
-      if (pingIntervalRef.current) {
-        clearInterval(pingIntervalRef.current);
-        pingIntervalRef.current = null;
-      }
+      // Only handle disconnect if component is still mounted
+      if (isMountedRef.current) {
+        onDisconnect?.();
 
-      // Auto-reconnect if enabled
-      if (autoReconnect && reconnectAttemptsRef.current < maxReconnectAttempts) {
-        reconnectAttemptsRef.current += 1;
-        console.log(
-          `[useMailWebSocket] Reconnecting in ${reconnectDelay}ms (attempt ${reconnectAttemptsRef.current}/${maxReconnectAttempts})`
-        );
-        reconnectTimeoutRef.current = setTimeout(connect, reconnectDelay);
+        // Clear ping interval
+        if (pingIntervalRef.current) {
+          clearInterval(pingIntervalRef.current);
+          pingIntervalRef.current = null;
+        }
+
+        // Auto-reconnect if enabled and component still mounted
+        if (autoReconnect && reconnectAttemptsRef.current < maxReconnectAttempts && isMountedRef.current) {
+          reconnectAttemptsRef.current += 1;
+          console.log(
+            `[useMailWebSocket] Reconnecting in ${reconnectDelay}ms (attempt ${reconnectAttemptsRef.current}/${maxReconnectAttempts})`
+          );
+          reconnectTimeoutRef.current = setTimeout(connect, reconnectDelay);
+        }
       }
     };
 
     ws.onerror = (error) => {
       console.error('[useMailWebSocket] Error:', error);
-      onError?.('WebSocket connection error');
+      isConnectingRef.current = false;
+      if (isMountedRef.current) {
+        onError?.('WebSocket connection error');
+      }
     };
 
     wsRef.current = ws;
 
     // Set up ping interval (every 30 seconds)
+    if (pingIntervalRef.current) {
+      clearInterval(pingIntervalRef.current);
+    }
     pingIntervalRef.current = setInterval(() => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: 'ping' }));
@@ -256,13 +287,27 @@ export function useMailWebSocket(options: UseMailWebSocketOptions = {}): UseMail
 
   // Connect when authenticated
   useEffect(() => {
+    isMountedRef.current = true;
+
     if (isAuthenticated && token) {
-      connect();
+      // Small delay to avoid React strict mode double-connect
+      const timeoutId = setTimeout(() => {
+        if (isMountedRef.current) {
+          connect();
+        }
+      }, 100);
+
+      return () => {
+        clearTimeout(timeoutId);
+        isMountedRef.current = false;
+        disconnect();
+      };
     } else {
       disconnect();
     }
 
     return () => {
+      isMountedRef.current = false;
       disconnect();
     };
   }, [isAuthenticated, token, connect, disconnect]);
