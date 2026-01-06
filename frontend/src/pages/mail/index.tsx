@@ -232,13 +232,15 @@ export default function MailPage() {
         {/* Undo Send Toast Manager */}
         <UndoSendToastManager />
 
-        {/* WebSocket Connection Status - shown only when disconnected */}
+        {/* WebSocket Connection Status - hidden when WebSocket is disabled */}
+        {/* TODO: Re-enable when WebSocket infrastructure is ready
         {!isConnected && isMailAuthenticated && (
           <div className="fixed bottom-4 right-4 px-4 py-2 bg-yellow-100 text-yellow-800 rounded-lg text-sm flex items-center gap-2 shadow-lg">
             <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
             Reconnecting to real-time updates...
           </div>
         )}
+        */}
       </div>
 
       {/* Custom scrollbar styles */}
