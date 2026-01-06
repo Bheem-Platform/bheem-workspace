@@ -30,7 +30,32 @@ NEXTJS_URL = os.getenv("NEXTJS_URL", "http://localhost:3000")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Bheem Workspace starting...", action="app_startup")
+
+    # Initialize email scheduler
+    try:
+        from services.email_scheduler_service import email_scheduler_service
+        from core.database import async_session_maker
+
+        email_scheduler_service.initialize()
+
+        # Load pending scheduled emails
+        async with async_session_maker() as db:
+            await email_scheduler_service.load_pending_jobs(db)
+
+        logger.info("Email scheduler initialized", action="email_scheduler_started")
+    except Exception as e:
+        logger.warning(f"Could not initialize email scheduler: {e}", action="email_scheduler_failed")
+
     yield
+
+    # Shutdown email scheduler
+    try:
+        from services.email_scheduler_service import email_scheduler_service
+        email_scheduler_service.shutdown()
+        logger.info("Email scheduler stopped", action="email_scheduler_stopped")
+    except Exception as e:
+        logger.warning(f"Error shutting down email scheduler: {e}", action="email_scheduler_shutdown_error")
+
     logger.info("Bheem Workspace shutting down...", action="app_shutdown")
 
 app = FastAPI(
@@ -47,6 +72,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Rate limiting
+try:
+    from slowapi.errors import RateLimitExceeded
+    from middleware.rate_limit import limiter, rate_limit_exceeded_handler
+
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+    logger.info("Rate limiting enabled", action="rate_limit_enabled")
+except ImportError as e:
+    logger.warning(f"Rate limiting not available: {e}", action="rate_limit_disabled")
 
 # Request logging middleware
 @app.middleware("http")
@@ -131,6 +167,90 @@ try:
     app.include_router(mail_ai_router, prefix="/api/v1")
 except Exception as e:
     print(f"Could not load mail AI router: {e}")
+
+try:
+    from api.mail_2fa import router as mail_2fa_router
+    app.include_router(mail_2fa_router, prefix="/api/v1")
+except Exception as e:
+    print(f"Could not load mail 2FA router: {e}")
+
+try:
+    from api.mail_drafts import router as mail_drafts_router
+    app.include_router(mail_drafts_router, prefix="/api/v1")
+except Exception as e:
+    print(f"Could not load mail drafts router: {e}")
+
+try:
+    from api.mail_signatures import router as mail_signatures_router
+    app.include_router(mail_signatures_router, prefix="/api/v1")
+except Exception as e:
+    print(f"Could not load mail signatures router: {e}")
+
+try:
+    from api.mail_scheduled import router as mail_scheduled_router
+    app.include_router(mail_scheduled_router, prefix="/api/v1")
+except Exception as e:
+    print(f"Could not load mail scheduled router: {e}")
+
+try:
+    from api.mail_undo_send import router as mail_undo_send_router
+    app.include_router(mail_undo_send_router, prefix="/api/v1")
+except Exception as e:
+    print(f"Could not load mail undo send router: {e}")
+
+try:
+    from api.mail_filters import router as mail_filters_router
+    app.include_router(mail_filters_router, prefix="/api/v1")
+except Exception as e:
+    print(f"Could not load mail filters router: {e}")
+
+try:
+    from api.mail_contacts import router as mail_contacts_router
+    app.include_router(mail_contacts_router, prefix="/api/v1")
+except Exception as e:
+    print(f"Could not load mail contacts router: {e}")
+
+try:
+    from api.mail_labels import router as mail_labels_router
+    app.include_router(mail_labels_router, prefix="/api/v1")
+except Exception as e:
+    print(f"Could not load mail labels router: {e}")
+
+try:
+    from api.mail_templates import router as mail_templates_router
+    app.include_router(mail_templates_router, prefix="/api/v1")
+except Exception as e:
+    print(f"Could not load mail templates router: {e}")
+
+try:
+    from api.mail_vacation import router as mail_vacation_router
+    app.include_router(mail_vacation_router, prefix="/api/v1")
+except Exception as e:
+    print(f"Could not load mail vacation router: {e}")
+
+try:
+    from api.mail_realtime import router as mail_realtime_router
+    app.include_router(mail_realtime_router, prefix="/api/v1")
+except Exception as e:
+    print(f"Could not load mail realtime router: {e}")
+
+try:
+    from api.mail_calendar import router as mail_calendar_router
+    app.include_router(mail_calendar_router, prefix="/api/v1")
+except Exception as e:
+    print(f"Could not load mail calendar router: {e}")
+
+try:
+    from api.mail_shared import router as mail_shared_router
+    app.include_router(mail_shared_router, prefix="/api/v1")
+except Exception as e:
+    print(f"Could not load mail shared router: {e}")
+
+try:
+    from api.mail_attachments import router as mail_attachments_router
+    app.include_router(mail_attachments_router, prefix="/api/v1")
+except Exception as e:
+    print(f"Could not load mail attachments router: {e}")
 
 try:
     from api.calendar import router as calendar_router

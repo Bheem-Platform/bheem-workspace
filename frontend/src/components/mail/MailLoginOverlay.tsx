@@ -9,7 +9,7 @@ interface MailLoginOverlayProps {
 }
 
 export default function MailLoginOverlay({ onSuccess }: MailLoginOverlayProps) {
-  const { setMailCredentials, setLoading, loading } = useCredentialsStore();
+  const { createMailSession, loading } = useCredentialsStore();
   const { fetchFolders, fetchEmails } = useMailStore();
 
   const [email, setEmail] = useState('');
@@ -17,6 +17,7 @@ export default function MailLoginOverlay({ onSuccess }: MailLoginOverlayProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rememberMe, setRememberMe] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,28 +28,25 @@ export default function MailLoginOverlay({ onSuccess }: MailLoginOverlayProps) {
       return;
     }
 
-    setLoading('mail', true);
+    setSubmitting(true);
 
     try {
-      // Validate credentials with backend
-      const response = await mailApi.loginMail(email, password);
+      // Create mail session with backend
+      const success = await createMailSession(email, password);
 
-      if (response.success) {
-        // Store credentials
-        setMailCredentials({ email, password });
-
+      if (success) {
         // Fetch folders and emails
         await fetchFolders();
         await fetchEmails();
 
         onSuccess();
       } else {
-        setError(response.message || 'Login failed. Please check your credentials.');
+        setError('Login failed. Please check your credentials.');
       }
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to connect to mail server');
     } finally {
-      setLoading('mail', false);
+      setSubmitting(false);
     }
   };
 
@@ -89,7 +87,7 @@ export default function MailLoginOverlay({ onSuccess }: MailLoginOverlayProps) {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
                   className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors"
-                  disabled={loading.mail}
+                  disabled={submitting}
                 />
               </div>
             </div>
@@ -108,7 +106,7 @@ export default function MailLoginOverlay({ onSuccess }: MailLoginOverlayProps) {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Your password"
                   className="w-full pl-10 pr-12 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors"
-                  disabled={loading.mail}
+                  disabled={submitting}
                 />
                 <button
                   type="button"
@@ -137,10 +135,10 @@ export default function MailLoginOverlay({ onSuccess }: MailLoginOverlayProps) {
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={loading.mail}
+              disabled={submitting}
               className="w-full py-3 px-4 bg-gradient-to-r from-orange-500 to-red-500 text-white font-medium rounded-lg hover:from-orange-600 hover:to-red-600 focus:ring-4 focus:ring-orange-500/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
-              {loading.mail ? (
+              {submitting ? (
                 <span className="flex items-center justify-center gap-2">
                   <svg className="animate-spin h-5 w-5" viewBox="0 0 24 24">
                     <circle

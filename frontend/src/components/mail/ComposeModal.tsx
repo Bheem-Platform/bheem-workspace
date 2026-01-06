@@ -1,3 +1,7 @@
+/**
+ * Bheem Mail Compose Modal
+ * Enhanced with Contact Autocomplete, Schedule Send, and Templates
+ */
 import { useState, useRef, useEffect } from 'react';
 import {
   X,
@@ -18,9 +22,15 @@ import {
   ListOrdered,
   AlignLeft,
   Code,
+  Clock,
+  FileText,
+  MoreHorizontal,
 } from 'lucide-react';
 import { useMailStore } from '@/stores/mailStore';
 import { useCredentialsStore } from '@/stores/credentialsStore';
+import ContactAutocomplete from './ContactAutocomplete';
+import ScheduleSendModal from './ScheduleSendModal';
+import * as mailApi from '@/lib/mailApi';
 import type { ComposeEmail } from '@/types/mail';
 
 interface ComposeModalProps {
@@ -35,10 +45,18 @@ export default function ComposeModal({ onClose }: ComposeModalProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const [showCc, setShowCc] = useState(false);
   const [showBcc, setShowBcc] = useState(false);
-  const [toInput, setToInput] = useState('');
-  const [ccInput, setCcInput] = useState('');
-  const [bccInput, setBccInput] = useState('');
+  const [toEmails, setToEmails] = useState<string[]>([]);
+  const [ccEmails, setCcEmails] = useState<string[]>([]);
+  const [bccEmails, setBccEmails] = useState<string[]>([]);
   const [attachments, setAttachments] = useState<File[]>([]);
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [showMoreOptions, setShowMoreOptions] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [templates, setTemplates] = useState<any[]>([]);
+  const [signatures, setSignatures] = useState<any[]>([]);
+  const [selectedSignature, setSelectedSignature] = useState<string | null>(null);
+  const [sendWithUndo, setSendWithUndo] = useState(true);
+  const [undoDelay, setUndoDelay] = useState(30);
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -46,32 +64,55 @@ export default function ComposeModal({ onClose }: ComposeModalProps) {
   // Initialize with prefill data
   useEffect(() => {
     if (composeData.to) {
-      setToInput(composeData.to.join(', '));
+      setToEmails(composeData.to);
     }
     if (composeData.cc && composeData.cc.length > 0) {
-      setCcInput(composeData.cc.join(', '));
+      setCcEmails(composeData.cc);
       setShowCc(true);
     }
     if (composeData.bcc && composeData.bcc.length > 0) {
-      setBccInput(composeData.bcc.join(', '));
+      setBccEmails(composeData.bcc);
       setShowBcc(true);
     }
   }, [composeData]);
 
-  const handleSend = async () => {
-    const toAddresses = toInput.split(',').map((e) => e.trim()).filter(Boolean);
-    const ccAddresses = ccInput.split(',').map((e) => e.trim()).filter(Boolean);
-    const bccAddresses = bccInput.split(',').map((e) => e.trim()).filter(Boolean);
+  // Fetch templates and signatures
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [templatesRes, signaturesRes] = await Promise.all([
+          mailApi.listTemplates(),
+          mailApi.listSignatures(),
+        ]);
+        setTemplates(templatesRes.templates || []);
+        setSignatures(signaturesRes.signatures || []);
 
-    if (toAddresses.length === 0) {
+        // Set default signature
+        const defaultSig = signaturesRes.signatures?.find((s: any) => s.is_default);
+        if (defaultSig && !composeData.originalEmail) {
+          setSelectedSignature(defaultSig.id);
+          // Append signature to body
+          if (bodyRef.current && defaultSig.content) {
+            bodyRef.current.innerHTML += `<br><br>${defaultSig.content}`;
+          }
+        }
+      } catch (error) {
+        console.error('Failed to fetch templates/signatures:', error);
+      }
+    };
+    fetchData();
+  }, []);
+
+  const handleSend = async () => {
+    if (toEmails.length === 0) {
       alert('Please enter at least one recipient');
       return;
     }
 
     const email: ComposeEmail = {
-      to: toAddresses,
-      cc: ccAddresses.length > 0 ? ccAddresses : undefined,
-      bcc: bccAddresses.length > 0 ? bccAddresses : undefined,
+      to: toEmails,
+      cc: ccEmails.length > 0 ? ccEmails : undefined,
+      bcc: bccEmails.length > 0 ? bccEmails : undefined,
       subject: composeData.subject || '',
       body: bodyRef.current?.innerHTML || '',
       isHtml: true,
@@ -80,9 +121,60 @@ export default function ComposeModal({ onClose }: ComposeModalProps) {
       references: composeData.references,
     };
 
-    const success = await sendEmail(email);
-    if (success) {
+    if (sendWithUndo) {
+      // Send with undo capability
+      try {
+        const result = await mailApi.sendEmailWithUndo({
+          to: email.to,
+          cc: email.cc,
+          bcc: email.bcc,
+          subject: email.subject,
+          body: email.body,
+          is_html: email.isHtml,
+          delay_seconds: undoDelay,
+        });
+        // Show undo toast
+        if ((window as any).showUndoSendToast) {
+          (window as any).showUndoSendToast(
+            result.queue_id,
+            toEmails[0],
+            undoDelay
+          );
+        }
+        onClose();
+      } catch (error) {
+        console.error('Failed to send email:', error);
+        alert('Failed to send email');
+      }
+    } else {
+      const success = await sendEmail(email);
+      if (success) {
+        onClose();
+      }
+    }
+  };
+
+  const handleScheduleSend = async (scheduledTime: Date) => {
+    if (toEmails.length === 0) {
+      alert('Please enter at least one recipient');
+      return;
+    }
+
+    try {
+      await mailApi.scheduleEmail({
+        to: toEmails,
+        cc: ccEmails.length > 0 ? ccEmails : undefined,
+        bcc: bccEmails.length > 0 ? bccEmails : undefined,
+        subject: composeData.subject || '',
+        body: bodyRef.current?.innerHTML || '',
+        is_html: true,
+        scheduled_at: scheduledTime.toISOString(),
+      });
+      setShowSchedule(false);
       onClose();
+    } catch (error) {
+      console.error('Failed to schedule email:', error);
+      alert('Failed to schedule email');
     }
   };
 
@@ -104,6 +196,14 @@ export default function ComposeModal({ onClose }: ComposeModalProps) {
     bodyRef.current?.focus();
   };
 
+  const applyTemplate = (template: any) => {
+    updateComposeData({ subject: template.subject });
+    if (bodyRef.current) {
+      bodyRef.current.innerHTML = template.body;
+    }
+    setShowTemplates(false);
+  };
+
   const credentials = getMailCredentials();
 
   // Modal size classes
@@ -111,244 +211,335 @@ export default function ComposeModal({ onClose }: ComposeModalProps) {
     ? 'fixed inset-4 m-0'
     : isMinimized
     ? 'fixed bottom-4 right-4 w-80 h-12'
-    : 'fixed bottom-4 right-4 w-[600px] h-[500px]';
+    : 'fixed bottom-4 right-4 w-[650px] h-[550px]';
 
   return (
-    <div className={`${sizeClasses} bg-white rounded-t-xl shadow-2xl border border-gray-200 flex flex-col z-50 transition-all duration-200`}>
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-gray-800 text-white rounded-t-xl cursor-move">
-        <span className="font-medium text-sm truncate">
-          {composeData.subject || 'New Message'}
-        </span>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => setIsMinimized(!isMinimized)}
-            className="p-1.5 hover:bg-gray-700 rounded"
-          >
-            <Minus size={16} />
-          </button>
-          <button
-            onClick={() => setIsMaximized(!isMaximized)}
-            className="p-1.5 hover:bg-gray-700 rounded"
-          >
-            {isMaximized ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-          </button>
-          <button
-            onClick={onClose}
-            className="p-1.5 hover:bg-red-600 rounded"
-          >
-            <X size={16} />
-          </button>
-        </div>
-      </div>
-
-      {/* Content - hidden when minimized */}
-      {!isMinimized && (
-        <>
-          {/* Recipients */}
-          <div className="flex-shrink-0 border-b border-gray-200">
-            {/* To */}
-            <div className="flex items-center px-4 py-2 border-b border-gray-100">
-              <span className="text-sm text-gray-500 w-12">To</span>
-              <input
-                type="text"
-                value={toInput}
-                onChange={(e) => setToInput(e.target.value)}
-                placeholder="Recipients"
-                className="flex-1 px-2 py-1 text-sm border-0 focus:ring-0 focus:outline-none"
-              />
-              <div className="flex items-center gap-2 text-sm text-gray-500">
-                {!showCc && (
-                  <button
-                    onClick={() => setShowCc(true)}
-                    className="hover:text-gray-700"
-                  >
-                    Cc
-                  </button>
-                )}
-                {!showBcc && (
-                  <button
-                    onClick={() => setShowBcc(true)}
-                    className="hover:text-gray-700"
-                  >
-                    Bcc
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {/* Cc */}
-            {showCc && (
-              <div className="flex items-center px-4 py-2 border-b border-gray-100">
-                <span className="text-sm text-gray-500 w-12">Cc</span>
-                <input
-                  type="text"
-                  value={ccInput}
-                  onChange={(e) => setCcInput(e.target.value)}
-                  placeholder="Cc recipients"
-                  className="flex-1 px-2 py-1 text-sm border-0 focus:ring-0 focus:outline-none"
-                />
-              </div>
-            )}
-
-            {/* Bcc */}
-            {showBcc && (
-              <div className="flex items-center px-4 py-2 border-b border-gray-100">
-                <span className="text-sm text-gray-500 w-12">Bcc</span>
-                <input
-                  type="text"
-                  value={bccInput}
-                  onChange={(e) => setBccInput(e.target.value)}
-                  placeholder="Bcc recipients"
-                  className="flex-1 px-2 py-1 text-sm border-0 focus:ring-0 focus:outline-none"
-                />
-              </div>
-            )}
-
-            {/* Subject */}
-            <div className="flex items-center px-4 py-2">
-              <span className="text-sm text-gray-500 w-12">Subject</span>
-              <input
-                type="text"
-                value={composeData.subject || ''}
-                onChange={(e) => updateComposeData({ subject: e.target.value })}
-                placeholder="Subject"
-                className="flex-1 px-2 py-1 text-sm border-0 focus:ring-0 focus:outline-none"
-              />
-            </div>
-          </div>
-
-          {/* Formatting Toolbar */}
-          <div className="flex-shrink-0 flex items-center gap-1 px-4 py-2 border-b border-gray-100">
+    <>
+      <div className={`${sizeClasses} bg-white rounded-t-xl shadow-2xl border border-gray-200 flex flex-col z-50 transition-all duration-200`}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-2 bg-gray-800 text-white rounded-t-xl cursor-move">
+          <span className="font-medium text-sm truncate">
+            {composeData.subject || 'New Message'}
+          </span>
+          <div className="flex items-center gap-1">
             <button
-              onClick={() => formatText('bold')}
-              className="p-1.5 hover:bg-gray-100 rounded"
-              title="Bold"
+              onClick={() => setIsMinimized(!isMinimized)}
+              className="p-1.5 hover:bg-gray-700 rounded"
             >
-              <Bold size={16} className="text-gray-600" />
+              <Minus size={16} />
             </button>
             <button
-              onClick={() => formatText('italic')}
-              className="p-1.5 hover:bg-gray-100 rounded"
-              title="Italic"
+              onClick={() => setIsMaximized(!isMaximized)}
+              className="p-1.5 hover:bg-gray-700 rounded"
             >
-              <Italic size={16} className="text-gray-600" />
+              {isMaximized ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
             </button>
-            <button
-              onClick={() => formatText('underline')}
-              className="p-1.5 hover:bg-gray-100 rounded"
-              title="Underline"
-            >
-              <Underline size={16} className="text-gray-600" />
-            </button>
-            <div className="w-px h-5 bg-gray-300 mx-1" />
-            <button
-              onClick={() => formatText('insertUnorderedList')}
-              className="p-1.5 hover:bg-gray-100 rounded"
-              title="Bullet list"
-            >
-              <List size={16} className="text-gray-600" />
-            </button>
-            <button
-              onClick={() => formatText('insertOrderedList')}
-              className="p-1.5 hover:bg-gray-100 rounded"
-              title="Numbered list"
-            >
-              <ListOrdered size={16} className="text-gray-600" />
-            </button>
-            <div className="w-px h-5 bg-gray-300 mx-1" />
-            <button
-              onClick={() => {
-                const url = prompt('Enter URL:');
-                if (url) formatText('createLink', url);
-              }}
-              className="p-1.5 hover:bg-gray-100 rounded"
-              title="Insert link"
-            >
-              <Link size={16} className="text-gray-600" />
-            </button>
-          </div>
-
-          {/* Body */}
-          <div className="flex-1 overflow-y-auto p-4">
-            <div
-              ref={bodyRef}
-              contentEditable
-              className="min-h-full text-sm focus:outline-none"
-              dangerouslySetInnerHTML={{
-                __html: composeData.body || (composeData.originalEmail
-                  ? `<br><br><div style="border-left: 2px solid #ccc; padding-left: 12px; margin-left: 0;">
-                      <p style="color: #666; font-size: 12px;">On ${new Date(composeData.originalEmail.date).toLocaleString()}, ${composeData.originalEmail.from.name || composeData.originalEmail.from.email} wrote:</p>
-                      ${composeData.originalEmail.bodyHtml || composeData.originalEmail.body}
-                    </div>`
-                  : ''
-                ),
-              }}
-              onInput={(e) => updateComposeData({ body: e.currentTarget.innerHTML })}
-            />
-          </div>
-
-          {/* Attachments */}
-          {attachments.length > 0 && (
-            <div className="flex-shrink-0 px-4 py-2 border-t border-gray-100">
-              <div className="flex flex-wrap gap-2">
-                {attachments.map((file, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center gap-2 px-2 py-1 bg-gray-100 rounded text-sm"
-                  >
-                    <Paperclip size={14} className="text-gray-500" />
-                    <span className="max-w-32 truncate">{file.name}</span>
-                    <button
-                      onClick={() => removeAttachment(index)}
-                      className="text-gray-400 hover:text-red-500"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Footer */}
-          <div className="flex-shrink-0 flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleSend}
-                disabled={loading.send}
-                className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white font-medium rounded-lg hover:bg-orange-600 disabled:opacity-50 transition-colors"
-              >
-                <Send size={16} />
-                <span>{loading.send ? 'Sending...' : 'Send'}</span>
-              </button>
-
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                onChange={handleFileChange}
-                className="hidden"
-              />
-              <button
-                onClick={handleAttachment}
-                className="p-2 text-gray-600 hover:bg-gray-200 rounded-lg"
-                title="Attach file"
-              >
-                <Paperclip size={18} />
-              </button>
-            </div>
-
             <button
               onClick={onClose}
-              className="p-2 text-gray-400 hover:text-red-500 hover:bg-gray-200 rounded-lg"
-              title="Discard"
+              className="p-1.5 hover:bg-red-600 rounded"
             >
-              <Trash2 size={18} />
+              <X size={16} />
             </button>
           </div>
-        </>
-      )}
-    </div>
+        </div>
+
+        {/* Content - hidden when minimized */}
+        {!isMinimized && (
+          <>
+            {/* Recipients */}
+            <div className="flex-shrink-0 border-b border-gray-200">
+              {/* To */}
+              <div className="flex items-center px-4 py-2 border-b border-gray-100">
+                <span className="text-sm text-gray-500 w-12">To</span>
+                <div className="flex-1">
+                  <ContactAutocomplete
+                    value={toEmails}
+                    onChange={setToEmails}
+                    placeholder="Recipients"
+                  />
+                </div>
+                <div className="flex items-center gap-2 text-sm text-gray-500 ml-2">
+                  {!showCc && (
+                    <button
+                      onClick={() => setShowCc(true)}
+                      className="hover:text-gray-700"
+                    >
+                      Cc
+                    </button>
+                  )}
+                  {!showBcc && (
+                    <button
+                      onClick={() => setShowBcc(true)}
+                      className="hover:text-gray-700"
+                    >
+                      Bcc
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Cc */}
+              {showCc && (
+                <div className="flex items-center px-4 py-2 border-b border-gray-100">
+                  <span className="text-sm text-gray-500 w-12">Cc</span>
+                  <div className="flex-1">
+                    <ContactAutocomplete
+                      value={ccEmails}
+                      onChange={setCcEmails}
+                      placeholder="Cc recipients"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Bcc */}
+              {showBcc && (
+                <div className="flex items-center px-4 py-2 border-b border-gray-100">
+                  <span className="text-sm text-gray-500 w-12">Bcc</span>
+                  <div className="flex-1">
+                    <ContactAutocomplete
+                      value={bccEmails}
+                      onChange={setBccEmails}
+                      placeholder="Bcc recipients"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Subject */}
+              <div className="flex items-center px-4 py-2">
+                <span className="text-sm text-gray-500 w-12">Subject</span>
+                <input
+                  type="text"
+                  value={composeData.subject || ''}
+                  onChange={(e) => updateComposeData({ subject: e.target.value })}
+                  placeholder="Subject"
+                  className="flex-1 px-2 py-1 text-sm border-0 focus:ring-0 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Formatting Toolbar */}
+            <div className="flex-shrink-0 flex items-center gap-1 px-4 py-2 border-b border-gray-100">
+              <button
+                onClick={() => formatText('bold')}
+                className="p-1.5 hover:bg-gray-100 rounded"
+                title="Bold (Ctrl+B)"
+              >
+                <Bold size={16} className="text-gray-600" />
+              </button>
+              <button
+                onClick={() => formatText('italic')}
+                className="p-1.5 hover:bg-gray-100 rounded"
+                title="Italic (Ctrl+I)"
+              >
+                <Italic size={16} className="text-gray-600" />
+              </button>
+              <button
+                onClick={() => formatText('underline')}
+                className="p-1.5 hover:bg-gray-100 rounded"
+                title="Underline (Ctrl+U)"
+              >
+                <Underline size={16} className="text-gray-600" />
+              </button>
+              <div className="w-px h-5 bg-gray-300 mx-1" />
+              <button
+                onClick={() => formatText('insertUnorderedList')}
+                className="p-1.5 hover:bg-gray-100 rounded"
+                title="Bullet list"
+              >
+                <List size={16} className="text-gray-600" />
+              </button>
+              <button
+                onClick={() => formatText('insertOrderedList')}
+                className="p-1.5 hover:bg-gray-100 rounded"
+                title="Numbered list"
+              >
+                <ListOrdered size={16} className="text-gray-600" />
+              </button>
+              <div className="w-px h-5 bg-gray-300 mx-1" />
+              <button
+                onClick={() => {
+                  const url = prompt('Enter URL:');
+                  if (url) formatText('createLink', url);
+                }}
+                className="p-1.5 hover:bg-gray-100 rounded"
+                title="Insert link"
+              >
+                <Link size={16} className="text-gray-600" />
+              </button>
+              <div className="flex-1" />
+              {/* Templates dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setShowTemplates(!showTemplates)}
+                  className="flex items-center gap-1 px-2 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded"
+                  title="Use template"
+                >
+                  <FileText size={16} />
+                  <ChevronDown size={14} />
+                </button>
+                {showTemplates && templates.length > 0 && (
+                  <>
+                    <div className="fixed inset-0 z-10" onClick={() => setShowTemplates(false)} />
+                    <div className="absolute right-0 top-full mt-1 w-64 bg-white rounded-lg shadow-xl border border-gray-200 z-20 max-h-64 overflow-y-auto">
+                      <div className="p-2 border-b border-gray-100">
+                        <p className="text-xs font-medium text-gray-500 uppercase">Templates</p>
+                      </div>
+                      {templates.map((template) => (
+                        <button
+                          key={template.id}
+                          onClick={() => applyTemplate(template)}
+                          className="w-full text-left px-3 py-2 hover:bg-gray-50"
+                        >
+                          <p className="text-sm font-medium text-gray-900">{template.name}</p>
+                          <p className="text-xs text-gray-500 truncate">{template.subject}</p>
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-4">
+              <div
+                ref={bodyRef}
+                contentEditable
+                className="min-h-full text-sm focus:outline-none prose prose-sm max-w-none"
+                dangerouslySetInnerHTML={{
+                  __html: composeData.body || (composeData.originalEmail
+                    ? `<br><br><div style="border-left: 2px solid #ccc; padding-left: 12px; margin-left: 0;">
+                        <p style="color: #666; font-size: 12px;">On ${new Date(composeData.originalEmail.date).toLocaleString()}, ${composeData.originalEmail.from.name || composeData.originalEmail.from.email} wrote:</p>
+                        ${composeData.originalEmail.bodyHtml || composeData.originalEmail.body}
+                      </div>`
+                    : ''
+                  ),
+                }}
+                onInput={(e) => updateComposeData({ body: e.currentTarget.innerHTML })}
+              />
+            </div>
+
+            {/* Attachments */}
+            {attachments.length > 0 && (
+              <div className="flex-shrink-0 px-4 py-2 border-t border-gray-100">
+                <div className="flex flex-wrap gap-2">
+                  {attachments.map((file, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center gap-2 px-2 py-1 bg-gray-100 rounded text-sm"
+                    >
+                      <Paperclip size={14} className="text-gray-500" />
+                      <span className="max-w-32 truncate">{file.name}</span>
+                      <button
+                        onClick={() => removeAttachment(index)}
+                        className="text-gray-400 hover:text-red-500"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Footer */}
+            <div className="flex-shrink-0 flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50">
+              <div className="flex items-center gap-2">
+                {/* Send button with dropdown */}
+                <div className="flex">
+                  <button
+                    onClick={handleSend}
+                    disabled={loading.send}
+                    className="flex items-center gap-2 px-4 py-2 bg-orange-500 text-white font-medium rounded-l-lg hover:bg-orange-600 disabled:opacity-50 transition-colors"
+                  >
+                    <Send size={16} />
+                    <span>{loading.send ? 'Sending...' : 'Send'}</span>
+                  </button>
+                  <button
+                    onClick={() => setShowSchedule(true)}
+                    className="px-2 py-2 bg-orange-600 text-white rounded-r-lg hover:bg-orange-700 border-l border-orange-400"
+                    title="Schedule send"
+                  >
+                    <Clock size={16} />
+                  </button>
+                </div>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  onChange={handleFileChange}
+                  className="hidden"
+                />
+                <button
+                  onClick={handleAttachment}
+                  className="p-2 text-gray-600 hover:bg-gray-200 rounded-lg"
+                  title="Attach file"
+                >
+                  <Paperclip size={18} />
+                </button>
+
+                {/* More options */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowMoreOptions(!showMoreOptions)}
+                    className="p-2 text-gray-600 hover:bg-gray-200 rounded-lg"
+                    title="More options"
+                  >
+                    <MoreHorizontal size={18} />
+                  </button>
+                  {showMoreOptions && (
+                    <>
+                      <div className="fixed inset-0 z-10" onClick={() => setShowMoreOptions(false)} />
+                      <div className="absolute left-0 bottom-full mb-2 w-56 bg-white rounded-lg shadow-xl border border-gray-200 z-20">
+                        <label className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={sendWithUndo}
+                            onChange={(e) => setSendWithUndo(e.target.checked)}
+                            className="rounded border-gray-300 text-orange-500"
+                          />
+                          <span className="text-sm text-gray-700">Enable undo send</span>
+                        </label>
+                        {sendWithUndo && (
+                          <div className="px-3 py-2 border-t border-gray-100">
+                            <label className="text-xs text-gray-500">Undo delay (seconds)</label>
+                            <input
+                              type="number"
+                              min={5}
+                              max={120}
+                              value={undoDelay}
+                              onChange={(e) => setUndoDelay(Number(e.target.value))}
+                              className="w-full mt-1 px-2 py-1 text-sm border border-gray-200 rounded"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              <button
+                onClick={onClose}
+                className="p-2 text-gray-400 hover:text-red-500 hover:bg-gray-200 rounded-lg"
+                title="Discard"
+              >
+                <Trash2 size={18} />
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Schedule Send Modal */}
+      <ScheduleSendModal
+        isOpen={showSchedule}
+        onClose={() => setShowSchedule(false)}
+        onSchedule={handleScheduleSend}
+      />
+    </>
   );
 }

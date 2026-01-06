@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import * as mailApi from '@/lib/mailApi';
+import type { Conversation, ConversationsResponse, SearchResponse, ConversationSearchResponse } from '@/lib/mailApi';
 import { useCredentialsStore } from './credentialsStore';
 import type {
   Email,
@@ -16,6 +17,11 @@ interface MailState {
   selectedEmail: Email | null;
   currentFolder: string;
 
+  // Conversation Threading (Phase 2.1)
+  conversations: Conversation[];
+  selectedConversation: Conversation | null;
+  viewMode: 'list' | 'threaded';  // 'list' = flat emails, 'threaded' = grouped conversations
+
   // UI State
   isComposeOpen: boolean;
   composeData: Partial<ComposeEmail>;
@@ -25,12 +31,21 @@ interface MailState {
 
   // Pagination
   pagination: MailPagination;
+  conversationPagination: {
+    page: number;
+    limit: number;
+    total: number;
+    hasMore: boolean;
+  };
 
   // Loading states
   loading: {
     folders: boolean;
     emails: boolean;
     email: boolean;
+    conversations: boolean;
+    conversation: boolean;
+    search: boolean;
     send: boolean;
     action: boolean;
   };
@@ -47,6 +62,22 @@ interface MailState {
   deleteEmail: (messageId: string) => Promise<void>;
   markAsRead: (messageId: string, isRead: boolean) => Promise<void>;
   toggleStar: (messageId: string) => Promise<void>;
+
+  // Conversation Actions (Phase 2.1)
+  fetchConversations: (folder?: string, page?: number) => Promise<void>;
+  fetchConversation: (threadId: string) => Promise<void>;
+  fetchMessageThread: (messageId: string) => Promise<void>;
+  selectConversation: (conversation: Conversation | null) => void;
+  setViewMode: (mode: 'list' | 'threaded') => void;
+
+  // Search Actions (Phase 2.2)
+  searchEmails: (query: string, folder?: string) => Promise<void>;
+  searchConversations: (query: string, folder?: string) => Promise<void>;
+  clearSearch: () => void;
+  isSearchActive: boolean;
+  searchResults: Email[];
+  searchResultsCount: number;
+  searchByFolder: Record<string, number>;
 
   // UI Actions
   setCurrentFolder: (folder: string) => void;
@@ -67,6 +98,16 @@ const initialState = {
   emails: [],
   selectedEmail: null,
   currentFolder: 'INBOX',
+  // Conversation Threading
+  conversations: [],
+  selectedConversation: null,
+  viewMode: 'threaded' as const,  // Default to threaded view
+  // Search (Phase 2.2)
+  isSearchActive: false,
+  searchResults: [] as Email[],
+  searchResultsCount: 0,
+  searchByFolder: {} as Record<string, number>,
+  // UI State
   isComposeOpen: false,
   composeData: {},
   searchQuery: '',
@@ -78,56 +119,85 @@ const initialState = {
     total: 0,
     hasMore: false,
   },
+  conversationPagination: {
+    page: 1,
+    limit: 50,
+    total: 0,
+    hasMore: false,
+  },
   loading: {
     folders: false,
     emails: false,
     email: false,
+    conversations: false,
+    conversation: false,
+    search: false,
     send: false,
     action: false,
   },
   error: null,
 };
 
+/**
+ * Check if mail session is valid before API calls.
+ * Returns true if authenticated, false otherwise.
+ */
+function checkSession(): boolean {
+  const { isMailAuthenticated, isSessionValid } = useCredentialsStore.getState();
+  return isMailAuthenticated && isSessionValid();
+}
+
 export const useMailStore = create<MailState>((set, get) => ({
   ...initialState,
 
-  // Fetch folders
+  // ===========================================
+  // Fetch folders (session-based)
+  // ===========================================
   fetchFolders: async () => {
-    const credentials = useCredentialsStore.getState().getMailCredentials();
-    if (!credentials) {
-      set({ error: 'Mail credentials not found. Please login.' });
+    if (!checkSession()) {
+      set({ error: 'Mail session expired. Please login again.' });
       return;
     }
 
     set((state) => ({ loading: { ...state.loading, folders: true }, error: null }));
 
     try {
-      const folders = await mailApi.getFolders(credentials.email, credentials.password);
+      const response = await mailApi.getFolders();
+      const folderNames = response.folders || [];
 
       // Map to MailFolder type with defaults
-      const mappedFolders: MailFolder[] = folders.map((f: any) => ({
-        id: f.id || f.name,
-        name: f.name,
-        path: f.path || f.name,
-        type: getFolderType(f.name),
-        unreadCount: f.unread_count || 0,
-        totalCount: f.total_count || 0,
-        isSystem: isSystemFolder(f.name),
+      const mappedFolders: MailFolder[] = folderNames.map((name: string) => ({
+        id: name,
+        name: name,
+        path: name,
+        type: getFolderType(name),
+        unreadCount: 0,
+        totalCount: 0,
+        isSystem: isSystemFolder(name),
       }));
 
       set({ folders: mappedFolders });
     } catch (error: any) {
-      set({ error: error.response?.data?.detail || 'Failed to fetch folders' });
+      const message = error.response?.data?.detail || 'Failed to fetch folders';
+
+      // Check if it's a session error
+      if (error.response?.status === 401) {
+        set({ error: 'Mail session expired. Please login again.' });
+        useCredentialsStore.getState().destroyMailSession();
+      } else {
+        set({ error: message });
+      }
     } finally {
       set((state) => ({ loading: { ...state.loading, folders: false } }));
     }
   },
 
-  // Fetch emails
+  // ===========================================
+  // Fetch emails (session-based)
+  // ===========================================
   fetchEmails: async (folder?: string, page: number = 1) => {
-    const credentials = useCredentialsStore.getState().getMailCredentials();
-    if (!credentials) {
-      set({ error: 'Mail credentials not found. Please login.' });
+    if (!checkSession()) {
+      set({ error: 'Mail session expired. Please login again.' });
       return;
     }
 
@@ -139,25 +209,19 @@ export const useMailStore = create<MailState>((set, get) => ({
     }));
 
     try {
-      const response = await mailApi.getMessages(
-        credentials.email,
-        credentials.password,
-        targetFolder,
-        page,
-        50
-      );
+      const response = await mailApi.getMessages(targetFolder, page, 50);
 
-      const emails: Email[] = (response.emails || response || []).map((e: any) => ({
+      const emails: Email[] = (response.messages || response.emails || []).map((e: any) => ({
         id: e.id || e.message_id,
         messageId: e.message_id || e.id,
-        from: e.from || { name: '', email: '' },
-        to: e.to || [],
-        cc: e.cc || [],
+        from: parseEmailAddress(e.from),
+        to: Array.isArray(e.to) ? e.to.map(parseEmailAddress) : [parseEmailAddress(e.to)],
+        cc: e.cc ? (Array.isArray(e.cc) ? e.cc.map(parseEmailAddress) : [parseEmailAddress(e.cc)]) : [],
         subject: e.subject || '(No Subject)',
-        body: e.body || e.body_text || '',
+        body: e.body || e.body_text || e.preview || '',
         bodyHtml: e.body_html || e.body,
         date: e.date || e.received_date || new Date().toISOString(),
-        isRead: e.is_read ?? false,
+        isRead: e.is_read ?? e.read ?? false,
         isStarred: e.is_starred ?? false,
         isFlagged: e.is_flagged ?? false,
         hasAttachments: e.has_attachments ?? (e.attachments?.length > 0),
@@ -171,35 +235,58 @@ export const useMailStore = create<MailState>((set, get) => ({
         pagination: {
           page,
           limit: 50,
-          total: response.total || emails.length,
+          total: response.total || response.count || emails.length,
           hasMore: response.hasMore ?? emails.length >= 50,
         },
       });
     } catch (error: any) {
-      set({ error: error.response?.data?.detail || 'Failed to fetch emails' });
+      const message = error.response?.data?.detail || 'Failed to fetch emails';
+
+      if (error.response?.status === 401) {
+        set({ error: 'Mail session expired. Please login again.' });
+        useCredentialsStore.getState().destroyMailSession();
+      } else {
+        set({ error: message });
+      }
     } finally {
       set((state) => ({ loading: { ...state.loading, emails: false } }));
     }
   },
 
-  // Fetch single email
+  // ===========================================
+  // Fetch single email (session-based)
+  // ===========================================
   fetchEmail: async (messageId: string) => {
-    const credentials = useCredentialsStore.getState().getMailCredentials();
-    if (!credentials) return;
+    if (!checkSession()) return;
 
     set((state) => ({ loading: { ...state.loading, email: true } }));
 
     try {
-      const email = await mailApi.getMessage(
-        credentials.email,
-        credentials.password,
-        messageId
-      );
+      const rawEmail: any = await mailApi.getMessage(messageId, get().currentFolder);
 
-      set({ selectedEmail: email });
+      const parsedEmail: Email = {
+        id: rawEmail.id || messageId,
+        messageId: rawEmail.message_id || rawEmail.messageId || messageId,
+        from: parseEmailAddress(rawEmail.from),
+        to: Array.isArray(rawEmail.to) ? rawEmail.to.map(parseEmailAddress) : [parseEmailAddress(rawEmail.to)],
+        cc: rawEmail.cc ? (Array.isArray(rawEmail.cc) ? rawEmail.cc.map(parseEmailAddress) : [parseEmailAddress(rawEmail.cc)]) : [],
+        subject: rawEmail.subject || '(No Subject)',
+        body: rawEmail.body_text || rawEmail.bodyText || rawEmail.body || '',
+        bodyHtml: rawEmail.body_html || rawEmail.bodyHtml || '',
+        date: rawEmail.date || new Date().toISOString(),
+        isRead: true,
+        isStarred: rawEmail.is_starred ?? rawEmail.isStarred ?? false,
+        isFlagged: rawEmail.is_flagged ?? rawEmail.isFlagged ?? false,
+        hasAttachments: (rawEmail.attachments?.length || 0) > 0,
+        attachments: rawEmail.attachments || [],
+        folder: get().currentFolder,
+        labels: [],
+      };
+
+      set({ selectedEmail: parsedEmail });
 
       // Mark as read if not already
-      if (!email.isRead) {
+      if (!parsedEmail.isRead) {
         get().markAsRead(messageId, true);
       }
     } catch (error: any) {
@@ -209,25 +296,26 @@ export const useMailStore = create<MailState>((set, get) => ({
     }
   },
 
-  // Send email
+  // ===========================================
+  // Send email (session-based)
+  // ===========================================
   sendEmail: async (email: ComposeEmail) => {
-    const credentials = useCredentialsStore.getState().getMailCredentials();
-    if (!credentials) {
-      set({ error: 'Mail credentials not found. Please login.' });
+    if (!checkSession()) {
+      set({ error: 'Mail session expired. Please login again.' });
       return false;
     }
 
     set((state) => ({ loading: { ...state.loading, send: true }, error: null }));
 
     try {
-      await mailApi.sendEmail(credentials.email, credentials.password, {
+      await mailApi.sendEmail({
         to: email.to,
         cc: email.cc,
         bcc: email.bcc,
         subject: email.subject,
         body: email.body,
         isHtml: email.isHtml,
-        attachments: email.attachments,
+        inReplyTo: email.inReplyTo,
       });
 
       set({ isComposeOpen: false, composeData: {} });
@@ -240,22 +328,17 @@ export const useMailStore = create<MailState>((set, get) => ({
     }
   },
 
-  // Move email
+  // ===========================================
+  // Move email (session-based)
+  // ===========================================
   moveEmail: async (messageId: string, targetFolder: string) => {
-    const credentials = useCredentialsStore.getState().getMailCredentials();
-    if (!credentials) return;
+    if (!checkSession()) return;
 
     const { currentFolder, emails } = get();
     set((state) => ({ loading: { ...state.loading, action: true } }));
 
     try {
-      await mailApi.moveEmail(
-        credentials.email,
-        credentials.password,
-        messageId,
-        currentFolder,
-        targetFolder
-      );
+      await mailApi.moveEmail(messageId, currentFolder, targetFolder);
 
       // Remove from current list
       set({
@@ -269,15 +352,16 @@ export const useMailStore = create<MailState>((set, get) => ({
     }
   },
 
-  // Delete email
+  // ===========================================
+  // Delete email (session-based)
+  // ===========================================
   deleteEmail: async (messageId: string) => {
-    const credentials = useCredentialsStore.getState().getMailCredentials();
-    if (!credentials) return;
+    if (!checkSession()) return;
 
     set((state) => ({ loading: { ...state.loading, action: true } }));
 
     try {
-      await mailApi.deleteEmail(credentials.email, credentials.password, messageId);
+      await mailApi.deleteEmail(messageId, get().currentFolder);
 
       const { emails, selectedEmail } = get();
       set({
@@ -291,13 +375,14 @@ export const useMailStore = create<MailState>((set, get) => ({
     }
   },
 
-  // Mark as read/unread
+  // ===========================================
+  // Mark as read/unread (session-based)
+  // ===========================================
   markAsRead: async (messageId: string, isRead: boolean) => {
-    const credentials = useCredentialsStore.getState().getMailCredentials();
-    if (!credentials) return;
+    if (!checkSession()) return;
 
     try {
-      await mailApi.markAsRead(credentials.email, credentials.password, messageId, isRead);
+      await mailApi.markAsRead(messageId, isRead);
 
       // Update local state
       set((state) => ({
@@ -315,10 +400,11 @@ export const useMailStore = create<MailState>((set, get) => ({
     }
   },
 
-  // Toggle star
+  // ===========================================
+  // Toggle star (session-based)
+  // ===========================================
   toggleStar: async (messageId: string) => {
-    const credentials = useCredentialsStore.getState().getMailCredentials();
-    if (!credentials) return;
+    if (!checkSession()) return;
 
     const email = get().emails.find((e) => e.id === messageId);
     if (!email) return;
@@ -333,12 +419,7 @@ export const useMailStore = create<MailState>((set, get) => ({
     }));
 
     try {
-      await mailApi.toggleStar(
-        credentials.email,
-        credentials.password,
-        messageId,
-        newStarred
-      );
+      await mailApi.toggleStar(messageId, newStarred);
     } catch (error) {
       // Revert on failure
       set((state) => ({
@@ -349,10 +430,237 @@ export const useMailStore = create<MailState>((set, get) => ({
     }
   },
 
+  // ===========================================
+  // Conversation Threading (Phase 2.1)
+  // ===========================================
+  fetchConversations: async (folder?: string, page: number = 1) => {
+    if (!checkSession()) {
+      set({ error: 'Mail session expired. Please login again.' });
+      return;
+    }
+
+    const targetFolder = folder || get().currentFolder;
+    set((state) => ({
+      loading: { ...state.loading, conversations: true },
+      error: null,
+      currentFolder: targetFolder,
+    }));
+
+    try {
+      const response = await mailApi.getConversations(targetFolder, page, 50);
+
+      set({
+        conversations: response.conversations || [],
+        conversationPagination: {
+          page,
+          limit: 50,
+          total: response.total_conversations || 0,
+          hasMore: (response.conversations?.length || 0) >= 50,
+        },
+      });
+    } catch (error: any) {
+      const message = error.response?.data?.detail || 'Failed to fetch conversations';
+
+      if (error.response?.status === 401) {
+        set({ error: 'Mail session expired. Please login again.' });
+        useCredentialsStore.getState().destroyMailSession();
+      } else {
+        set({ error: message });
+      }
+    } finally {
+      set((state) => ({ loading: { ...state.loading, conversations: false } }));
+    }
+  },
+
+  fetchConversation: async (threadId: string) => {
+    if (!checkSession()) return;
+
+    set((state) => ({ loading: { ...state.loading, conversation: true } }));
+
+    try {
+      const conversation = await mailApi.getConversation(threadId, get().currentFolder);
+      set({ selectedConversation: conversation });
+    } catch (error: any) {
+      set({ error: error.response?.data?.detail || 'Failed to fetch conversation' });
+    } finally {
+      set((state) => ({ loading: { ...state.loading, conversation: false } }));
+    }
+  },
+
+  fetchMessageThread: async (messageId: string) => {
+    if (!checkSession()) return;
+
+    set((state) => ({ loading: { ...state.loading, conversation: true } }));
+
+    try {
+      const thread = await mailApi.getMessageThread(messageId, get().currentFolder);
+
+      // Convert to Conversation format
+      const conversation: Conversation = {
+        thread_id: thread.thread_id,
+        subject: thread.messages[0]?.subject || '(No Subject)',
+        message_count: thread.message_count,
+        participants: [],
+        latest_date: thread.messages[thread.messages.length - 1]?.date || '',
+        oldest_date: thread.messages[0]?.date || '',
+        preview: (thread.messages[thread.messages.length - 1] as any)?.preview || thread.messages[thread.messages.length - 1]?.body?.slice(0, 100) || '',
+        has_unread: false,
+        messages: thread.messages,
+      };
+
+      set({ selectedConversation: conversation });
+    } catch (error: any) {
+      set({ error: error.response?.data?.detail || 'Failed to fetch thread' });
+    } finally {
+      set((state) => ({ loading: { ...state.loading, conversation: false } }));
+    }
+  },
+
+  selectConversation: (conversation: Conversation | null) => {
+    set({ selectedConversation: conversation });
+  },
+
+  setViewMode: (mode: 'list' | 'threaded') => {
+    set({ viewMode: mode });
+    // Refresh data when switching modes
+    if (mode === 'threaded') {
+      get().fetchConversations();
+    } else {
+      get().fetchEmails();
+    }
+  },
+
+  // ===========================================
+  // Search Actions (Phase 2.2)
+  // ===========================================
+  searchEmails: async (query: string, folder?: string) => {
+    if (!checkSession()) {
+      set({ error: 'Mail session expired. Please login again.' });
+      return;
+    }
+
+    if (!query.trim()) {
+      get().clearSearch();
+      return;
+    }
+
+    set((state) => ({
+      loading: { ...state.loading, search: true },
+      error: null,
+      searchQuery: query,
+      isSearchActive: true,
+    }));
+
+    try {
+      const response = await mailApi.searchEmails(query, folder || undefined);
+
+      // Parse results into Email format
+      const searchResults: Email[] = (response.results || []).map((e: any) => ({
+        id: e.id || e.message_id,
+        messageId: e.message_id || e.id,
+        from: parseEmailAddress(e.from),
+        to: Array.isArray(e.to) ? e.to.map(parseEmailAddress) : [parseEmailAddress(e.to)],
+        cc: [],
+        subject: e.subject || '(No Subject)',
+        body: e.preview || '',
+        bodyHtml: '',
+        date: e.date || '',
+        isRead: e.read ?? true,
+        isStarred: false,
+        isFlagged: false,
+        hasAttachments: false,
+        attachments: [],
+        folder: e.folder || folder || 'INBOX',
+        labels: [],
+      }));
+
+      set({
+        searchResults,
+        searchResultsCount: response.count || 0,
+        searchByFolder: response.by_folder || {},
+      });
+    } catch (error: any) {
+      const message = error.response?.data?.detail || 'Search failed';
+      if (error.response?.status === 401) {
+        set({ error: 'Mail session expired. Please login again.' });
+        useCredentialsStore.getState().destroyMailSession();
+      } else {
+        set({ error: message });
+      }
+    } finally {
+      set((state) => ({ loading: { ...state.loading, search: false } }));
+    }
+  },
+
+  searchConversations: async (query: string, folder?: string) => {
+    if (!checkSession()) {
+      set({ error: 'Mail session expired. Please login again.' });
+      return;
+    }
+
+    if (!query.trim()) {
+      get().clearSearch();
+      return;
+    }
+
+    set((state) => ({
+      loading: { ...state.loading, search: true },
+      error: null,
+      searchQuery: query,
+      isSearchActive: true,
+    }));
+
+    try {
+      const response = await mailApi.searchConversations(query, folder || undefined);
+
+      set({
+        conversations: response.conversations || [],
+        searchResultsCount: response.conversation_count || 0,
+      });
+    } catch (error: any) {
+      const message = error.response?.data?.detail || 'Search failed';
+      if (error.response?.status === 401) {
+        set({ error: 'Mail session expired. Please login again.' });
+        useCredentialsStore.getState().destroyMailSession();
+      } else {
+        set({ error: message });
+      }
+    } finally {
+      set((state) => ({ loading: { ...state.loading, search: false } }));
+    }
+  },
+
+  clearSearch: () => {
+    const { viewMode } = get();
+    set({
+      isSearchActive: false,
+      searchQuery: '',
+      searchResults: [],
+      searchResultsCount: 0,
+      searchByFolder: {},
+    });
+
+    // Refresh the current view
+    if (viewMode === 'threaded') {
+      get().fetchConversations();
+    } else {
+      get().fetchEmails();
+    }
+  },
+
+  // ===========================================
   // UI Actions
+  // ===========================================
   setCurrentFolder: (folder: string) => {
-    set({ currentFolder: folder, selectedEmail: null });
-    get().fetchEmails(folder);
+    const { viewMode } = get();
+    set({ currentFolder: folder, selectedEmail: null, selectedConversation: null });
+
+    // Fetch based on current view mode
+    if (viewMode === 'threaded') {
+      get().fetchConversations(folder);
+    } else {
+      get().fetchEmails(folder);
+    }
   },
 
   selectEmail: (email: Email | null) => {
@@ -408,7 +716,10 @@ export const useMailStore = create<MailState>((set, get) => ({
   },
 }));
 
+// ===========================================
 // Helper functions
+// ===========================================
+
 function getFolderType(name: string): MailFolder['type'] {
   const lower = name.toLowerCase();
   if (lower === 'inbox') return 'inbox';
@@ -425,9 +736,31 @@ function isSystemFolder(name: string): boolean {
   return systemFolders.includes(name.toLowerCase());
 }
 
+function parseEmailAddress(input: any): { name: string; email: string } {
+  if (!input) return { name: '', email: '' };
+
+  if (typeof input === 'object' && input.email) {
+    return { name: input.name || '', email: input.email };
+  }
+
+  if (typeof input === 'string') {
+    const match = input.match(/^(.+?)\s*<(.+?)>$/);
+    if (match) {
+      return { name: match[1].trim(), email: match[2].trim() };
+    }
+    return { name: '', email: input.trim() };
+  }
+
+  return { name: '', email: '' };
+}
+
+// ===========================================
 // Hooks for common operations
+// ===========================================
+
 export function useReplyToEmail(email: Email) {
   const { openCompose } = useMailStore();
+  const { mailSession } = useCredentialsStore();
 
   return () => {
     openCompose({
@@ -442,13 +775,14 @@ export function useReplyToEmail(email: Email) {
 
 export function useReplyAllToEmail(email: Email) {
   const { openCompose } = useMailStore();
-  const credentials = useCredentialsStore.getState().getMailCredentials();
+  const { mailSession } = useCredentialsStore();
 
   return () => {
+    const currentEmail = mailSession?.email;
     const allRecipients = [
       email.from.email,
       ...email.to.map((t) => t.email),
-    ].filter((e) => e !== credentials?.email);
+    ].filter((e) => e !== currentEmail);
 
     openCompose({
       to: allRecipients,

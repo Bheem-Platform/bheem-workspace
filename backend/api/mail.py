@@ -1,24 +1,68 @@
 """
 Bheem Workspace - Mail API (Mailcow + MSG91 Integration)
 Webmail functionality via IMAP/SMTP and MSG91 transactional emails
+
+Security:
+- Uses session-based authentication with encrypted credential storage in Redis
+- Credentials are never passed in URL query parameters
+- Rate limiting protects against abuse
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from core.security import get_current_user
 from services.mailcow_service import mailcow_service
+from services.mail_session_service import mail_session_service, get_mail_session, MailSessionService
+from services.mail_threading_service import mail_threading_service
 # Use centralized Bheem Notify service
 from integrations.notify import msg91_service
+# Rate limiting
+try:
+    from middleware.rate_limit import limiter, RateLimits
+    RATE_LIMITING_ENABLED = True
+except ImportError:
+    RATE_LIMITING_ENABLED = False
+
+    # Dummy limiter for when rate limiting is disabled
+    class DummyLimiter:
+        def limit(self, limit_string):
+            def decorator(func):
+                return func
+            return decorator
+
+    limiter = DummyLimiter()
+
+    class RateLimits:
+        SESSION_CREATE = "5/minute"
+        MAIL_READ = "100/minute"
+        MAIL_LIST = "60/minute"
+        MAIL_SEND = "10/minute"
+        MAIL_MOVE = "30/minute"
+        MAIL_DELETE = "30/minute"
+        FOLDERS = "30/minute"
 
 router = APIRouter(prefix="/mail", tags=["Bheem Mail"])
 
+
+# ===========================================
 # Schemas
+# ===========================================
+
+class MailLoginRequest(BaseModel):
+    """Request body for mail login (credentials in body, not URL)."""
+    email: EmailStr
+    password: str
+
+
 class SendEmailRequest(BaseModel):
     to: List[EmailStr]
     cc: Optional[List[EmailStr]] = []
+    bcc: Optional[List[EmailStr]] = []
     subject: str
     body: str
     is_html: bool = True
+    in_reply_to: Optional[str] = None  # Message-ID for threading
+
 
 class EmailPreview(BaseModel):
     id: str
@@ -27,6 +71,7 @@ class EmailPreview(BaseModel):
     date: str
     preview: str
     read: bool
+
 
 class EmailDetail(BaseModel):
     id: str
@@ -39,173 +84,776 @@ class EmailDetail(BaseModel):
     body_text: str
     attachments: List[dict]
 
+
 class MoveEmailRequest(BaseModel):
     from_folder: str
     to_folder: str
 
-# Note: For now, we store mail credentials in session/token
-# In production, use secure credential storage
 
-@router.get("/inbox")
-async def get_inbox(
-    folder: str = "INBOX",
-    limit: int = 50,
+class MailSessionResponse(BaseModel):
+    """Response for mail session operations."""
+    success: bool
+    message: str
+    email: Optional[str] = None
+    session_id: Optional[str] = None
+    expires_in_seconds: Optional[int] = None
+    folders: Optional[List[str]] = None
+
+
+# ===========================================
+# Helper function to get credentials from session
+# ===========================================
+
+def get_mail_credentials(user_id: str) -> dict:
+    """Get mail credentials from session or raise 401."""
+    credentials = mail_session_service.get_credentials(user_id)
+    if not credentials:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Mail session expired or not found. Please authenticate via POST /mail/session/create"
+        )
+    return credentials
+
+
+# ===========================================
+# Session Management Endpoints (Phase 1.1)
+# ===========================================
+
+@router.post("/session/create", response_model=MailSessionResponse)
+@limiter.limit(RateLimits.SESSION_CREATE)
+async def create_mail_session(
+    request_obj: Request,
+    request: MailLoginRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Get emails from inbox
-    Note: Requires mail credentials stored in user session
-    For demo, using placeholder credentials
-    """
-    # In production, get credentials from secure storage
-    email = current_user.get("email") or f"{current_user['username']}@bheem.cloud"
-    
-    # For demo purposes - in production, use stored/encrypted credentials
-    # This would typically come from a secure vault or user-provided credentials
-    return {
-        "message": "Mail API ready",
-        "user_email": email,
-        "folder": folder,
-        "note": "Use /mail/login to authenticate with mail credentials"
-    }
+    Create a secure mail session.
 
-@router.post("/login")
-async def mail_login(
-    email: EmailStr,
-    password: str,
-    current_user: dict = Depends(get_current_user)
-):
+    Authenticates with the mail server and stores encrypted credentials
+    in Redis. Returns a session that expires after 24 hours.
+
+    **Security:** Credentials are passed in the request body (not URL)
+    and stored encrypted server-side. The frontend only receives a session ID.
     """
-    Authenticate with mail server
-    Returns session for subsequent mail operations
-    """
-    # Test IMAP connection
+    user_id = current_user.get("id") or current_user.get("user_id")
+
+    # Validate credentials with Mailcow
     try:
-        folders = mailcow_service.get_folders(email, password)
-        if folders:
-            return {
-                "success": True,
-                "email": email,
-                "folders": folders,
-                "message": "Mail authentication successful"
-            }
+        folders = mailcow_service.get_folders(request.email, request.password)
+        if not folders:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid mail credentials"
+            )
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Mail authentication failed: {str(e)}"
         )
 
-@router.get("/messages")
-async def get_messages(
-    email: EmailStr,
-    password: str,
-    folder: str = "INBOX",
-    limit: int = 50,
+    # Create encrypted session
+    try:
+        session_info = mail_session_service.create_session(
+            user_id=user_id,
+            email=request.email,
+            password=request.password,
+            additional_data={"username": current_user.get("username")}
+        )
+
+        return MailSessionResponse(
+            success=True,
+            message="Mail session created successfully",
+            email=request.email,
+            session_id=session_info["session_id"],
+            expires_in_seconds=session_info["expires_in_seconds"],
+            folders=folders
+        )
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Session service unavailable: {str(e)}"
+        )
+
+
+@router.get("/session/status")
+async def get_mail_session_status(
     current_user: dict = Depends(get_current_user)
 ):
-    """Get messages from a folder"""
-    messages = mailcow_service.get_inbox(email, password, folder, limit)
+    """
+    Check current mail session status.
+
+    Returns session info including remaining TTL, or indicates no active session.
+    """
+    user_id = current_user.get("id") or current_user.get("user_id")
+
+    session_info = mail_session_service.get_session_info(user_id)
+
+    if not session_info:
+        return {
+            "active": False,
+            "message": "No active mail session. Please authenticate via POST /mail/session/create"
+        }
+
+    return {
+        "active": True,
+        "email": session_info["email"],
+        "expires_in_seconds": session_info["expires_in_seconds"],
+        "session_id": session_info["session_id"]
+    }
+
+
+@router.post("/session/refresh")
+async def refresh_mail_session(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Refresh/extend the mail session TTL.
+
+    Extends the session without requiring re-authentication.
+    """
+    user_id = current_user.get("id") or current_user.get("user_id")
+
+    success = mail_session_service.refresh_session(user_id)
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active mail session to refresh"
+        )
+
+    session_info = mail_session_service.get_session_info(user_id)
+
+    return {
+        "success": True,
+        "message": "Session refreshed",
+        "expires_in_seconds": session_info["expires_in_seconds"] if session_info else 0
+    }
+
+
+@router.delete("/session")
+async def destroy_mail_session(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Destroy mail session (logout from mail).
+
+    Removes encrypted credentials from server storage.
+    """
+    user_id = current_user.get("id") or current_user.get("user_id")
+
+    success = mail_session_service.destroy_session(user_id)
+
+    return {
+        "success": True,
+        "message": "Mail session destroyed" if success else "No active session"
+    }
+
+
+# ===========================================
+# Legacy login endpoint (deprecated, redirects to session)
+# ===========================================
+
+@router.post("/login")
+async def mail_login(
+    request: MailLoginRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    [DEPRECATED] Use POST /mail/session/create instead.
+
+    This endpoint is kept for backwards compatibility but internally
+    uses the new session-based authentication.
+    """
+    return await create_mail_session(request, current_user)
+
+
+# ===========================================
+# Inbox / Message Endpoints (Using Session Auth)
+# ===========================================
+
+@router.get("/inbox")
+@limiter.limit(RateLimits.MAIL_LIST)
+async def get_inbox(
+    request: Request,
+    folder: str = Query("INBOX", description="Mail folder to fetch"),
+    limit: int = Query(50, ge=1, le=200, description="Number of messages to fetch"),
+    page: int = Query(1, ge=1, description="Page number"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get emails from inbox using session authentication.
+
+    Requires an active mail session (created via POST /mail/session/create).
+    """
+    user_id = current_user.get("id") or current_user.get("user_id")
+    credentials = get_mail_credentials(user_id)
+
+    # Calculate offset for pagination
+    offset = (page - 1) * limit
+
+    messages = mailcow_service.get_inbox(
+        credentials["email"],
+        credentials["password"],
+        folder,
+        limit
+    )
+
     return {
         "folder": folder,
         "count": len(messages),
+        "page": page,
+        "limit": limit,
+        "messages": messages,
+        "email": credentials["email"]
+    }
+
+
+@router.get("/messages")
+@limiter.limit(RateLimits.MAIL_LIST)
+async def get_messages(
+    request: Request,
+    folder: str = Query("INBOX", description="Mail folder"),
+    limit: int = Query(50, ge=1, le=200, description="Number of messages"),
+    page: int = Query(1, ge=1, description="Page number"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get messages from a folder using session authentication.
+
+    Requires an active mail session.
+    """
+    user_id = current_user.get("id") or current_user.get("user_id")
+    credentials = get_mail_credentials(user_id)
+
+    messages = mailcow_service.get_inbox(
+        credentials["email"],
+        credentials["password"],
+        folder,
+        limit
+    )
+
+    return {
+        "folder": folder,
+        "count": len(messages),
+        "page": page,
+        "limit": limit,
         "messages": messages
     }
 
+
 @router.get("/messages/{message_id}")
+@limiter.limit(RateLimits.MAIL_READ)
 async def get_message(
+    request: Request,
     message_id: str,
-    email: EmailStr,
-    password: str,
-    folder: str = "INBOX",
+    folder: str = Query("INBOX", description="Mail folder"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get a single message by ID"""
-    message = mailcow_service.get_email(email, password, message_id, folder)
+    """
+    Get a single message by ID using session authentication.
+
+    Requires an active mail session.
+    """
+    user_id = current_user.get("id") or current_user.get("user_id")
+    credentials = get_mail_credentials(user_id)
+
+    message = mailcow_service.get_email(
+        credentials["email"],
+        credentials["password"],
+        message_id,
+        folder
+    )
+
     if not message:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Message not found"
         )
+
     return message
 
+
 @router.post("/send")
+@limiter.limit(RateLimits.MAIL_SEND)
 async def send_email(
+    request_obj: Request,
     request: SendEmailRequest,
-    email: EmailStr,
-    password: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """Send an email"""
+    """
+    Send an email using session authentication.
+
+    Requires an active mail session.
+    """
+    user_id = current_user.get("id") or current_user.get("user_id")
+    credentials = get_mail_credentials(user_id)
+
     success = mailcow_service.send_email(
-        from_email=email,
-        password=password,
+        from_email=credentials["email"],
+        password=credentials["password"],
         to=request.to,
         subject=request.subject,
         body=request.body,
         cc=request.cc,
         is_html=request.is_html
     )
-    
+
     if not success:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to send email"
         )
-    
-    return {"success": True, "message": "Email sent successfully"}
+
+    return {
+        "success": True,
+        "message": "Email sent successfully",
+        "from": credentials["email"],
+        "to": request.to
+    }
+
 
 @router.get("/folders")
+@limiter.limit(RateLimits.FOLDERS)
 async def get_folders(
-    email: EmailStr,
-    password: str,
+    request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    """Get list of mail folders"""
-    folders = mailcow_service.get_folders(email, password)
+    """
+    Get list of mail folders using session authentication.
+
+    Requires an active mail session.
+    """
+    user_id = current_user.get("id") or current_user.get("user_id")
+    credentials = get_mail_credentials(user_id)
+
+    folders = mailcow_service.get_folders(
+        credentials["email"],
+        credentials["password"]
+    )
+
     return {"folders": folders}
 
+
 @router.post("/messages/{message_id}/move")
+@limiter.limit(RateLimits.MAIL_MOVE)
 async def move_message(
+    request_obj: Request,
     message_id: str,
     request: MoveEmailRequest,
-    email: EmailStr,
-    password: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """Move a message to another folder"""
+    """
+    Move a message to another folder using session authentication.
+
+    Requires an active mail session.
+    """
+    user_id = current_user.get("id") or current_user.get("user_id")
+    credentials = get_mail_credentials(user_id)
+
     success = mailcow_service.move_email(
-        email, password, message_id, 
-        request.from_folder, request.to_folder
+        credentials["email"],
+        credentials["password"],
+        message_id,
+        request.from_folder,
+        request.to_folder
     )
-    
+
     if not success:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to move message"
         )
-    
+
     return {"success": True, "message": "Message moved"}
 
+
 @router.delete("/messages/{message_id}")
+@limiter.limit(RateLimits.MAIL_DELETE)
 async def delete_message(
+    request: Request,
     message_id: str,
-    email: EmailStr,
-    password: str,
-    folder: str = "INBOX",
+    folder: str = Query("INBOX", description="Source folder"),
     current_user: dict = Depends(get_current_user)
 ):
-    """Delete a message (move to Trash)"""
+    """
+    Delete a message (move to Trash) using session authentication.
+
+    Requires an active mail session.
+    """
+    user_id = current_user.get("id") or current_user.get("user_id")
+    credentials = get_mail_credentials(user_id)
+
     success = mailcow_service.move_email(
-        email, password, message_id, folder, "Trash"
+        credentials["email"],
+        credentials["password"],
+        message_id,
+        folder,
+        "Trash"
     )
-    
+
     if not success:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete message"
         )
-    
+
     return {"success": True, "message": "Message deleted"}
+
+
+# ===========================================
+# Conversation Threading Endpoints (Phase 2.1)
+# ===========================================
+
+@router.get("/conversations")
+@limiter.limit(RateLimits.MAIL_LIST)
+async def get_conversations(
+    request: Request,
+    folder: str = Query("INBOX", description="Mail folder"),
+    limit: int = Query(50, ge=1, le=200, description="Number of messages to fetch for threading"),
+    page: int = Query(1, ge=1, description="Page number"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get emails grouped into threaded conversations.
+
+    Returns a list of conversation threads, each containing related messages
+    grouped by Message-ID/In-Reply-To/References headers.
+
+    Requires an active mail session.
+    """
+    user_id = current_user.get("id") or current_user.get("user_id")
+    credentials = get_mail_credentials(user_id)
+
+    # Fetch messages with threading headers
+    messages = mailcow_service.get_inbox(
+        credentials["email"],
+        credentials["password"],
+        folder,
+        limit * 2  # Fetch more to ensure we get complete threads
+    )
+
+    # Group into threads
+    conversations = mail_threading_service.group_into_threads(messages)
+
+    # Apply pagination to conversations
+    start_idx = (page - 1) * limit
+    end_idx = start_idx + limit
+    paginated_conversations = conversations[start_idx:end_idx]
+
+    return {
+        "folder": folder,
+        "total_conversations": len(conversations),
+        "page": page,
+        "limit": limit,
+        "conversations": paginated_conversations
+    }
+
+
+@router.get("/conversations/{thread_id}")
+@limiter.limit(RateLimits.MAIL_READ)
+async def get_conversation(
+    request: Request,
+    thread_id: str,
+    folder: str = Query("INBOX", description="Mail folder"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get a single conversation thread by ID.
+
+    Returns all messages in the thread with full content.
+
+    Requires an active mail session.
+    """
+    user_id = current_user.get("id") or current_user.get("user_id")
+    credentials = get_mail_credentials(user_id)
+
+    # Fetch messages
+    messages = mailcow_service.get_inbox(
+        credentials["email"],
+        credentials["password"],
+        folder,
+        200  # Fetch enough to find the thread
+    )
+
+    # Group into threads
+    conversations = mail_threading_service.group_into_threads(messages)
+
+    # Find the requested thread
+    for conversation in conversations:
+        if conversation.get("thread_id") == thread_id:
+            # Fetch full content for each message in the thread
+            full_messages = []
+            for msg in conversation.get("messages", []):
+                full_msg = mailcow_service.get_email(
+                    credentials["email"],
+                    credentials["password"],
+                    msg.get("id"),
+                    folder
+                )
+                if full_msg:
+                    full_messages.append(full_msg)
+                else:
+                    full_messages.append(msg)
+
+            conversation["messages"] = full_messages
+            return conversation
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Conversation thread not found"
+    )
+
+
+@router.get("/messages/{message_id}/thread")
+@limiter.limit(RateLimits.MAIL_READ)
+async def get_message_thread(
+    request: Request,
+    message_id: str,
+    folder: str = Query("INBOX", description="Mail folder"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get all messages in the same thread as the specified message.
+
+    Useful for expanding a single message into its full conversation.
+
+    Requires an active mail session.
+    """
+    user_id = current_user.get("id") or current_user.get("user_id")
+    credentials = get_mail_credentials(user_id)
+
+    # Get the target message first
+    target_message = mailcow_service.get_email(
+        credentials["email"],
+        credentials["password"],
+        message_id,
+        folder
+    )
+
+    if not target_message:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Message not found"
+        )
+
+    # Fetch all messages in folder
+    all_messages = mailcow_service.get_inbox(
+        credentials["email"],
+        credentials["password"],
+        folder,
+        200
+    )
+
+    # Get thread for this message
+    thread_messages = mail_threading_service.get_thread_for_message(
+        target_message,
+        all_messages
+    )
+
+    # Fetch full content for each message
+    full_messages = []
+    for msg in thread_messages:
+        full_msg = mailcow_service.get_email(
+            credentials["email"],
+            credentials["password"],
+            msg.get("id"),
+            folder
+        )
+        if full_msg:
+            full_messages.append(full_msg)
+        else:
+            full_messages.append(msg)
+
+    return {
+        "thread_id": target_message.get("message_id", message_id),
+        "message_count": len(full_messages),
+        "messages": full_messages
+    }
+
+
+# ===========================================
+# Search Endpoints (Phase 2.2)
+# ===========================================
+
+class SearchRequest(BaseModel):
+    query: str
+    folder: Optional[str] = None  # None = search all folders
+    search_in: Optional[List[str]] = None  # ['subject', 'from', 'to', 'body', 'all']
+    limit: Optional[int] = 50
+
+
+@router.get("/search")
+@limiter.limit(RateLimits.MAIL_LIST)
+async def search_emails(
+    request: Request,
+    query: str = Query(..., min_length=1, description="Search query"),
+    folder: Optional[str] = Query(None, description="Folder to search (null for all)"),
+    search_in: Optional[str] = Query("all", description="Fields to search: subject,from,to,body,all"),
+    limit: int = Query(50, ge=1, le=100, description="Max results"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Search emails using IMAP SEARCH.
+
+    Searches in specified folder or all folders if folder is not provided.
+    Can filter by fields: subject, from, to, body, or all.
+
+    Requires an active mail session.
+    """
+    user_id = current_user.get("id") or current_user.get("user_id")
+    credentials = get_mail_credentials(user_id)
+
+    # Parse search_in fields
+    search_fields = search_in.split(",") if search_in else ["all"]
+
+    if folder:
+        # Search single folder
+        results = mailcow_service.search_emails(
+            credentials["email"],
+            credentials["password"],
+            query,
+            folder,
+            search_fields,
+            limit
+        )
+        return {
+            "query": query,
+            "folder": folder,
+            "count": len(results),
+            "results": results
+        }
+    else:
+        # Search all folders
+        results = mailcow_service.search_all_folders(
+            credentials["email"],
+            credentials["password"],
+            query,
+            search_fields,
+            limit
+        )
+
+        # Flatten results with folder info
+        all_results = []
+        for folder_name, messages in results.items():
+            all_results.extend(messages)
+
+        # Sort by date (newest first)
+        all_results.sort(key=lambda x: x.get("date", ""), reverse=True)
+
+        return {
+            "query": query,
+            "folder": "all",
+            "count": len(all_results),
+            "results": all_results[:limit],
+            "by_folder": {k: len(v) for k, v in results.items()}
+        }
+
+
+@router.post("/search")
+@limiter.limit(RateLimits.MAIL_LIST)
+async def search_emails_post(
+    request_obj: Request,
+    request: SearchRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Search emails (POST version for complex queries).
+
+    Same as GET /search but accepts JSON body for more complex search parameters.
+    """
+    user_id = current_user.get("id") or current_user.get("user_id")
+    credentials = get_mail_credentials(user_id)
+
+    search_fields = request.search_in or ["all"]
+
+    if request.folder:
+        results = mailcow_service.search_emails(
+            credentials["email"],
+            credentials["password"],
+            request.query,
+            request.folder,
+            search_fields,
+            request.limit or 50
+        )
+        return {
+            "query": request.query,
+            "folder": request.folder,
+            "count": len(results),
+            "results": results
+        }
+    else:
+        results = mailcow_service.search_all_folders(
+            credentials["email"],
+            credentials["password"],
+            request.query,
+            search_fields,
+            request.limit or 50
+        )
+
+        all_results = []
+        for folder_name, messages in results.items():
+            all_results.extend(messages)
+
+        all_results.sort(key=lambda x: x.get("date", ""), reverse=True)
+
+        return {
+            "query": request.query,
+            "folder": "all",
+            "count": len(all_results),
+            "results": all_results[:request.limit or 50],
+            "by_folder": {k: len(v) for k, v in results.items()}
+        }
+
+
+@router.get("/search/conversations")
+@limiter.limit(RateLimits.MAIL_LIST)
+async def search_conversations(
+    request: Request,
+    query: str = Query(..., min_length=1, description="Search query"),
+    folder: Optional[str] = Query(None, description="Folder to search"),
+    limit: int = Query(50, ge=1, le=100, description="Max results"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Search emails and return results grouped into conversations.
+
+    Combines search with threading for conversation-based search results.
+    """
+    user_id = current_user.get("id") or current_user.get("user_id")
+    credentials = get_mail_credentials(user_id)
+
+    if folder:
+        results = mailcow_service.search_emails(
+            credentials["email"],
+            credentials["password"],
+            query,
+            folder,
+            ["all"],
+            limit * 2  # Fetch more for complete threads
+        )
+    else:
+        all_folder_results = mailcow_service.search_all_folders(
+            credentials["email"],
+            credentials["password"],
+            query,
+            ["all"],
+            limit * 2
+        )
+        results = []
+        for messages in all_folder_results.values():
+            results.extend(messages)
+
+    # Group into threads
+    conversations = mail_threading_service.group_into_threads(results)
+
+    return {
+        "query": query,
+        "folder": folder or "all",
+        "conversation_count": len(conversations),
+        "conversations": conversations[:limit]
+    }
 
 
 # ===========================================

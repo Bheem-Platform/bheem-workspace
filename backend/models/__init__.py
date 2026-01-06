@@ -21,6 +21,15 @@ from .meet_models import (
     MeetingSettings
 )
 
+from .mail_models import (
+    MailDraft,
+    MailSignature,
+    MailFilter,
+    MailContact,
+    ScheduledEmail,
+    Mail2FALog
+)
+
 __all__ = [
     # Admin models
     "Tenant",
@@ -37,5 +46,12 @@ __all__ = [
     "MeetingChatMessage",
     "MeetingParticipant",
     "WaitingRoom",
-    "MeetingSettings"
+    "MeetingSettings",
+    # Mail models
+    "MailDraft",
+    "MailSignature",
+    "MailFilter",
+    "MailContact",
+    "ScheduledEmail",
+    "Mail2FALog"
 ]

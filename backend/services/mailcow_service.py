@@ -184,13 +184,23 @@ class MailcowService:
                         else:
                             body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")[:200]
                         
+                        # Extract threading headers
+                        message_id_header = msg.get("Message-ID", "")
+                        in_reply_to = msg.get("In-Reply-To", "")
+                        references = msg.get("References", "")
+
                         messages.append({
                             "id": num.decode(),
                             "subject": subject,
                             "from": from_addr,
+                            "to": msg.get("To", ""),
                             "date": date_str,
                             "preview": body.strip(),
-                            "read": True  # TODO: Check flags
+                            "read": True,  # TODO: Check flags
+                            # Threading headers
+                            "message_id": message_id_header,
+                            "in_reply_to": in_reply_to,
+                            "references": references
                         })
             
             mail.logout()
@@ -240,7 +250,7 @@ class MailcowService:
                         body_text = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
                     
                     mail.logout()
-                    
+
                     return {
                         "id": message_id,
                         "subject": subject,
@@ -250,7 +260,11 @@ class MailcowService:
                         "date": msg.get("Date", ""),
                         "body_html": body_html,
                         "body_text": body_text,
-                        "attachments": attachments
+                        "attachments": attachments,
+                        # Threading headers
+                        "message_id": msg.get("Message-ID", ""),
+                        "in_reply_to": msg.get("In-Reply-To", ""),
+                        "references": msg.get("References", "")
                     }
             
             mail.logout()
@@ -319,16 +333,177 @@ class MailcowService:
             mail = imaplib.IMAP4_SSL(self.imap_host, self.imap_port, timeout=30)
             mail.login(email, password)
             mail.select(from_folder)
-            
+
             mail.copy(message_id.encode(), to_folder)
             mail.store(message_id.encode(), "+FLAGS", "\\Deleted")
             mail.expunge()
-            
+
             mail.logout()
             return True
         except Exception as e:
             print(f"IMAP Error: {e}")
             return False
+
+    def search_emails(
+        self,
+        email: str,
+        password: str,
+        query: str,
+        folder: str = "INBOX",
+        search_in: List[str] = None,
+        limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """
+        Search emails using IMAP SEARCH command.
+
+        Args:
+            email: User email address
+            password: User password
+            query: Search query string
+            folder: Folder to search in (default: INBOX)
+            search_in: Fields to search ['subject', 'from', 'to', 'body', 'all']
+            limit: Maximum results to return
+
+        Returns:
+            List of matching email previews
+        """
+        if search_in is None:
+            search_in = ['all']
+
+        messages = []
+
+        try:
+            mail = imaplib.IMAP4_SSL(self.imap_host, self.imap_port, timeout=30)
+            mail.login(email, password)
+            mail.select(folder)
+
+            # Build IMAP search criteria
+            search_criteria = self._build_search_criteria(query, search_in)
+
+            _, message_numbers = mail.search(None, search_criteria)
+            message_list = message_numbers[0].split()
+
+            # Get latest matching emails (reversed order)
+            for num in reversed(message_list[-limit:]):
+                _, msg_data = mail.fetch(num, "(RFC822)")
+
+                for response_part in msg_data:
+                    if isinstance(response_part, tuple):
+                        msg = email_lib.message_from_bytes(response_part[1])
+
+                        # Decode subject
+                        subject = ""
+                        if msg["Subject"]:
+                            decoded = email_lib.header.decode_header(msg["Subject"])[0]
+                            subject = decoded[0] if isinstance(decoded[0], str) else decoded[0].decode(decoded[1] or "utf-8")
+
+                        # Decode from
+                        from_addr = msg.get("From", "")
+
+                        # Get date
+                        date_str = msg.get("Date", "")
+
+                        # Get body preview
+                        body = ""
+                        if msg.is_multipart():
+                            for part in msg.walk():
+                                if part.get_content_type() == "text/plain":
+                                    body = part.get_payload(decode=True).decode("utf-8", errors="ignore")[:200]
+                                    break
+                        else:
+                            body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")[:200]
+
+                        # Extract threading headers
+                        message_id_header = msg.get("Message-ID", "")
+                        in_reply_to = msg.get("In-Reply-To", "")
+                        references = msg.get("References", "")
+
+                        messages.append({
+                            "id": num.decode(),
+                            "subject": subject,
+                            "from": from_addr,
+                            "to": msg.get("To", ""),
+                            "date": date_str,
+                            "preview": body.strip(),
+                            "read": True,
+                            "message_id": message_id_header,
+                            "in_reply_to": in_reply_to,
+                            "references": references,
+                            "folder": folder
+                        })
+
+            mail.logout()
+        except Exception as e:
+            print(f"IMAP Search Error: {e}")
+
+        return messages
+
+    def _build_search_criteria(self, query: str, search_in: List[str]) -> str:
+        """Build IMAP search criteria string."""
+        # Escape special characters and quotes
+        safe_query = query.replace('"', '\\"')
+
+        if 'all' in search_in:
+            # Search in all common fields using OR
+            return f'(OR OR OR SUBJECT "{safe_query}" FROM "{safe_query}" TO "{safe_query}" BODY "{safe_query}")'
+
+        criteria_parts = []
+
+        if 'subject' in search_in:
+            criteria_parts.append(f'SUBJECT "{safe_query}"')
+
+        if 'from' in search_in:
+            criteria_parts.append(f'FROM "{safe_query}"')
+
+        if 'to' in search_in:
+            criteria_parts.append(f'TO "{safe_query}"')
+
+        if 'body' in search_in:
+            criteria_parts.append(f'BODY "{safe_query}"')
+
+        if len(criteria_parts) == 1:
+            return criteria_parts[0]
+        elif len(criteria_parts) > 1:
+            # Combine with OR
+            result = criteria_parts[0]
+            for part in criteria_parts[1:]:
+                result = f'(OR {result} {part})'
+            return result
+
+        # Default: search subject
+        return f'SUBJECT "{safe_query}"'
+
+    def search_all_folders(
+        self,
+        email: str,
+        password: str,
+        query: str,
+        search_in: List[str] = None,
+        limit: int = 50
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Search emails across all folders.
+
+        Returns:
+            Dict mapping folder names to lists of matching emails
+        """
+        results = {}
+
+        try:
+            folders = self.get_folders(email, password)
+
+            for folder in folders:
+                folder_results = self.search_emails(
+                    email, password, query, folder, search_in, limit
+                )
+                if folder_results:
+                    results[folder] = folder_results
+
+        except Exception as e:
+            print(f"IMAP Search All Error: {e}")
+
+        return results
+
 
 # Singleton instance
 mailcow_service = MailcowService()

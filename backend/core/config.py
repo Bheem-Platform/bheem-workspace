@@ -90,6 +90,14 @@ class Settings(BaseSettings):
     NOTIFY_SENDER_NAME: str = "Bheem Workspace"
 
     # ============================================
+    # MAIL SESSION SECURITY
+    # ============================================
+    REDIS_URL: str = "redis://localhost:6379/1"
+    MAIL_ENCRYPTION_KEY: Optional[str] = None  # Fernet key for encrypting mail credentials
+    MAIL_SESSION_TTL_HOURS: int = 24
+    UNDO_SEND_DELAY_SECONDS: int = 30
+
+    # ============================================
     # USER PROVISIONING CONFIGURATION
     # ============================================
     WORKSPACE_FRONTEND_URL: str = "https://workspace.bheem.cloud"

@@ -137,6 +137,7 @@ export interface SendEmailRequest {
   body: string;
   isHtml?: boolean;
   attachments?: File[];
+  inReplyTo?: string;
 }
 
 export interface MoveEmailRequest {
@@ -151,9 +152,24 @@ export interface MailLoginResponse {
 }
 
 export interface EmailListResponse {
-  emails: Email[];
-  total: number;
-  page: number;
-  limit: number;
-  hasMore: boolean;
+  emails?: Email[];
+  messages?: Email[];  // Alternative response format from API
+  total?: number;
+  count?: number;  // Alternative count field
+  page?: number;
+  limit?: number;
+  hasMore?: boolean;
+}
+
+// Conversation Threading
+export interface Conversation {
+  thread_id: string;
+  subject: string;
+  message_count: number;
+  participants: string[];
+  latest_date: string;
+  oldest_date: string;
+  preview: string;
+  has_unread: boolean;
+  messages: Email[];
 }

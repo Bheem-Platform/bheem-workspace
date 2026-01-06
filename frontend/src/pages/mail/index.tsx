@@ -1,4 +1,8 @@
-import { useEffect, useState } from 'react';
+/**
+ * Bheem Mail - Main Page
+ * Enhanced with Settings, Advanced Search, Shared Mailboxes, and more
+ */
+import { useEffect, useState, useCallback } from 'react';
 import Head from 'next/head';
 import { useHotkeys } from 'react-hotkeys-hook';
 import AppSwitcherBar from '@/components/shared/AppSwitcherBar';
@@ -6,17 +10,23 @@ import MailHeader from '@/components/mail/MailHeader';
 import MailSidebar from '@/components/mail/MailSidebar';
 import MailList from '@/components/mail/MailList';
 import MailViewer from '@/components/mail/MailViewer';
+import ConversationView from '@/components/mail/ConversationView';
 import ComposeModal from '@/components/mail/ComposeModal';
 import MailLoginOverlay from '@/components/mail/MailLoginOverlay';
+import MailSettings from '@/components/mail/MailSettings';
+import AdvancedSearchModal from '@/components/mail/AdvancedSearchModal';
+import SharedMailboxPanel from '@/components/mail/SharedMailboxPanel';
+import { UndoSendToastManager } from '@/components/mail/UndoSendToast';
 import { useMailStore } from '@/stores/mailStore';
 import { useCredentialsStore, useRequireMailAuth } from '@/stores/credentialsStore';
 import { useRequireAuth } from '@/stores/authStore';
+import { useMailWebSocket } from '@/hooks/useMailWebSocket';
 import type { Email } from '@/types/mail';
 
 export default function MailPage() {
   const { isAuthenticated: isLoggedIn, isLoading: authLoading } = useRequireAuth();
   const { isAuthenticated: isMailAuth } = useRequireMailAuth();
-  const { isMailAuthenticated } = useCredentialsStore();
+  const { isMailAuthenticated, mailSession } = useCredentialsStore();
 
   const {
     selectedEmail,
@@ -29,9 +39,36 @@ export default function MailPage() {
     emails,
     deleteEmail,
     toggleStar,
+    viewMode,
+    setViewMode,
+    searchEmails,
+    // Conversation/threading support
+    selectedConversation,
+    selectConversation,
+    fetchConversations,
+    conversations,
   } = useMailStore();
 
   const [showLoginOverlay, setShowLoginOverlay] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [showAdvancedSearch, setShowAdvancedSearch] = useState(false);
+  const [showSharedMailbox, setShowSharedMailbox] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'labels' | 'filters' | 'signatures' | 'templates' | 'vacation'>('labels');
+
+  // WebSocket for real-time updates
+  const { isConnected, subscribeFolder, unsubscribeFolder } = useMailWebSocket({
+    onNewEmail: (folder) => {
+      // Refresh the email list when new email arrives
+      fetchEmails();
+    },
+    onEmailUpdated: (emailId, updateType) => {
+      // Handle email updates (read status, star, etc.)
+    },
+    onFolderUpdated: (folder, unreadCount) => {
+      // Handle folder count updates
+      fetchFolders();
+    },
+  });
 
   // Check if mail credentials exist
   useEffect(() => {
@@ -42,6 +79,8 @@ export default function MailPage() {
         // Fetch data if authenticated
         fetchFolders();
         fetchEmails();
+        // Subscribe to INBOX for real-time updates
+        subscribeFolder('INBOX');
       }
     }
   }, [authLoading, isLoggedIn, isMailAuthenticated]);
@@ -54,6 +93,9 @@ export default function MailPage() {
   useHotkeys('s', () => selectedEmail && toggleStar(selectedEmail.id), { enabled: !!selectedEmail });
   useHotkeys('delete', () => selectedEmail && deleteEmail(selectedEmail.id), { enabled: !!selectedEmail });
   useHotkeys('escape', () => closeCompose(), { enabled: isComposeOpen });
+  useHotkeys('/', () => setShowAdvancedSearch(true), { enabled: !isComposeOpen });
+  useHotkeys('g+s', () => setShowSettings(true), { enabled: !isComposeOpen });
+  useHotkeys('g+t', () => setShowSharedMailbox(true), { enabled: !isComposeOpen });
 
   const navigateEmail = (direction: 'next' | 'prev') => {
     if (!selectedEmail || emails.length === 0) return;
@@ -91,6 +133,14 @@ export default function MailPage() {
     fetchEmails();
   };
 
+  const handleAdvancedSearch = useCallback((params: any) => {
+    searchEmails(params);
+  }, [searchEmails]);
+
+  const handleToggleViewMode = () => {
+    setViewMode(viewMode === 'list' ? 'threaded' : 'list');
+  };
+
   // Show loading while checking auth
   if (authLoading) {
     return (
@@ -116,7 +166,13 @@ export default function MailPage() {
         <AppSwitcherBar activeApp="mail" />
 
         {/* Header */}
-        <MailHeader />
+        <MailHeader
+          onOpenAdvancedSearch={() => setShowAdvancedSearch(true)}
+          onOpenSettings={() => setShowSettings(true)}
+          onOpenSharedMailbox={() => setShowSharedMailbox(true)}
+          onToggleViewMode={handleToggleViewMode}
+          viewMode={viewMode}
+        />
 
         {/* Main Content - offset by header (56px) and app switcher (60px) */}
         <div className="flex h-[calc(100vh-56px)] mt-14 ml-[60px]">
@@ -133,14 +189,56 @@ export default function MailPage() {
             />
           </div>
 
-          {/* Email Viewer */}
+          {/* Email Viewer / Conversation View */}
           <div className="flex-1 min-w-0 bg-gray-50">
-            <MailViewer email={selectedEmail} />
+            {viewMode === 'threaded' && selectedConversation ? (
+              <ConversationView
+                conversation={selectedConversation}
+                onClose={() => selectConversation(null)}
+              />
+            ) : (
+              <MailViewer email={selectedEmail} />
+            )}
           </div>
         </div>
 
         {/* Compose Modal */}
         {isComposeOpen && <ComposeModal onClose={closeCompose} />}
+
+        {/* Settings Modal */}
+        <MailSettings
+          isOpen={showSettings}
+          onClose={() => setShowSettings(false)}
+          initialTab={settingsTab}
+        />
+
+        {/* Advanced Search Modal */}
+        <AdvancedSearchModal
+          isOpen={showAdvancedSearch}
+          onClose={() => setShowAdvancedSearch(false)}
+          onSearch={handleAdvancedSearch}
+        />
+
+        {/* Shared Mailbox Panel */}
+        <SharedMailboxPanel
+          isOpen={showSharedMailbox}
+          onClose={() => setShowSharedMailbox(false)}
+          onSelectMailbox={(id) => {
+            console.log('Selected shared mailbox:', id);
+            setShowSharedMailbox(false);
+          }}
+        />
+
+        {/* Undo Send Toast Manager */}
+        <UndoSendToastManager />
+
+        {/* WebSocket Connection Status - shown only when disconnected */}
+        {!isConnected && isMailAuthenticated && (
+          <div className="fixed bottom-4 right-4 px-4 py-2 bg-yellow-100 text-yellow-800 rounded-lg text-sm flex items-center gap-2 shadow-lg">
+            <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
+            Reconnecting to real-time updates...
+          </div>
+        )}
       </div>
 
       {/* Custom scrollbar styles */}

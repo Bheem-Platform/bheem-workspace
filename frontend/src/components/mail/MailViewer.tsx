@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useMailStore, useReplyToEmail, useReplyAllToEmail, useForwardEmail } from '@/stores/mailStore';
 import EmptyState from '@/components/shared/EmptyState';
+import CalendarEventDetector, { ICSAttachment } from './CalendarEventDetector';
 import type { Email, Attachment } from '@/types/mail';
 
 interface MailViewerProps {
@@ -256,6 +257,35 @@ export default function MailViewer({ email }: MailViewerProps) {
             </div>
           </div>
         </div>
+
+        {/* Calendar Event Detection */}
+        <div className="px-6 mt-4">
+          <CalendarEventDetector
+            email={email}
+            onAddToCalendar={(event) => {
+              console.log('Event added to calendar:', event);
+            }}
+          />
+        </div>
+
+        {/* ICS Attachments (Calendar Invites) */}
+        {email.attachments && email.attachments.some(att =>
+          att.contentType === 'text/calendar' || att.filename.endsWith('.ics')
+        ) && (
+          <div className="px-6 mt-4 space-y-2">
+            {email.attachments
+              .map((att, idx) => ({ ...att, originalIndex: idx }))
+              .filter(att => att.contentType === 'text/calendar' || att.filename.endsWith('.ics'))
+              .map((att) => (
+                <ICSAttachment
+                  key={att.id}
+                  attachment={att}
+                  messageId={email.id}
+                  attachmentIndex={att.originalIndex}
+                />
+              ))}
+          </div>
+        )}
 
         {/* Image Warning */}
         {hasRemoteImages && !showImages && (
