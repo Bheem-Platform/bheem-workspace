@@ -21,16 +21,41 @@ async def validate_ws_token(token: str) -> Optional[dict]:
     Validate WebSocket authentication token.
 
     Returns user dict if valid, None otherwise.
+    Uses same validation as main auth: local decode first, then Passport API.
     """
-    from core.security import decode_token
+    from core.security import decode_token, validate_token_via_passport, get_user_from_passport
+    from core.config import settings
 
     try:
+        # Step 1: Try local decode first (faster)
         payload = decode_token(token)
         if payload:
-            return {
-                "id": payload.get("sub") or payload.get("user_id"),
-                "email": payload.get("email")
-            }
+            user_id = payload.get("sub") or payload.get("user_id")
+            if user_id:
+                return {
+                    "id": user_id,
+                    "email": payload.get("email") or payload.get("username")
+                }
+
+        # Step 2: Try Passport validation if local decode failed
+        if settings.USE_PASSPORT_AUTH:
+            passport_payload = await validate_token_via_passport(token)
+            if passport_payload:
+                user_id = passport_payload.get("user_id") or passport_payload.get("sub")
+                return {
+                    "id": user_id,
+                    "email": passport_payload.get("email") or passport_payload.get("username")
+                }
+
+            # Step 3: Try /me endpoint as fallback
+            user_info = await get_user_from_passport(token)
+            if user_info:
+                user_id = user_info.get("user_id") or user_info.get("sub")
+                return {
+                    "id": user_id,
+                    "email": user_info.get("email") or user_info.get("username")
+                }
+
     except Exception as e:
         logger.warning(f"WebSocket token validation failed: {e}")
 
