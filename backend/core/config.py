@@ -114,6 +114,13 @@ class Settings(BaseSettings):
     ERP_SERVICE_URL: str = "http://localhost:8000"
     ERP_API_KEY: Optional[str] = None
 
+    # ERP Database Direct Connection (for workspace email migration)
+    ERP_DB_HOST: str = "65.109.167.218"
+    ERP_DB_PORT: int = 5432
+    ERP_DB_NAME: str = "erp_staging"
+    ERP_DB_USER: str = "postgres"
+    ERP_DB_PASSWORD: str = "Bheem924924.@"
+
     # BheemPay Payment Gateway Service
     BHEEMPAY_URL: str = "http://bheem-pay:8006"
     BHEEMPAY_API_KEY: Optional[str] = None
