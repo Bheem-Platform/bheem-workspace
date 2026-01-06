@@ -27,6 +27,8 @@ export interface MailWebSocketMessage {
 }
 
 export interface UseMailWebSocketOptions {
+  /** Enable WebSocket connection (default: false - disabled until stable) */
+  enabled?: boolean;
   /** Called when a new email arrives */
   onNewEmail?: (folder: string, preview?: { subject?: string; from?: string }) => void;
   /** Called when an email is updated */
@@ -66,6 +68,7 @@ export interface UseMailWebSocketReturn {
 
 export function useMailWebSocket(options: UseMailWebSocketOptions = {}): UseMailWebSocketReturn {
   const {
+    enabled = false, // Disabled by default until WebSocket infrastructure is stable
     onNewEmail,
     onEmailUpdated,
     onFolderUpdated,
@@ -285,8 +288,13 @@ export function useMailWebSocket(options: UseMailWebSocketOptions = {}): UseMail
     }
   }, []);
 
-  // Connect when authenticated
+  // Connect when authenticated and enabled
   useEffect(() => {
+    // Don't connect if disabled
+    if (!enabled) {
+      return;
+    }
+
     isMountedRef.current = true;
 
     if (isAuthenticated && token) {
@@ -310,7 +318,7 @@ export function useMailWebSocket(options: UseMailWebSocketOptions = {}): UseMail
       isMountedRef.current = false;
       disconnect();
     };
-  }, [isAuthenticated, token, connect, disconnect]);
+  }, [enabled, isAuthenticated, token, connect, disconnect]);
 
   return {
     isConnected,
