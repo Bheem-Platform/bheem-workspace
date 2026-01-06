@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     MAILCOW_IMAP_HOST: str = "mail.bheem.cloud"
     MAILCOW_SMTP_HOST: str = "mail.bheem.cloud"
     MAILCOW_IMAP_PORT: int = 993
-    MAILCOW_SMTP_PORT: int = 465
+    MAILCOW_SMTP_PORT: int = 587  # Use STARTTLS on port 587
 
     # Mailcow SSH (for direct password sync fallback)
     MAILCOW_SSH_HOST: Optional[str] = None

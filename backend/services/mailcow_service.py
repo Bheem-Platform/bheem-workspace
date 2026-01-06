@@ -274,16 +274,17 @@ class MailcowService:
         return None
     
     def send_email(
-        self, 
-        from_email: str, 
-        password: str, 
-        to: List[str], 
-        subject: str, 
+        self,
+        from_email: str,
+        password: str,
+        to: List[str],
+        subject: str,
         body: str,
         cc: List[str] = None,
+        bcc: List[str] = None,
         is_html: bool = True
     ) -> bool:
-        """Send email via SMTP"""
+        """Send email via SMTP (supports both port 465 SSL and port 587 STARTTLS)"""
         try:
             msg = MIMEMultipart("alternative")
             msg["Subject"] = subject
@@ -291,17 +292,25 @@ class MailcowService:
             msg["To"] = ", ".join(to)
             if cc:
                 msg["Cc"] = ", ".join(cc)
-            
+
             if is_html:
                 msg.attach(MIMEText(body, "html"))
             else:
                 msg.attach(MIMEText(body, "plain"))
-            
-            with smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=30) as server:
-                server.login(from_email, password)
-                recipients = to + (cc or [])
-                server.sendmail(from_email, recipients, msg.as_string())
-            
+
+            recipients = to + (cc or []) + (bcc or [])
+
+            # Use STARTTLS for port 587, SSL for port 465
+            if self.smtp_port == 587:
+                with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=30) as server:
+                    server.starttls()
+                    server.login(from_email, password)
+                    server.sendmail(from_email, recipients, msg.as_string())
+            else:
+                with smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=30) as server:
+                    server.login(from_email, password)
+                    server.sendmail(from_email, recipients, msg.as_string())
+
             return True
         except Exception as e:
             print(f"SMTP Error: {e}")
