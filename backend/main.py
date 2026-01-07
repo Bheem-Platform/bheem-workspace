@@ -362,6 +362,14 @@ try:
 except Exception as e:
     print(f"Could not load docs_erp router: {e}")
 
+# Bheem Docs Editor & Templates API
+try:
+    from api.docs_editor import router as docs_editor_router
+    app.include_router(docs_editor_router, prefix="/api/v1", tags=["Bheem Docs Editor"])
+    logger.info("Bheem Docs Editor API loaded", action="docs_editor_loaded")
+except Exception as e:
+    print(f"Could not load docs_editor router: {e}")
+
 # Frontend routes
 @app.get("/", response_class=HTMLResponse)
 async def homepage():
