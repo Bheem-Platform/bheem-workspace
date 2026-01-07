@@ -133,6 +133,28 @@ class Settings(BaseSettings):
     BHEEMVERSE_PARENT_COMPANY_ID: str = "79f70aef-17eb-48a8-b599-2879721e8796"
     BHEEMVERSE_PARENT_COMPANY_CODE: str = "BHM001"
 
+    # ============================================
+    # BHEEM DOCS CONFIGURATION
+    # ============================================
+    DOCS_S3_ENDPOINT: Optional[str] = None  # Falls back to S3_ENDPOINT if not set
+    DOCS_S3_ACCESS_KEY: Optional[str] = None
+    DOCS_S3_SECRET_KEY: Optional[str] = None
+    DOCS_S3_BUCKET: str = "bheem-docs"
+    DOCS_S3_REGION: str = "hel1"
+
+    # Storage quotas
+    DOCS_DEFAULT_QUOTA_BYTES: int = 10737418240  # 10GB default
+    DOCS_MAX_FILE_SIZE_BYTES: int = 104857600  # 100MB max file size
+    DOCS_ALLOWED_EXTENSIONS: str = "pdf,doc,docx,xls,xlsx,ppt,pptx,txt,md,csv,json,xml,jpg,jpeg,png,gif,svg,mp4,mp3,zip,rar"
+
+    # Collaboration
+    DOCS_COLLAB_WEBSOCKET_URL: str = "wss://workspace.bheem.cloud/docs/collab"
+    DOCS_AUTO_SAVE_INTERVAL_MS: int = 3000  # 3 seconds
+
+    # AI Features
+    DOCS_AI_ENABLED: bool = True
+    DOCS_OCR_ENABLED: bool = True
+
     class Config:
         env_file = ".env"
         case_sensitive = True

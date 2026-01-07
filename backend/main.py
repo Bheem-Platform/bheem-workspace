@@ -127,6 +127,8 @@ async def api_info():
         "endpoints": {
             "meet": "/api/v1/meet",
             "docs": "/api/v1/docs",
+            "docs_v2": "/api/v1/docs/v2",
+            "docs_erp": "/api/v1/docs/erp",
             "mail": "/api/v1/mail",
             "workspace": "/api/v1/workspace",
             "tenants": "/api/v1/tenants",
@@ -343,6 +345,22 @@ try:
     app.include_router(workspace_email_router, prefix="/api/v1", tags=["Workspace Email"])
 except Exception as e:
     print(f"Could not load workspace_email router: {e}")
+
+# Bheem Docs v2 API (ERP DMS Integration)
+try:
+    from api.docs_v2 import router as docs_v2_router
+    app.include_router(docs_v2_router, prefix="/api/v1", tags=["Bheem Docs v2"])
+    logger.info("Bheem Docs v2 API loaded", action="docs_v2_loaded")
+except Exception as e:
+    print(f"Could not load docs_v2 router: {e}")
+
+# Bheem Docs ERP Integration API (Entity Document Links)
+try:
+    from api.docs_erp import router as docs_erp_router
+    app.include_router(docs_erp_router, prefix="/api/v1", tags=["Bheem Docs ERP"])
+    logger.info("Bheem Docs ERP API loaded", action="docs_erp_loaded")
+except Exception as e:
+    print(f"Could not load docs_erp router: {e}")
 
 # Frontend routes
 @app.get("/", response_class=HTMLResponse)
