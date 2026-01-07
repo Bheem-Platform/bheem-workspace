@@ -422,3 +422,212 @@ async def generate_email(
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# =============================================================================
+# NEW EMPLOYEE PROVISIONING ENDPOINTS
+# =============================================================================
+
+class NewEmployeeProvisionRequest(BaseModel):
+    """Request to provision workspace email for a new employee"""
+    employee_code: str = Field(..., description="Employee code from ERP")
+    first_name: str = Field(..., description="First name")
+    last_name: str = Field(..., description="Last name")
+    personal_email: str = Field(..., description="Personal/current email")
+    department: Optional[str] = Field(None, description="Department code override (dev, mkt, admin, etc.)")
+    default_password: str = Field(..., description="Password for the new mailbox")
+
+
+class NewEmployeeProvisionResponse(BaseModel):
+    """Response for new employee provisioning"""
+    success: bool
+    employee_code: str
+    workspace_email: Optional[str]
+    mailbox_created: bool
+    erp_updated: bool
+    personal_email_saved_as: str = "secondary_email"
+    error: Optional[str]
+
+
+@router.post("/provision-new", response_model=NewEmployeeProvisionResponse)
+async def provision_new_employee(
+    request: NewEmployeeProvisionRequest,
+    service: WorkspaceEmailService = Depends(get_service),
+    current_user: dict = Depends(require_superadmin())
+):
+    """
+    Provision workspace email for a NEW employee.
+
+    This endpoint is called when HR adds a new employee in ERP.
+
+    **Workflow:**
+    1. HR adds new employee in ERP with personal email
+    2. Call this endpoint with employee details
+    3. System generates workspace email (firstname.lastname.dept@bheem.co.uk)
+    4. Creates Mailcow mailbox
+    5. Updates ERP with new workspace email (old email → secondary)
+
+    **Returns:**
+    - workspace_email: The generated email (e.g., john.doe.dev@bheem.co.uk)
+    - mailbox_created: Whether Mailcow mailbox was created
+    - erp_updated: Whether ERP database was updated
+    """
+    try:
+        # Generate workspace email
+        workspace_email, dept_code = service.generate_unique_email(
+            first_name=request.first_name,
+            last_name=request.last_name,
+            current_email=request.personal_email,
+            department_override=request.department
+        )
+
+        # Get employee from ERP to get user_id
+        employee = service.get_employee_by_code(request.employee_code)
+        if not employee:
+            return NewEmployeeProvisionResponse(
+                success=False,
+                employee_code=request.employee_code,
+                workspace_email=None,
+                mailbox_created=False,
+                erp_updated=False,
+                error=f"Employee not found in ERP: {request.employee_code}"
+            )
+
+        # Prepare employee data for migration
+        employee_data = {
+            'employee_code': request.employee_code,
+            'first_name': request.first_name,
+            'last_name': request.last_name,
+            'current_email': request.personal_email,
+            'user_id': employee.user_id,
+            'workspace_email': workspace_email
+        }
+
+        # Perform migration (ERP update + mailbox creation)
+        result = service.migrate_employee(employee_data, dry_run=False, default_password=request.default_password)
+
+        return NewEmployeeProvisionResponse(
+            success=result.get("status") == "success",
+            employee_code=request.employee_code,
+            workspace_email=workspace_email,
+            mailbox_created=result.get("mailbox_created", False),
+            erp_updated=result.get("erp_updated", False),
+            error=result.get("error")
+        )
+
+    except Exception as e:
+        return NewEmployeeProvisionResponse(
+            success=False,
+            employee_code=request.employee_code,
+            workspace_email=None,
+            mailbox_created=False,
+            erp_updated=False,
+            error=str(e)
+        )
+
+
+class SyncEmployeesRequest(BaseModel):
+    """Request to sync employees from ERP with auto email provisioning"""
+    company_code: Optional[str] = Field(None, description="Company code (BHM001-BHM009). Omit for all companies")
+    auto_provision_email: bool = Field(True, description="Auto-provision workspace emails for new employees")
+    default_password: str = Field(..., description="Default password for new mailboxes")
+
+
+class SyncEmployeesResponse(BaseModel):
+    """Response for employee sync"""
+    status: str
+    total_employees: int
+    synced: int
+    emails_provisioned: int
+    errors: List[dict]
+
+
+@router.post("/sync-employees", response_model=SyncEmployeesResponse)
+async def sync_employees_with_email(
+    request: SyncEmployeesRequest,
+    service: WorkspaceEmailService = Depends(get_service),
+    current_user: dict = Depends(require_superadmin())
+):
+    """
+    Sync employees from ERP and auto-provision workspace emails.
+
+    This endpoint:
+    1. Fetches all active employees from ERP
+    2. For employees WITHOUT @bheem.co.uk email:
+       - Generates workspace email
+       - Creates Mailcow mailbox
+       - Updates ERP database
+    3. Returns summary of sync operation
+
+    **Use this for:**
+    - Initial bulk provisioning
+    - Periodic sync to catch new employees
+    - Re-running after fixing quota issues
+    """
+    try:
+        from services.internal_workspace_service import InternalWorkspaceService, BHEEMVERSE_COMPANY_CODES
+        from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
+        # Get all employees that need provisioning
+        employees = service.get_all_employees(request.company_code)
+
+        synced = 0
+        emails_provisioned = 0
+        errors = []
+
+        for emp in employees:
+            try:
+                # Skip if already has workspace email
+                if emp.current_email and emp.current_email.endswith('@bheem.co.uk'):
+                    synced += 1
+                    continue
+
+                if not request.auto_provision_email:
+                    synced += 1
+                    continue
+
+                # Generate workspace email
+                workspace_email, dept_code = service.generate_unique_email(
+                    first_name=emp.first_name,
+                    last_name=emp.last_name,
+                    current_email=emp.current_email
+                )
+
+                # Prepare employee data
+                employee_data = {
+                    'employee_code': emp.employee_code,
+                    'first_name': emp.first_name,
+                    'last_name': emp.last_name,
+                    'current_email': emp.current_email,
+                    'user_id': emp.user_id,
+                    'workspace_email': workspace_email
+                }
+
+                # Migrate
+                result = service.migrate_employee(employee_data, dry_run=False, default_password=request.default_password)
+
+                if result.get("status") == "success":
+                    emails_provisioned += 1
+                    synced += 1
+                else:
+                    errors.append({
+                        "employee_code": emp.employee_code,
+                        "error": result.get("error", "Unknown error")
+                    })
+
+            except Exception as e:
+                errors.append({
+                    "employee_code": emp.employee_code,
+                    "error": str(e)
+                })
+
+        return SyncEmployeesResponse(
+            status="completed",
+            total_employees=len(employees),
+            synced=synced,
+            emails_provisioned=emails_provisioned,
+            errors=errors
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")

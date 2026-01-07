@@ -1,14 +1,18 @@
 """
 Bheem Workspace - Internal Workspace Service
 Handles internal Bheemverse subsidiary tenants (BHM001-BHM008) with full ERP integration
+Includes automatic workspace email provisioning for new employees
 """
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+import logging
 
 from core.config import settings
 from services.erp_client import erp_client
+
+logger = logging.getLogger(__name__)
 
 # Bheemverse company codes and their UUIDs (Internal Mode)
 BHEEMVERSE_COMPANY_CODES = {
@@ -62,15 +66,17 @@ class InternalWorkspaceService:
     # HR MODULE INTEGRATION - Employee Sync
     # ═══════════════════════════════════════════════════════════════════
 
-    async def sync_employees(self, company_code: str) -> dict:
+    async def sync_employees(self, company_code: str, auto_provision_email: bool = True) -> dict:
         """
         Sync employees from ERP HR module to workspace users.
 
         For internal mode tenants, employees are automatically provisioned
-        as workspace users with appropriate roles.
+        as workspace users with appropriate roles. If auto_provision_email is True,
+        workspace emails are automatically generated and mailboxes created.
 
         Args:
             company_code: Bheemverse company code (BHM001-BHM008)
+            auto_provision_email: Auto-generate workspace emails for new employees
 
         Returns:
             Sync result with count and errors
@@ -86,17 +92,14 @@ class InternalWorkspaceService:
         )
 
         synced = 0
+        emails_provisioned = 0
         errors = []
 
         for emp in employees:
             try:
                 work_email = emp.get("work_email") or emp.get("email")
-                if not work_email:
-                    errors.append({
-                        "employee_id": emp.get("id"),
-                        "error": "No email address"
-                    })
-                    continue
+                first_name = emp.get('first_name', '')
+                last_name = emp.get('last_name', '')
 
                 # Get department and job title
                 department = emp.get("department", {})
@@ -105,9 +108,38 @@ class InternalWorkspaceService:
                 else:
                     department_name = str(department) if department else ""
 
+                # Check if employee needs workspace email provisioning
+                needs_email_provision = auto_provision_email and work_email and not work_email.endswith('@bheem.co.uk')
+
+                if needs_email_provision:
+                    # Auto-provision workspace email for new employees
+                    try:
+                        provision_result = await self._provision_workspace_email(
+                            employee_code=emp.get("employee_code"),
+                            first_name=first_name,
+                            last_name=last_name,
+                            current_email=work_email,
+                            department=department_name,
+                            erp_user_id=emp.get("user_id")
+                        )
+                        if provision_result.get("success"):
+                            work_email = provision_result.get("workspace_email")
+                            emails_provisioned += 1
+                            logger.info(f"Auto-provisioned workspace email for {emp.get('employee_code')}: {work_email}")
+                    except Exception as e:
+                        logger.warning(f"Failed to auto-provision email for {emp.get('employee_code')}: {e}")
+                        # Continue with existing email
+
+                if not work_email:
+                    errors.append({
+                        "employee_id": emp.get("id"),
+                        "error": "No email address"
+                    })
+                    continue
+
                 await self._upsert_workspace_user(
                     email=work_email,
-                    name=f"{emp.get('first_name', '')} {emp.get('last_name', '')}".strip(),
+                    name=f"{first_name} {last_name}".strip(),
                     erp_employee_id=emp.get("id"),
                     erp_user_id=emp.get("user_id"),
                     department=department_name,
@@ -125,9 +157,78 @@ class InternalWorkspaceService:
         return {
             "status": "completed",
             "synced": synced,
+            "emails_provisioned": emails_provisioned,
             "errors": errors,
             "total": len(employees)
         }
+
+    async def _provision_workspace_email(
+        self,
+        employee_code: str,
+        first_name: str,
+        last_name: str,
+        current_email: str,
+        department: str,
+        erp_user_id: Optional[str]
+    ) -> dict:
+        """
+        Auto-provision workspace email for a new employee.
+
+        This method:
+        1. Generates workspace email (firstname.lastname.dept@bheem.co.uk)
+        2. Updates ERP database with new email
+        3. Creates Mailcow mailbox
+
+        Args:
+            employee_code: Employee code from ERP
+            first_name: Employee first name
+            last_name: Employee last name
+            current_email: Current personal email (becomes secondary)
+            department: Department name for code extraction
+            erp_user_id: ERP user ID for database updates
+
+        Returns:
+            Result dict with success status and workspace_email
+        """
+        from services.workspace_email_service import WorkspaceEmailService
+
+        try:
+            service = WorkspaceEmailService()
+
+            # Generate workspace email
+            workspace_email = service.generate_workspace_email(
+                first_name=first_name,
+                last_name=last_name,
+                current_email=current_email
+            )
+
+            if not workspace_email:
+                return {"success": False, "error": "Could not generate workspace email"}
+
+            # Prepare employee data for migration
+            employee_data = {
+                'employee_code': employee_code,
+                'first_name': first_name,
+                'last_name': last_name,
+                'current_email': current_email,
+                'user_id': erp_user_id,
+                'workspace_email': workspace_email
+            }
+
+            # Migrate (updates ERP + creates mailbox)
+            result = service.migrate_employee(employee_data, dry_run=False)
+
+            return {
+                "success": result.get("status") == "success",
+                "workspace_email": workspace_email,
+                "erp_updated": result.get("erp_updated", False),
+                "mailbox_created": result.get("mailbox_created", False),
+                "error": result.get("error")
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to provision workspace email for {employee_code}: {e}")
+            return {"success": False, "error": str(e)}
 
     async def get_employee_details(self, employee_id: str) -> Optional[dict]:
         """Get employee details from ERP"""
