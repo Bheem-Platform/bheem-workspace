@@ -53,7 +53,7 @@ class DocsEditorService:
     """
 
     def __init__(self):
-        """Initialize with database connection."""
+        """Initialize with ERP database connection for DMS schema."""
         self.db_config = {
             'host': settings.ERP_DB_HOST,
             'port': settings.ERP_DB_PORT,
@@ -173,7 +173,7 @@ class DocsEditorService:
 
             # Create version if requested
             if create_version:
-                new_version = row['current_version'] + 1
+                new_version = (row['current_version'] or 0) + 1
 
                 cur.execute("""
                     INSERT INTO dms.document_versions (
@@ -689,7 +689,7 @@ class DocsEditorService:
             current = cur.fetchone()
             if current and current['editor_content']:
                 # Save current as new version
-                new_version = current['current_version'] + 1
+                new_version = (current['current_version'] or 0) + 1
 
                 cur.execute("""
                     INSERT INTO dms.document_versions (
@@ -711,6 +711,8 @@ class DocsEditorService:
                     INSERT INTO dms.version_content (version_id, editor_content)
                     VALUES (%s, %s)
                 """, (str(backup_version['id']), current['editor_content']))
+
+            conn.commit()
 
             # Restore the old version
             return await self.save_editor_content(
@@ -742,7 +744,7 @@ class DocsEditorService:
         """Log document edit action."""
         try:
             cur.execute("""
-                INSERT INTO dms.document_audit (
+                INSERT INTO dms.document_audit_logs (
                     document_id, action, performed_by, performed_at
                 ) VALUES (%s, %s::dms.auditaction, %s, NOW())
             """, (str(document_id), action, str(user_id)))

@@ -130,7 +130,7 @@ class DocsDocumentService:
     """
 
     def __init__(self):
-        """Initialize with ERP database connection."""
+        """Initialize with ERP database connection for DMS schema."""
         self.storage: DocsStorageService = get_docs_storage_service()
         self.db_config = {
             'host': settings.ERP_DB_HOST,

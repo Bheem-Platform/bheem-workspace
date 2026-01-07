@@ -370,6 +370,46 @@ try:
 except Exception as e:
     print(f"Could not load docs_editor router: {e}")
 
+# Bheem Docs Comments & Annotations API
+try:
+    from api.docs_comments import router as docs_comments_router
+    app.include_router(docs_comments_router, prefix="/api/v1", tags=["Bheem Docs Comments"])
+    logger.info("Bheem Docs Comments API loaded", action="docs_comments_loaded")
+except Exception as e:
+    print(f"Could not load docs_comments router: {e}")
+
+# Bheem Docs WebSocket Collaboration API
+try:
+    from api.docs_websocket import router as docs_websocket_router
+    app.include_router(docs_websocket_router, prefix="/api/v1", tags=["Bheem Docs Collaboration"])
+    logger.info("Bheem Docs WebSocket API loaded", action="docs_websocket_loaded")
+except Exception as e:
+    print(f"Could not load docs_websocket router: {e}")
+
+# Bheem Docs Workflow & Approval API
+try:
+    from api.docs_workflow import router as docs_workflow_router
+    app.include_router(docs_workflow_router, prefix="/api/v1", tags=["Bheem Docs Workflow"])
+    logger.info("Bheem Docs Workflow API loaded", action="docs_workflow_loaded")
+except Exception as e:
+    print(f"Could not load docs_workflow router: {e}")
+
+# Bheem Docs Enterprise API (Audit, eSignature)
+try:
+    from api.docs_enterprise import router as docs_enterprise_router
+    app.include_router(docs_enterprise_router, prefix="/api/v1", tags=["Bheem Docs Enterprise"])
+    logger.info("Bheem Docs Enterprise API loaded", action="docs_enterprise_loaded")
+except Exception as e:
+    print(f"Could not load docs_enterprise router: {e}")
+
+# Bheem Docs AI API (Summarization, Smart Search, Analysis)
+try:
+    from api.docs_ai import router as docs_ai_router
+    app.include_router(docs_ai_router, prefix="/api/v1", tags=["Bheem Docs AI"])
+    logger.info("Bheem Docs AI API loaded", action="docs_ai_loaded")
+except Exception as e:
+    print(f"Could not load docs_ai router: {e}")
+
 # Frontend routes
 @app.get("/", response_class=HTMLResponse)
 async def homepage():

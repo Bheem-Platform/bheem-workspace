@@ -10,7 +10,7 @@ Endpoints:
 - Entity Links: ERP integration
 """
 
-from typing import Optional, List
+from typing import Optional, List, Any
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Response
 from fastapi.responses import StreamingResponse
@@ -104,7 +104,10 @@ class FolderResponse(BaseModel):
     is_system: bool = False
     subfolder_count: Optional[int] = None
     document_count: Optional[int] = None
-    created_at: Optional[str] = None
+    created_at: Optional[Any] = None
+
+    class Config:
+        from_attributes = True
 
 
 class CreateFolderRequest(BaseModel):

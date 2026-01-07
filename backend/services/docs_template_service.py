@@ -5,7 +5,7 @@ Manages document templates for both internal (ERP) and external (SaaS) users.
 Templates can be global (public), tenant-specific, or company-specific.
 
 Database Tables:
-- workspace.docs_templates
+- dms.templates
 """
 
 from typing import Optional, List, Dict, Any
@@ -218,7 +218,7 @@ class DocsTemplateService:
     """
 
     def __init__(self):
-        """Initialize with ERP database connection."""
+        """Initialize with ERP database connection for DMS schema."""
         self.db_config = {
             'host': settings.ERP_DB_HOST,
             'port': settings.ERP_DB_PORT,
@@ -291,7 +291,7 @@ class DocsTemplateService:
                     id, name, description, category, thumbnail_url,
                     is_public, tenant_id, company_id, usage_count,
                     created_at, updated_at
-                FROM workspace.docs_templates
+                FROM dms.templates
                 WHERE {where_clause}
                 ORDER BY usage_count DESC, name ASC
                 LIMIT %s OFFSET %s
@@ -370,7 +370,7 @@ class DocsTemplateService:
                     id, name, description, category, content,
                     thumbnail_url, is_public, tenant_id, company_id,
                     usage_count, created_by, created_at, updated_at
-                FROM workspace.docs_templates
+                FROM dms.templates
                 WHERE id = %s AND is_active = true AND {access_clause}
             """, params)
 
@@ -415,7 +415,7 @@ class DocsTemplateService:
 
         try:
             cur.execute("""
-                INSERT INTO workspace.docs_templates (
+                INSERT INTO dms.templates (
                     name, description, category, content,
                     thumbnail_url, is_public, company_id, tenant_id,
                     created_by, created_at, updated_at
@@ -496,7 +496,7 @@ class DocsTemplateService:
             params.append(str(template_id))
 
             cur.execute(f"""
-                UPDATE workspace.docs_templates
+                UPDATE dms.templates
                 SET {', '.join(updates)}
                 WHERE id = %s AND is_active = true
                 RETURNING *
@@ -526,7 +526,7 @@ class DocsTemplateService:
 
         try:
             cur.execute("""
-                UPDATE workspace.docs_templates
+                UPDATE dms.templates
                 SET is_active = false, updated_at = NOW()
                 WHERE id = %s
             """, (str(template_id),))
@@ -551,7 +551,7 @@ class DocsTemplateService:
 
         try:
             cur.execute("""
-                UPDATE workspace.docs_templates
+                UPDATE dms.templates
                 SET usage_count = usage_count + 1
                 WHERE id = %s
             """, (template_id,))
@@ -589,7 +589,7 @@ class DocsTemplateService:
 
             cur.execute(f"""
                 SELECT DISTINCT category
-                FROM workspace.docs_templates
+                FROM dms.templates
                 WHERE is_active = true AND category IS NOT NULL
                 AND {access_clause}
                 ORDER BY category

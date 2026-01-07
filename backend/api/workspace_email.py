@@ -631,3 +631,266 @@ async def sync_employees_with_email(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Sync failed: {str(e)}")
+
+
+# =============================================================================
+# AUTOMATIC EMPLOYEE EMAIL PROVISIONING (Webhook for ERP)
+# =============================================================================
+
+class AutoProvisionRequest(BaseModel):
+    """Request for automatic email provisioning when HR adds employee"""
+    employee_code: str = Field(..., description="Employee code from ERP (e.g., BHM0030)")
+    department: str = Field(..., description="Department code (dev, mentor, mkt, sales, admin, media, counsel)")
+
+
+class AutoProvisionResponse(BaseModel):
+    """Response for automatic provisioning"""
+    success: bool
+    employee_code: str
+    employee_name: Optional[str]
+    workspace_email: Optional[str]
+    personal_email: Optional[str]
+    department_code: str
+    mailbox_created: bool
+    erp_updated: bool
+    message: str
+    error: Optional[str] = None
+
+
+@router.post("/auto-provision", response_model=AutoProvisionResponse)
+async def auto_provision_employee_email(
+    request: AutoProvisionRequest,
+    service: WorkspaceEmailService = Depends(get_service)
+):
+    """
+    🚀 AUTOMATIC WORKSPACE EMAIL PROVISIONING
+
+    Call this endpoint when HR adds a new employee in ERP.
+
+    **Workflow:**
+    1. HR adds employee in ERP with personal email
+    2. ERP calls this endpoint with employee_code + department
+    3. System automatically:
+       - Fetches employee details from ERP
+       - Generates workspace email (firstname.lastname.dept@bheem.co.uk)
+       - Creates mailbox in Mailcow
+       - Updates ERP: workspace email → primary, personal email → secondary
+
+    **Example:**
+    ```
+    POST /api/v1/workspace-email/auto-provision
+    {
+        "employee_code": "BHM0030",
+        "department": "dev"
+    }
+    ```
+
+    **Response:**
+    ```json
+    {
+        "success": true,
+        "employee_code": "BHM0030",
+        "employee_name": "John Doe",
+        "workspace_email": "john.doe.dev@bheem.co.uk",
+        "personal_email": "john@gmail.com",
+        "department_code": "dev",
+        "mailbox_created": true,
+        "erp_updated": true,
+        "message": "Workspace email provisioned successfully"
+    }
+    ```
+    """
+    import psycopg2
+    from psycopg2.extras import RealDictCursor
+    import requests
+
+    MAILCOW_URL = "https://mail.bheem.cloud"
+    MAILCOW_API_KEY = "BheemMailAPI2024Key"
+
+    try:
+        # Step 1: Fetch employee from ERP
+        erp_config = {
+            'host': '65.109.167.218',
+            'port': 5432,
+            'database': 'erp_staging',
+            'user': 'postgres',
+            'password': 'Bheem924924.@'
+        }
+
+        conn = psycopg2.connect(**erp_config)
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        cur.execute("""
+            SELECT
+                e.employee_code,
+                e.user_id,
+                p.id as person_id,
+                p.first_name,
+                p.last_name,
+                u.username as current_username,
+                c.email_primary,
+                c.email_secondary
+            FROM hr.employees e
+            JOIN auth.users u ON e.user_id = u.id
+            LEFT JOIN public.persons p ON u.person_id = p.id
+            LEFT JOIN public.contacts c ON c.person_id = p.id
+            WHERE e.employee_code = %s
+        """, (request.employee_code,))
+
+        emp = cur.fetchone()
+
+        if not emp:
+            return AutoProvisionResponse(
+                success=False,
+                employee_code=request.employee_code,
+                employee_name=None,
+                workspace_email=None,
+                personal_email=None,
+                department_code=request.department,
+                mailbox_created=False,
+                erp_updated=False,
+                message="Employee not found",
+                error=f"No employee found with code: {request.employee_code}"
+            )
+
+        # Check if already has workspace email
+        if emp['email_primary'] and emp['email_primary'].endswith('@bheem.co.uk'):
+            return AutoProvisionResponse(
+                success=True,
+                employee_code=request.employee_code,
+                employee_name=f"{emp['first_name']} {emp['last_name']}",
+                workspace_email=emp['email_primary'],
+                personal_email=emp['email_secondary'],
+                department_code=request.department,
+                mailbox_created=True,
+                erp_updated=True,
+                message="Employee already has workspace email"
+            )
+
+        # Step 2: Generate workspace email
+        first_name = (emp['first_name'] or '').lower().strip()
+        last_name = (emp['last_name'] or '').lower().strip()
+        dept = request.department.lower()
+
+        if not first_name:
+            first_name = 'user'
+        if not last_name:
+            last_name = 'unknown'
+
+        # Clean names (remove special chars)
+        import re
+        first_name = re.sub(r'[^a-z]', '', first_name)
+        last_name = re.sub(r'[^a-z]', '', last_name)
+
+        workspace_email = f"{first_name}.{last_name}.{dept}@bheem.co.uk"
+        local_part = f"{first_name}.{last_name}.{dept}"
+
+        # Personal email is current username or email
+        personal_email = emp['current_username'] or emp['email_primary'] or ''
+
+        employee_name = f"{emp['first_name']} {emp['last_name']}"
+
+        # Step 3: Create mailbox in Mailcow
+        headers = {
+            "X-API-Key": MAILCOW_API_KEY,
+            "Content-Type": "application/json"
+        }
+
+        mailbox_data = {
+            "local_part": local_part,
+            "domain": "bheem.co.uk",
+            "name": employee_name,
+            "password": "Bheem@2024Temp!",
+            "password2": "Bheem@2024Temp!",
+            "quota": "1024",
+            "active": "1"
+        }
+
+        mailbox_created = False
+        try:
+            response = requests.post(
+                f"{MAILCOW_URL}/api/v1/add/mailbox",
+                headers=headers,
+                json=mailbox_data,
+                verify=False,
+                timeout=30
+            )
+            result = response.json()
+            mailbox_created = any(r.get('type') == 'success' for r in result)
+        except Exception as e:
+            pass  # Continue even if mailbox creation fails
+
+        # Step 4: Update ERP database
+        erp_updated = False
+        try:
+            # Update auth.users username
+            cur.execute("""
+                UPDATE auth.users
+                SET username = %s, updated_at = NOW()
+                WHERE id = %s::uuid
+            """, (workspace_email, str(emp['user_id'])))
+
+            # Update or create contacts
+            if emp['person_id']:
+                cur.execute("""
+                    SELECT id FROM public.contacts WHERE person_id = %s::uuid
+                """, (str(emp['person_id']),))
+                contact = cur.fetchone()
+
+                if contact:
+                    cur.execute("""
+                        UPDATE public.contacts
+                        SET email_primary = %s, email_secondary = %s, updated_at = NOW()
+                        WHERE person_id = %s::uuid
+                    """, (workspace_email, personal_email, str(emp['person_id'])))
+                else:
+                    cur.execute("""
+                        INSERT INTO public.contacts (id, person_id, email_primary, email_secondary, created_at, updated_at)
+                        VALUES (gen_random_uuid(), %s::uuid, %s, %s, NOW(), NOW())
+                    """, (str(emp['person_id']), workspace_email, personal_email))
+
+            conn.commit()
+            erp_updated = True
+        except Exception as e:
+            conn.rollback()
+            return AutoProvisionResponse(
+                success=False,
+                employee_code=request.employee_code,
+                employee_name=employee_name,
+                workspace_email=workspace_email,
+                personal_email=personal_email,
+                department_code=dept,
+                mailbox_created=mailbox_created,
+                erp_updated=False,
+                message="Failed to update ERP",
+                error=str(e)
+            )
+        finally:
+            cur.close()
+            conn.close()
+
+        return AutoProvisionResponse(
+            success=True,
+            employee_code=request.employee_code,
+            employee_name=employee_name,
+            workspace_email=workspace_email,
+            personal_email=personal_email,
+            department_code=dept,
+            mailbox_created=mailbox_created,
+            erp_updated=erp_updated,
+            message="Workspace email provisioned successfully"
+        )
+
+    except Exception as e:
+        return AutoProvisionResponse(
+            success=False,
+            employee_code=request.employee_code,
+            employee_name=None,
+            workspace_email=None,
+            personal_email=None,
+            department_code=request.department,
+            mailbox_created=False,
+            erp_updated=False,
+            message="Provisioning failed",
+            error=str(e)
+        )

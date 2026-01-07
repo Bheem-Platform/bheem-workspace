@@ -592,6 +592,302 @@ class ERPClient:
             }
         )
 
+    # ═══════════════════════════════════════════════════════════════════
+    # WORKFLOW & APPROVAL ENDPOINTS (for Document Workflows)
+    # ═══════════════════════════════════════════════════════════════════
+
+    async def submit_for_approval(
+        self,
+        company_id: str,
+        document_type: str,
+        document_id: str,
+        document_number: str,
+        requested_by: str,
+        amount: Optional[float] = None,
+        notes: Optional[str] = None
+    ) -> dict:
+        """
+        Submit a document for approval using ERP workflow system.
+
+        Args:
+            company_id: Company UUID
+            document_type: Type (DOCUMENT, INVOICE, PO, etc.)
+            document_id: Document UUID
+            document_number: Document reference number
+            requested_by: User ID submitting
+            amount: Amount for threshold-based routing
+            notes: Submission notes
+
+        Returns:
+            Created approval request
+        """
+        return await self._request(
+            "POST",
+            "/approvals/requests",
+            source="docs",
+            json={
+                "company_id": company_id,
+                "document_type": document_type,
+                "document_id": document_id,
+                "document_number": document_number,
+                "requested_by": requested_by,
+                "amount": amount,
+                "notes": notes
+            }
+        )
+
+    async def get_approval_request(self, request_id: str) -> Optional[dict]:
+        """
+        Get approval request details.
+
+        Args:
+            request_id: Approval request UUID
+
+        Returns:
+            Approval request with history
+        """
+        try:
+            return await self._request(
+                "GET",
+                f"/approvals/requests/{request_id}",
+                source="docs"
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            raise
+
+    async def get_pending_approvals(
+        self,
+        user_id: str,
+        company_id: Optional[str] = None,
+        document_type: Optional[str] = None,
+        limit: int = 50
+    ) -> list:
+        """
+        Get documents pending user's approval.
+
+        Args:
+            user_id: Approver user ID
+            company_id: Filter by company
+            document_type: Filter by type
+            limit: Max results
+
+        Returns:
+            List of pending approval requests
+        """
+        params = {"approver_id": user_id, "limit": limit}
+        if company_id:
+            params["company_id"] = company_id
+        if document_type:
+            params["document_type"] = document_type
+
+        result = await self._request(
+            "GET",
+            "/approvals/pending",
+            source="docs",
+            params=params
+        )
+        return result.get("items", [])
+
+    async def approve_document(
+        self,
+        request_id: str,
+        approver_id: str,
+        comments: Optional[str] = None
+    ) -> dict:
+        """
+        Approve a document.
+
+        Args:
+            request_id: Approval request UUID
+            approver_id: Approving user ID
+            comments: Approval comments
+
+        Returns:
+            Updated approval status
+        """
+        return await self._request(
+            "POST",
+            f"/approvals/requests/{request_id}/approve",
+            source="docs",
+            json={
+                "approver_id": approver_id,
+                "comments": comments
+            }
+        )
+
+    async def reject_document(
+        self,
+        request_id: str,
+        approver_id: str,
+        comments: str
+    ) -> dict:
+        """
+        Reject a document.
+
+        Args:
+            request_id: Approval request UUID
+            approver_id: Rejecting user ID
+            comments: Rejection reason (required)
+
+        Returns:
+            Updated approval status
+        """
+        return await self._request(
+            "POST",
+            f"/approvals/requests/{request_id}/reject",
+            source="docs",
+            json={
+                "approver_id": approver_id,
+                "comments": comments
+            }
+        )
+
+    async def get_approval_history(
+        self,
+        document_id: str,
+        document_type: str = "DOCUMENT"
+    ) -> list:
+        """
+        Get approval history for a document.
+
+        Args:
+            document_id: Document UUID
+            document_type: Document type
+
+        Returns:
+            List of approval actions
+        """
+        result = await self._request(
+            "GET",
+            "/approvals/history",
+            source="docs",
+            params={
+                "document_id": document_id,
+                "document_type": document_type
+            }
+        )
+        return result.get("items", [])
+
+    async def get_workflow_definition(
+        self,
+        workflow_code: str
+    ) -> Optional[dict]:
+        """
+        Get workflow definition by code.
+
+        Args:
+            workflow_code: Workflow code (e.g., DOC_APPROVAL)
+
+        Returns:
+            Workflow definition with states and transitions
+        """
+        try:
+            return await self._request(
+                "GET",
+                f"/workflows/definitions/{workflow_code}",
+                source="docs"
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            raise
+
+    async def create_workflow_instance(
+        self,
+        workflow_code: str,
+        entity_type: str,
+        entity_id: str,
+        created_by: str,
+        initial_data: Optional[dict] = None
+    ) -> dict:
+        """
+        Create a workflow instance for an entity.
+
+        Args:
+            workflow_code: Workflow definition code
+            entity_type: Entity type (DOCUMENT, etc.)
+            entity_id: Entity UUID
+            created_by: Creating user ID
+            initial_data: Initial workflow data
+
+        Returns:
+            Created workflow instance
+        """
+        return await self._request(
+            "POST",
+            "/workflows/instances",
+            source="docs",
+            json={
+                "workflow_code": workflow_code,
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "created_by": created_by,
+                "initial_data": initial_data or {}
+            }
+        )
+
+    async def transition_workflow(
+        self,
+        instance_id: str,
+        to_state: str,
+        transitioned_by: str,
+        notes: Optional[str] = None
+    ) -> dict:
+        """
+        Transition workflow to a new state.
+
+        Args:
+            instance_id: Workflow instance UUID
+            to_state: Target state
+            transitioned_by: User performing transition
+            notes: Transition notes
+
+        Returns:
+            Updated workflow instance
+        """
+        return await self._request(
+            "POST",
+            f"/workflows/instances/{instance_id}/transition",
+            source="docs",
+            json={
+                "to_state": to_state,
+                "transitioned_by": transitioned_by,
+                "notes": notes
+            }
+        )
+
+    async def get_workflow_instance(
+        self,
+        entity_type: str,
+        entity_id: str
+    ) -> Optional[dict]:
+        """
+        Get workflow instance for an entity.
+
+        Args:
+            entity_type: Entity type
+            entity_id: Entity UUID
+
+        Returns:
+            Workflow instance with transitions
+        """
+        try:
+            return await self._request(
+                "GET",
+                "/workflows/instances/by-entity",
+                source="docs",
+                params={
+                    "entity_type": entity_type,
+                    "entity_id": entity_id
+                }
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            raise
+
 
 # Singleton instance
 erp_client = ERPClient()
