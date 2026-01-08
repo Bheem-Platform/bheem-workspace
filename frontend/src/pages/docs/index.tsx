@@ -11,7 +11,12 @@ import {
   SortAsc,
   Trash2,
   Download,
+  FilePlus,
+  FileText,
+  LayoutTemplate,
 } from 'lucide-react';
+import { useRouter } from 'next/router';
+import * as docsEditorApi from '@/lib/docsEditorApi';
 import AppSwitcher from '@/components/shared/AppSwitcher';
 import FileGrid from '@/components/docs/FileGrid';
 import Breadcrumb from '@/components/docs/Breadcrumb';
@@ -24,6 +29,7 @@ import { useRequireAuth } from '@/stores/authStore';
 import type { FileItem } from '@/types/docs';
 
 export default function DocsPage() {
+  const router = useRouter();
   const { isAuthenticated: isLoggedIn, isLoading: authLoading } = useRequireAuth();
   const { isNextcloudAuthenticated } = useCredentialsStore();
 
@@ -59,6 +65,25 @@ export default function DocsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showCredentialsPrompt, setShowCredentialsPrompt] = useState(false);
+  const [showNewDocDropdown, setShowNewDocDropdown] = useState(false);
+  const [isCreatingDoc, setIsCreatingDoc] = useState(false);
+
+  // Create new document
+  const handleCreateNewDocument = async () => {
+    setIsCreatingDoc(true);
+    try {
+      const doc = await docsEditorApi.createDocument({
+        title: 'Untitled Document',
+        folder_id: currentPath !== '/' ? currentPath : undefined,
+      });
+      router.push(`/docs/editor/${doc.id}`);
+    } catch (err) {
+      console.error('Failed to create document:', err);
+    } finally {
+      setIsCreatingDoc(false);
+      setShowNewDocDropdown(false);
+    }
+  };
 
   // Fetch files on mount
   useEffect(() => {
@@ -90,8 +115,15 @@ export default function DocsPage() {
   );
 
   const handleFileOpen = (file: FileItem) => {
-    // Open file preview or editor
-    if (file.mimeType?.includes('pdf') || file.mimeType?.startsWith('image/')) {
+    // Check if it's a Bheem Docs document (stored with special metadata or extension)
+    const isBheemDoc = file.mimeType === 'application/vnd.bheem.document' ||
+                       file.name.endsWith('.bheem') ||
+                       file.path.includes('/bheem-docs/');
+
+    if (isBheemDoc) {
+      // Open in Bheem Docs editor
+      router.push(`/docs/editor/${file.id}`);
+    } else if (file.mimeType?.includes('pdf') || file.mimeType?.startsWith('image/')) {
       // Open preview
       window.open(`/docs/preview?path=${encodeURIComponent(file.path)}`, '_blank');
     } else if (
@@ -180,6 +212,50 @@ export default function DocsPage() {
                 <p className="text-gray-500">Manage and collaborate on documents</p>
               </div>
               <div className="flex items-center gap-3">
+                {/* New Document Dropdown */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowNewDocDropdown(!showNewDocDropdown)}
+                    disabled={isCreatingDoc}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-500 to-indigo-500 text-white font-medium rounded-lg hover:from-blue-600 hover:to-indigo-600 transition-all disabled:opacity-50"
+                  >
+                    <FilePlus size={20} />
+                    <span>{isCreatingDoc ? 'Creating...' : 'New Document'}</span>
+                  </button>
+                  {showNewDocDropdown && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-10"
+                        onClick={() => setShowNewDocDropdown(false)}
+                      />
+                      <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-20">
+                        <button
+                          onClick={handleCreateNewDocument}
+                          className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 text-left"
+                        >
+                          <FileText size={18} className="text-blue-500" />
+                          <div>
+                            <p className="font-medium text-gray-900">Blank Document</p>
+                            <p className="text-xs text-gray-500">Start from scratch</p>
+                          </div>
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowNewDocDropdown(false);
+                            router.push('/docs/templates');
+                          }}
+                          className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 text-left"
+                        >
+                          <LayoutTemplate size={18} className="text-purple-500" />
+                          <div>
+                            <p className="font-medium text-gray-900">From Template</p>
+                            <p className="text-xs text-gray-500">Use a pre-built template</p>
+                          </div>
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
                 <button
                   onClick={() => setShowUploadModal(true)}
                   className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 font-medium rounded-lg hover:bg-gray-50 transition-colors"
