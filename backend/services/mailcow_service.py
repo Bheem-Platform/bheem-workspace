@@ -300,6 +300,65 @@ class MailcowService:
 
         return None
 
+    async def get_message(self, email_addr: str, password: str, folder: str, message_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Async wrapper for get_email. Used by mail_attachments.py.
+        Runs the synchronous IMAP operation in a thread pool.
+        """
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self.get_email(email_addr, password, message_id, folder)
+        )
+
+    async def get_attachment(self, email_addr: str, password: str, folder: str, message_id: str, attachment_index: int) -> Optional[bytes]:
+        """
+        Get a single attachment's content by index.
+        Returns the binary content of the attachment.
+        """
+        loop = asyncio.get_event_loop()
+
+        def fetch_attachment():
+            try:
+                mail = imaplib.IMAP4_SSL(self.imap_host, self.imap_port, timeout=30)
+                mail.login(email_addr, password)
+                mail.select(folder)
+
+                _, msg_data = mail.fetch(message_id.encode(), "(RFC822)")
+
+                for response_part in msg_data:
+                    if isinstance(response_part, tuple):
+                        msg = email_lib.message_from_bytes(response_part[1])
+
+                        attachment_count = 0
+                        if msg.is_multipart():
+                            for part in msg.walk():
+                                content_type = part.get_content_type()
+                                content_disposition = str(part.get("Content-Disposition") or "")
+                                filename = part.get_filename()
+
+                                is_attachment = (
+                                    filename or
+                                    "attachment" in content_disposition.lower() or
+                                    (content_type and not content_type.startswith("text/") and
+                                     not content_type.startswith("multipart/"))
+                                )
+
+                                if is_attachment:
+                                    if attachment_count == attachment_index:
+                                        payload = part.get_payload(decode=True)
+                                        mail.logout()
+                                        return payload
+                                    attachment_count += 1
+
+                mail.logout()
+            except Exception as e:
+                print(f"IMAP Error in get_attachment: {e}")
+
+            return None
+
+        return await loop.run_in_executor(None, fetch_attachment)
+
     def get_email_with_attachments(self, email_addr: str, password: str, message_id: str, folder: str = "INBOX") -> Optional[Dict[str, Any]]:
         """Get a single email with full attachment content (binary)"""
         try:
@@ -432,16 +491,21 @@ class MailcowService:
 
             # Add attachments
             if attachments:
+                print(f"DEBUG: Processing {len(attachments)} attachments")
                 for attachment in attachments:
                     filename = attachment.get("filename", "attachment")
                     content_type = attachment.get("content_type", "application/octet-stream")
                     content_b64 = attachment.get("content", "")
 
+                    print(f"DEBUG: Attachment '{filename}' - content_type: {content_type}, content_b64 length: {len(content_b64) if content_b64 else 'None/Empty'}")
+
                     # Decode base64 content
                     try:
                         content = base64.b64decode(content_b64)
-                    except Exception:
-                        print(f"Failed to decode attachment: {filename}")
+                        print(f"DEBUG: Successfully decoded attachment '{filename}' - {len(content)} bytes")
+                    except Exception as e:
+                        print(f"Failed to decode attachment: {filename} - Error: {e}")
+                        print(f"DEBUG: First 100 chars of content_b64: {content_b64[:100] if content_b64 else 'EMPTY'}")
                         continue
 
                     maintype, subtype = content_type.split("/", 1) if "/" in content_type else ("application", "octet-stream")
@@ -456,29 +520,30 @@ class MailcowService:
                     msg.attach(part)
 
             recipients = to + (cc or []) + (bcc or [])
-            msg_string = msg.as_string()
+            # Use as_bytes() to properly handle binary attachments in Python 3
+            msg_bytes = msg.as_bytes()
 
             # Use STARTTLS for port 587, SSL for port 465
             if self.smtp_port == 587:
                 with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=30) as server:
                     server.starttls()
                     server.login(from_email, password)
-                    server.sendmail(from_email, recipients, msg_string)
+                    server.sendmail(from_email, recipients, msg_bytes)
             else:
                 with smtplib.SMTP_SSL(self.smtp_host, self.smtp_port, timeout=30) as server:
                     server.login(from_email, password)
-                    server.sendmail(from_email, recipients, msg_string)
+                    server.sendmail(from_email, recipients, msg_bytes)
 
             # Save a copy to the Sent folder via IMAP
             if save_to_sent:
-                self._save_to_sent_folder(from_email, password, msg_string)
+                self._save_to_sent_folder(from_email, password, msg_bytes)
 
             return True
         except Exception as e:
             print(f"SMTP Error: {e}")
             return False
 
-    def _save_to_sent_folder(self, email: str, password: str, msg_string: str) -> bool:
+    def _save_to_sent_folder(self, email: str, password: str, msg_bytes: bytes) -> bool:
         """Save sent email to the Sent folder via IMAP"""
         try:
             mail = imaplib.IMAP4_SSL(self.imap_host, self.imap_port, timeout=30)
@@ -497,7 +562,7 @@ class MailcowService:
                         sent_folder,
                         "\\Seen",  # Mark as read
                         date_time,
-                        msg_string.encode()
+                        msg_bytes  # Already bytes, no need to encode
                     )
                     if result[0] == "OK":
                         print(f"Saved email to {sent_folder}")

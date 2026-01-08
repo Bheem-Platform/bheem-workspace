@@ -185,6 +185,17 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         organizer: e.organizer,
         created: e.created || new Date().toISOString(),
         updated: e.updated || new Date().toISOString(),
+        // Recurring event properties
+        recurrence: e.recurrence_parsed ? {
+          frequency: e.recurrence_parsed.freq?.toLowerCase(),
+          interval: e.recurrence_parsed.interval,
+          byDay: e.recurrence_parsed.by_day,
+          byMonthDay: e.recurrence_parsed.by_month_day,
+          byMonth: e.recurrence_parsed.by_month,
+          count: e.recurrence_parsed.count,
+          until: e.recurrence_parsed.until,
+        } : undefined,
+        recurringEventId: e.master_event_id,
       }));
 
       set({ events: mappedEvents });
@@ -339,6 +350,8 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         allDay: event.allDay,
         color: event.color,
         calendarId: event.calendarId,
+        recurrence: event.recurrence,
+        reminders: event.reminders,
       },
     });
   },

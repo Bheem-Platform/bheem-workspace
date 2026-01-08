@@ -706,7 +706,7 @@ export const sendScheduledNow = async (
 };
 
 // ===========================================
-// Undo Send (Phase 3.2)
+// Undo Send (Phase 3.2) - Client-side implementation
 // ===========================================
 
 export interface SendWithUndoResponse {
@@ -731,14 +731,58 @@ export interface QueuedEmailStatus {
     subject: string;
     body: string;
     is_html?: boolean;
+    attachments?: Array<{ filename: string; content_type: string; content: string }>;
   };
 }
 
+// Client-side queue for undo functionality
+interface QueuedEmail {
+  queue_id: string;
+  email_data: {
+    to: string[];
+    cc?: string[];
+    bcc?: string[];
+    subject: string;
+    body: string;
+    is_html?: boolean;
+    attachments?: Array<{ filename: string; content_type: string; content: string }>;
+  };
+  send_at: Date;
+  delay_seconds: number;
+  status: 'pending' | 'sent' | 'cancelled' | 'failed';
+  timeout_id?: ReturnType<typeof setTimeout>;
+}
+
+const emailQueue = new Map<string, QueuedEmail>();
+
+/**
+ * Convert a File to base64 encoded string
+ */
+const fileToBase64 = (file: File): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => {
+      const result = reader.result as string;
+      // Remove the data:mime/type;base64, prefix
+      const base64 = result.split(',')[1];
+      resolve(base64);
+    };
+    reader.onerror = (error) => reject(error);
+  });
+};
+
+/**
+ * Generate a unique queue ID
+ */
+const generateQueueId = (): string => {
+  return `queue_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+};
+
 /**
  * Send an email with undo capability.
- * The email will be queued and sent after delay_seconds (default 5s).
- * Can be cancelled within the delay window.
- * Supports file attachments via FormData.
+ * Uses client-side delay with /mail/send endpoint.
+ * Supports file attachments converted to base64.
  */
 export const sendEmailWithUndo = async (data: {
   to: string[];
@@ -750,41 +794,68 @@ export const sendEmailWithUndo = async (data: {
   delay_seconds?: number; // Default 5, max 120
   attachments?: File[];
 }): Promise<SendWithUndoResponse> => {
-  // If there are attachments, use FormData
+  const queueId = generateQueueId();
+  const delaySeconds = Math.min(Math.max(5, data.delay_seconds || 5), 120);
+  const sendAt = new Date(Date.now() + delaySeconds * 1000);
+
+  // Convert File attachments to base64 format
+  let attachmentsData: Array<{ filename: string; content_type: string; content: string }> | undefined;
   if (data.attachments && data.attachments.length > 0) {
-    const formData = new FormData();
-    formData.append('to', JSON.stringify(data.to));
-    formData.append('cc', JSON.stringify(data.cc || []));
-    formData.append('bcc', JSON.stringify(data.bcc || []));
-    formData.append('subject', data.subject);
-    formData.append('body', data.body);
-    formData.append('is_html', String(data.is_html ?? true));
-    formData.append('delay_seconds', String(data.delay_seconds || 5));
-
-    // Append each file
-    data.attachments.forEach((file) => {
-      formData.append('attachments', file);
-    });
-
-    const response = await api.post('/mail/send-with-undo/attachments', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data',
-      },
-    });
-    return response.data;
+    attachmentsData = await Promise.all(
+      data.attachments.map(async (file) => ({
+        filename: file.name,
+        content_type: file.type || 'application/octet-stream',
+        content: await fileToBase64(file),
+      }))
+    );
   }
 
-  // No attachments - use regular JSON
-  const response = await api.post('/mail/send-with-undo', {
+  // Build email data
+  const emailData = {
     to: data.to,
     cc: data.cc || [],
     bcc: data.bcc || [],
     subject: data.subject,
     body: data.body,
     is_html: data.is_html ?? true,
-    delay_seconds: data.delay_seconds || 5,
-  });
-  return response.data;
+    attachments: attachmentsData,
+  };
+
+  // Create queued email entry
+  const queuedEmail: QueuedEmail = {
+    queue_id: queueId,
+    email_data: emailData,
+    send_at: sendAt,
+    delay_seconds: delaySeconds,
+    status: 'pending',
+  };
+
+  // Set timeout to actually send the email
+  queuedEmail.timeout_id = setTimeout(async () => {
+    const entry = emailQueue.get(queueId);
+    if (entry && entry.status === 'pending') {
+      try {
+        // Use the /mail/send endpoint with base64 attachments
+        await api.post('/mail/send', entry.email_data);
+        entry.status = 'sent';
+      } catch (error) {
+        entry.status = 'failed';
+        console.error('Failed to send queued email:', error);
+      }
+    }
+  }, delaySeconds * 1000);
+
+  // Store in queue
+  emailQueue.set(queueId, queuedEmail);
+
+  return {
+    success: true,
+    message: `Email queued. Will be sent in ${delaySeconds} seconds unless cancelled.`,
+    queue_id: queueId,
+    send_at: sendAt.toISOString(),
+    delay_seconds: delaySeconds,
+    can_undo: true,
+  };
 };
 
 /**
@@ -793,8 +864,23 @@ export const sendEmailWithUndo = async (data: {
 export const getQueuedEmailStatus = async (
   queueId: string
 ): Promise<QueuedEmailStatus> => {
-  const response = await api.get(`/mail/send-with-undo/${queueId}`);
-  return response.data;
+  const entry = emailQueue.get(queueId);
+
+  if (!entry) {
+    throw new Error('Queued email not found');
+  }
+
+  const now = new Date();
+  const remainingSeconds = Math.max(0, Math.floor((entry.send_at.getTime() - now.getTime()) / 1000));
+
+  return {
+    queue_id: entry.queue_id,
+    status: entry.status,
+    send_at: entry.send_at.toISOString(),
+    remaining_seconds: remainingSeconds,
+    can_undo: entry.status === 'pending' && remainingSeconds > 0,
+    email_data: entry.email_data,
+  };
 };
 
 /**
@@ -803,8 +889,42 @@ export const getQueuedEmailStatus = async (
 export const undoSend = async (
   queueId: string
 ): Promise<{ success: boolean; message: string; email_data?: any }> => {
-  const response = await api.delete(`/mail/send-with-undo/${queueId}`);
-  return response.data;
+  const entry = emailQueue.get(queueId);
+
+  if (!entry) {
+    return { success: false, message: 'Queued email not found' };
+  }
+
+  if (entry.status !== 'pending') {
+    return { success: false, message: `Cannot cancel email with status: ${entry.status}` };
+  }
+
+  // Clear the timeout to prevent sending
+  if (entry.timeout_id) {
+    clearTimeout(entry.timeout_id);
+  }
+
+  entry.status = 'cancelled';
+
+  return {
+    success: true,
+    message: 'Email cancelled successfully. Your draft has been preserved.',
+    email_data: entry.email_data,
+  };
+};
+
+/**
+ * Clean up old entries from the queue (call periodically)
+ */
+export const cleanupEmailQueue = (): void => {
+  const now = Date.now();
+  const maxAge = 10 * 60 * 1000; // 10 minutes
+
+  emailQueue.forEach((entry, queueId) => {
+    if (entry.status !== 'pending' && now - entry.send_at.getTime() > maxAge) {
+      emailQueue.delete(queueId);
+    }
+  });
 };
 
 // ===========================================
@@ -1912,7 +2032,12 @@ export const downloadAttachment = async (
     }
   }
 
-  const blob = await response.blob();
+  // Get the content type from response headers
+  const contentType = response.headers.get('content-type') || 'application/octet-stream';
+
+  // Create blob with explicit content type to ensure proper rendering
+  const arrayBuffer = await response.arrayBuffer();
+  const blob = new Blob([arrayBuffer], { type: contentType });
   const blobUrl = URL.createObjectURL(blob);
   return { blobUrl, filename };
 };

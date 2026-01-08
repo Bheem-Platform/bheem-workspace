@@ -83,9 +83,12 @@ export function TimeSlotEvent({ event, onClick, style }: TimeSlotEventProps) {
   return (
     <button
       onClick={onClick}
-      className="absolute left-1 right-1 rounded-lg p-2 text-left overflow-hidden transition-all hover:shadow-lg z-10"
+      className="absolute rounded-lg p-2 text-left overflow-hidden transition-all hover:shadow-lg hover:z-20 z-10"
       style={{
         backgroundColor: event.color || '#3b82f6',
+        // Default width/left if not provided in style
+        width: 'calc(100% - 4px)',
+        left: '2px',
         ...style,
       }}
     >

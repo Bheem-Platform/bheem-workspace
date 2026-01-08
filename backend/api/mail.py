@@ -7,9 +7,10 @@ Security:
 - Credentials are never passed in URL query parameters
 - Rate limiting protects against abuse
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request, UploadFile, File, Form
 from pydantic import BaseModel, EmailStr
-from typing import Optional, List
+from typing import Optional, List, Dict
+from datetime import datetime
 from core.security import get_current_user
 from services.mailcow_service import mailcow_service
 from services.mail_session_service import mail_session_service, get_mail_session, MailSessionService
@@ -54,6 +55,12 @@ class MailLoginRequest(BaseModel):
     password: str
 
 
+class AttachmentData(BaseModel):
+    filename: str
+    content_type: str = "application/octet-stream"
+    content: str  # Base64 encoded content
+
+
 class SendEmailRequest(BaseModel):
     to: List[EmailStr]
     cc: Optional[List[EmailStr]] = []
@@ -62,6 +69,7 @@ class SendEmailRequest(BaseModel):
     body: str
     is_html: bool = True
     in_reply_to: Optional[str] = None  # Message-ID for threading
+    attachments: Optional[List[AttachmentData]] = []  # Base64 encoded attachments
 
 
 class EmailPreview(BaseModel):
@@ -122,8 +130,8 @@ def get_mail_credentials(user_id: str) -> dict:
 @router.post("/session/create", response_model=MailSessionResponse)
 @limiter.limit(RateLimits.SESSION_CREATE)
 async def create_mail_session(
-    request_obj: Request,
-    request: MailLoginRequest,
+    request: Request,
+    login_data: MailLoginRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -139,7 +147,7 @@ async def create_mail_session(
 
     # Validate credentials with Mailcow
     try:
-        folders = mailcow_service.get_folders(request.email, request.password)
+        folders = mailcow_service.get_folders(login_data.email, login_data.password)
         if not folders:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -157,15 +165,15 @@ async def create_mail_session(
     try:
         session_info = mail_session_service.create_session(
             user_id=user_id,
-            email=request.email,
-            password=request.password,
+            email=login_data.email,
+            password=login_data.password,
             additional_data={"username": current_user.get("username")}
         )
 
         return MailSessionResponse(
             success=True,
             message="Mail session created successfully",
-            email=request.email,
+            email=login_data.email,
             session_id=session_info["session_id"],
             expires_in_seconds=session_info["expires_in_seconds"],
             folders=folders
@@ -257,7 +265,8 @@ async def destroy_mail_session(
 
 @router.post("/login")
 async def mail_login(
-    request: MailLoginRequest,
+    request: Request,
+    login_data: MailLoginRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -266,7 +275,7 @@ async def mail_login(
     This endpoint is kept for backwards compatibility but internally
     uses the new session-based authentication.
     """
-    return await create_mail_session(request, current_user)
+    return await create_mail_session(request, login_data, current_user)
 
 
 # ===========================================
@@ -378,8 +387,8 @@ async def get_message(
 @router.post("/send")
 @limiter.limit(RateLimits.MAIL_SEND)
 async def send_email(
-    request_obj: Request,
-    request: SendEmailRequest,
+    request: Request,
+    email_request: SendEmailRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -390,14 +399,28 @@ async def send_email(
     user_id = current_user.get("id") or current_user.get("user_id")
     credentials = get_mail_credentials(user_id)
 
+    # Convert attachments to dict format for mailcow_service
+    attachments_data = None
+    if email_request.attachments:
+        attachments_data = [
+            {
+                "filename": att.filename,
+                "content_type": att.content_type,
+                "content": att.content  # Already base64 encoded
+            }
+            for att in email_request.attachments
+        ]
+
     success = mailcow_service.send_email(
         from_email=credentials["email"],
         password=credentials["password"],
-        to=request.to,
-        subject=request.subject,
-        body=request.body,
-        cc=request.cc,
-        is_html=request.is_html
+        to=email_request.to,
+        subject=email_request.subject,
+        body=email_request.body,
+        cc=email_request.cc,
+        bcc=email_request.bcc,
+        is_html=email_request.is_html,
+        attachments=attachments_data
     )
 
     if not success:
@@ -406,11 +429,272 @@ async def send_email(
             detail="Failed to send email"
         )
 
+    attachment_count = len(email_request.attachments) if email_request.attachments else 0
     return {
         "success": True,
-        "message": "Email sent successfully",
+        "message": f"Email sent successfully{f' with {attachment_count} attachment(s)' if attachment_count > 0 else ''}",
         "from": credentials["email"],
-        "to": request.to
+        "to": email_request.to,
+        "attachments_count": attachment_count
+    }
+
+
+# ===========================================
+# Send with Undo (Delayed Send) Endpoints
+# ===========================================
+
+class SendWithUndoRequest(BaseModel):
+    to: List[str]
+    cc: Optional[List[str]] = []
+    bcc: Optional[List[str]] = []
+    subject: str
+    body: str
+    is_html: bool = True
+    delay_seconds: int = 5
+
+
+# In-memory store for queued emails (use Redis in production)
+import asyncio
+_queued_emails: Dict[str, dict] = {}
+_send_tasks: Dict[str, asyncio.Task] = {}
+
+
+@router.post("/send-with-undo")
+@limiter.limit(RateLimits.MAIL_SEND)
+async def queue_email_with_undo(
+    request: Request,
+    email_data: SendWithUndoRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Queue an email for delayed sending with undo capability.
+
+    The email will be sent after `delay_seconds`. Before that,
+    it can be cancelled via DELETE /mail/send-with-undo/{queue_id}
+    """
+    import uuid
+
+    user_id = current_user.get("id") or current_user.get("user_id")
+    credentials = get_mail_credentials(user_id)
+
+    queue_id = str(uuid.uuid4())
+
+    # Store email data
+    _queued_emails[queue_id] = {
+        "id": queue_id,
+        "user_id": user_id,
+        "from_email": credentials["email"],
+        "password": credentials["password"],
+        "to": email_data.to,
+        "cc": email_data.cc,
+        "bcc": email_data.bcc,
+        "subject": email_data.subject,
+        "body": email_data.body,
+        "is_html": email_data.is_html,
+        "delay_seconds": email_data.delay_seconds,
+        "status": "queued",
+        "created_at": datetime.utcnow().isoformat()
+    }
+
+    # Schedule the send
+    async def send_after_delay():
+        await asyncio.sleep(email_data.delay_seconds)
+        if queue_id in _queued_emails and _queued_emails[queue_id]["status"] == "queued":
+            try:
+                email_info = _queued_emails[queue_id]
+                success = mailcow_service.send_email(
+                    from_email=email_info["from_email"],
+                    password=email_info["password"],
+                    to=email_info["to"],
+                    subject=email_info["subject"],
+                    body=email_info["body"],
+                    cc=email_info["cc"],
+                    is_html=email_info["is_html"]
+                )
+                _queued_emails[queue_id]["status"] = "sent" if success else "failed"
+            except Exception as e:
+                _queued_emails[queue_id]["status"] = "failed"
+                _queued_emails[queue_id]["error"] = str(e)
+
+    task = asyncio.create_task(send_after_delay())
+    _send_tasks[queue_id] = task
+
+    return {
+        "success": True,
+        "queue_id": queue_id,
+        "status": "queued",
+        "delay_seconds": email_data.delay_seconds,
+        "message": f"Email queued. Will be sent in {email_data.delay_seconds} seconds unless cancelled."
+    }
+
+
+@router.post("/send-with-undo/attachments")
+async def queue_email_with_attachments(
+    to: str = Form(...),
+    subject: str = Form(...),
+    body: str = Form(...),
+    cc: str = Form(""),
+    bcc: str = Form(""),
+    is_html: bool = Form(True),
+    delay_seconds: int = Form(5),
+    attachments: List[UploadFile] = File(default=[]),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Queue an email with attachments for delayed sending.
+    """
+    import uuid
+
+    user_id = current_user.get("id") or current_user.get("user_id")
+    credentials = get_mail_credentials(user_id)
+
+    # Parse recipients
+    to_list = [e.strip() for e in to.split(",") if e.strip()]
+    cc_list = [e.strip() for e in cc.split(",") if e.strip()] if cc else []
+    bcc_list = [e.strip() for e in bcc.split(",") if e.strip()] if bcc else []
+
+    # Read attachment data
+    attachment_data = []
+    for file in attachments:
+        content = await file.read()
+        attachment_data.append({
+            "filename": file.filename,
+            "content": content,
+            "content_type": file.content_type
+        })
+
+    queue_id = str(uuid.uuid4())
+
+    # Store email data
+    _queued_emails[queue_id] = {
+        "id": queue_id,
+        "user_id": user_id,
+        "from_email": credentials["email"],
+        "password": credentials["password"],
+        "to": to_list,
+        "cc": cc_list,
+        "bcc": bcc_list,
+        "subject": subject,
+        "body": body,
+        "is_html": is_html,
+        "attachments": attachment_data,
+        "delay_seconds": delay_seconds,
+        "status": "queued",
+        "created_at": datetime.utcnow().isoformat()
+    }
+
+    # Schedule the send
+    async def send_after_delay():
+        await asyncio.sleep(delay_seconds)
+        if queue_id in _queued_emails and _queued_emails[queue_id]["status"] == "queued":
+            try:
+                email_info = _queued_emails[queue_id]
+                success = mailcow_service.send_email(
+                    from_email=email_info["from_email"],
+                    password=email_info["password"],
+                    to=email_info["to"],
+                    subject=email_info["subject"],
+                    body=email_info["body"],
+                    cc=email_info["cc"],
+                    is_html=email_info["is_html"],
+                    attachments=email_info.get("attachments")
+                )
+                _queued_emails[queue_id]["status"] = "sent" if success else "failed"
+            except Exception as e:
+                _queued_emails[queue_id]["status"] = "failed"
+                _queued_emails[queue_id]["error"] = str(e)
+
+    task = asyncio.create_task(send_after_delay())
+    _send_tasks[queue_id] = task
+
+    return {
+        "success": True,
+        "queue_id": queue_id,
+        "status": "queued",
+        "delay_seconds": delay_seconds,
+        "attachments_count": len(attachment_data),
+        "message": f"Email with {len(attachment_data)} attachment(s) queued."
+    }
+
+
+@router.get("/send-with-undo/{queue_id}")
+async def get_queued_email_status(
+    queue_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Get the status of a queued email."""
+    if queue_id not in _queued_emails:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Queued email not found"
+        )
+
+    email_info = _queued_emails[queue_id]
+    user_id = current_user.get("id") or current_user.get("user_id")
+
+    if email_info["user_id"] != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view this queued email"
+        )
+
+    return {
+        "queue_id": queue_id,
+        "status": email_info["status"],
+        "to": email_info["to"],
+        "subject": email_info["subject"],
+        "delay_seconds": email_info["delay_seconds"],
+        "created_at": email_info["created_at"]
+    }
+
+
+@router.delete("/send-with-undo/{queue_id}")
+async def cancel_queued_email(
+    queue_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Cancel (undo) a queued email before it's sent."""
+    if queue_id not in _queued_emails:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Queued email not found"
+        )
+
+    email_info = _queued_emails[queue_id]
+    user_id = current_user.get("id") or current_user.get("user_id")
+
+    if email_info["user_id"] != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to cancel this email"
+        )
+
+    if email_info["status"] != "queued":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot cancel email with status: {email_info['status']}"
+        )
+
+    # Cancel the scheduled task
+    if queue_id in _send_tasks:
+        _send_tasks[queue_id].cancel()
+        del _send_tasks[queue_id]
+
+    # Update status
+    _queued_emails[queue_id]["status"] = "cancelled"
+
+    # Return email data so user can edit and resend
+    return {
+        "success": True,
+        "message": "Email cancelled successfully",
+        "email_data": {
+            "to": email_info["to"],
+            "cc": email_info.get("cc", []),
+            "bcc": email_info.get("bcc", []),
+            "subject": email_info["subject"],
+            "body": email_info["body"],
+            "is_html": email_info["is_html"]
+        }
     }
 
 
@@ -439,9 +723,9 @@ async def get_folders(
 @router.post("/messages/{message_id}/move")
 @limiter.limit(RateLimits.MAIL_MOVE)
 async def move_message(
-    request_obj: Request,
+    request: Request,
     message_id: str,
-    request: MoveEmailRequest,
+    move_data: MoveEmailRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -456,8 +740,8 @@ async def move_message(
         credentials["email"],
         credentials["password"],
         message_id,
-        request.from_folder,
-        request.to_folder
+        move_data.from_folder,
+        move_data.to_folder
     )
 
     if not success:
@@ -754,8 +1038,8 @@ async def search_emails(
 @router.post("/search")
 @limiter.limit(RateLimits.MAIL_LIST)
 async def search_emails_post(
-    request_obj: Request,
-    request: SearchRequest,
+    request: Request,
+    search_data: SearchRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -766,20 +1050,20 @@ async def search_emails_post(
     user_id = current_user.get("id") or current_user.get("user_id")
     credentials = get_mail_credentials(user_id)
 
-    search_fields = request.search_in or ["all"]
+    search_fields = search_data.search_in or ["all"]
 
-    if request.folder:
+    if search_data.folder:
         results = mailcow_service.search_emails(
             credentials["email"],
             credentials["password"],
-            request.query,
-            request.folder,
+            search_data.query,
+            search_data.folder,
             search_fields,
-            request.limit or 50
+            search_data.limit or 50
         )
         return {
-            "query": request.query,
-            "folder": request.folder,
+            "query": search_data.query,
+            "folder": search_data.folder,
             "count": len(results),
             "results": results
         }
@@ -787,9 +1071,9 @@ async def search_emails_post(
         results = mailcow_service.search_all_folders(
             credentials["email"],
             credentials["password"],
-            request.query,
+            search_data.query,
             search_fields,
-            request.limit or 50
+            search_data.limit or 50
         )
 
         all_results = []
@@ -799,10 +1083,10 @@ async def search_emails_post(
         all_results.sort(key=lambda x: x.get("date", ""), reverse=True)
 
         return {
-            "query": request.query,
+            "query": search_data.query,
             "folder": "all",
             "count": len(all_results),
-            "results": all_results[:request.limit or 50],
+            "results": all_results[:search_data.limit or 50],
             "by_folder": {k: len(v) for k, v in results.items()}
         }
 

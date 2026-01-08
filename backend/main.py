@@ -46,6 +46,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Could not initialize email scheduler: {e}", action="email_scheduler_failed")
 
+    # Initialize calendar reminder scheduler
+    try:
+        from services.calendar_reminder_service import calendar_reminder_service
+        from core.database import async_session_maker
+
+        calendar_reminder_service.initialize()
+
+        # Load pending calendar reminders
+        async with async_session_maker() as db:
+            await calendar_reminder_service.load_pending_reminders(db)
+
+        logger.info("Calendar reminder scheduler initialized", action="calendar_reminder_started")
+    except Exception as e:
+        logger.warning(f"Could not initialize calendar reminder scheduler: {e}", action="calendar_reminder_failed")
+
     yield
 
     # Shutdown email scheduler
@@ -55,6 +70,14 @@ async def lifespan(app: FastAPI):
         logger.info("Email scheduler stopped", action="email_scheduler_stopped")
     except Exception as e:
         logger.warning(f"Error shutting down email scheduler: {e}", action="email_scheduler_shutdown_error")
+
+    # Shutdown calendar reminder scheduler
+    try:
+        from services.calendar_reminder_service import calendar_reminder_service
+        calendar_reminder_service.shutdown()
+        logger.info("Calendar reminder scheduler stopped", action="calendar_reminder_stopped")
+    except Exception as e:
+        logger.warning(f"Error shutting down calendar reminder scheduler: {e}", action="calendar_reminder_shutdown_error")
 
     logger.info("Bheem Workspace shutting down...", action="app_shutdown")
 
@@ -715,4 +738,4 @@ async def calendar_proxy(request: Request, path: str = ""):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8500)
+    uvicorn.run(app, host="0.0.0.0", port=8000)

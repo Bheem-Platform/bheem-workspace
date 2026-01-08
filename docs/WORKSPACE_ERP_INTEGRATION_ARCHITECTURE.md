@@ -2434,12 +2434,12 @@ NOTIFY_API_KEY=your-workspace-notify-api-key
 WORKSPACE_NOTIFY_COMPANY_ID=79f70aef-17eb-48a8-b599-2879721e8796
 
 # Default sender configuration
-NOTIFY_FROM_EMAIL=workspace@bheem.cloud
+NOTIFY_FROM_EMAIL=workspace@bheem.cloud 
 NOTIFY_FROM_NAME=Bheem Workspace
 NOTIFY_SMS_SENDER_ID=BHEEM
 NOTIFY_WHATSAPP_NUMBER=+44XXXXXXXXXX
 
-# Real-time notifications (future)
+# Real-time notifications (future)   
 REDIS_URL=redis://redis:6379
 NOTIFICATION_WS_ENABLED=false
 ```

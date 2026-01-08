@@ -65,6 +65,8 @@ async def detect_calendar_events(
 
     Returns a list of detected events with confidence scores.
     """
+    import asyncio
+
     # Get mail credentials
     credentials = mail_session_service.get_credentials(current_user["id"])
     if not credentials:
@@ -74,13 +76,20 @@ async def detect_calendar_events(
         )
 
     try:
-        # Fetch the email (synchronous method)
-        email = mailcow_service.get_email(
-            credentials["email"],
-            credentials["password"],
-            message_id,
-            folder
-        )
+        # Fetch the email with retry logic for IMAP connection issues
+        email = None
+        max_retries = 3
+        for attempt in range(max_retries):
+            email = mailcow_service.get_email(
+                credentials["email"],
+                credentials["password"],
+                message_id,
+                folder
+            )
+            if email:
+                break
+            # Small delay before retry to avoid IMAP conflicts
+            await asyncio.sleep(0.1 * (attempt + 1))
 
         if not email:
             raise HTTPException(

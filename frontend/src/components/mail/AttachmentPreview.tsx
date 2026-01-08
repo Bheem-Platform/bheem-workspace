@@ -235,11 +235,28 @@ export default function AttachmentPreview({
         );
       }
       return (
-        <iframe
-          src={`${blobUrl}#toolbar=0`}
-          className="w-full h-full border-0"
+        <object
+          data={`${blobUrl}#toolbar=0&navpanes=0`}
+          type="application/pdf"
+          className="w-full h-full"
           title={currentAttachment.filename}
-        />
+        >
+          {/* Fallback for browsers that can't display PDF in object */}
+          <div className="flex flex-col items-center justify-center h-full text-center p-8">
+            <FileText size={48} className="text-red-500" />
+            <h3 className="text-lg font-medium text-white mt-4">{currentAttachment.filename}</h3>
+            <p className="text-sm text-white/50 mt-2">
+              Your browser cannot display this PDF inline.
+            </p>
+            <button
+              onClick={handleDownload}
+              className="flex items-center gap-2 mt-6 px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600"
+            >
+              <Download size={18} />
+              Download PDF
+            </button>
+          </div>
+        </object>
       );
     }
 

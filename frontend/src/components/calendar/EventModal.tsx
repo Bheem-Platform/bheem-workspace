@@ -11,7 +11,9 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useCalendarStore } from '@/stores/calendarStore';
-import { CALENDAR_COLORS } from '@/types/calendar';
+import { CALENDAR_COLORS, type RecurrenceRule, type Reminder } from '@/types/calendar';
+import RecurrenceSelector from './RecurrenceSelector';
+import ReminderSelector from './ReminderSelector';
 
 interface EventModalProps {
   isOpen: boolean;
@@ -45,6 +47,8 @@ export default function EventModal({ isOpen, onClose }: EventModalProps) {
   const [allDay, setAllDay] = useState(false);
   const [color, setColor] = useState<string>(CALENDAR_COLORS[0].value);
   const [calendarId, setCalendarId] = useState('');
+  const [recurrence, setRecurrence] = useState<RecurrenceRule | null>(null);
+  const [reminders, setReminders] = useState<Reminder[]>([{ type: 'popup', minutes: 10 }]);
 
   // Initialize form with eventFormData
   useEffect(() => {
@@ -54,6 +58,8 @@ export default function EventModal({ isOpen, onClose }: EventModalProps) {
     if (eventFormData.allDay !== undefined) setAllDay(eventFormData.allDay || false);
     if (eventFormData.color !== undefined) setColor(eventFormData.color || CALENDAR_COLORS[0].value);
     if (eventFormData.calendarId !== undefined) setCalendarId(eventFormData.calendarId || '');
+    if (eventFormData.recurrence !== undefined) setRecurrence(eventFormData.recurrence || null);
+    if (eventFormData.reminders !== undefined) setReminders(eventFormData.reminders || [{ type: 'popup', minutes: 10 }]);
 
     if (eventFormData.start) {
       const start = dayjs(eventFormData.start);
@@ -99,6 +105,8 @@ export default function EventModal({ isOpen, onClose }: EventModalProps) {
       allDay,
       color,
       calendarId: calendarId || undefined,
+      recurrence: recurrence || undefined,
+      reminders: reminders.length > 0 ? reminders : undefined,
     };
 
     let success = false;
@@ -222,6 +230,19 @@ export default function EventModal({ isOpen, onClose }: EventModalProps) {
               )}
             </div>
           </div>
+
+          {/* Recurrence */}
+          <RecurrenceSelector
+            value={recurrence}
+            onChange={setRecurrence}
+            eventStart={startDate ? new Date(startDate) : new Date()}
+          />
+
+          {/* Reminders */}
+          <ReminderSelector
+            reminders={reminders}
+            onChange={setReminders}
+          />
 
           {/* Location */}
           <div className="flex items-start gap-3">

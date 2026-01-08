@@ -15,7 +15,8 @@ export const getCalendars = async (
   const response = await api.get('/calendar/calendars', {
     params: { nc_user: ncUser, nc_pass: ncPass },
   });
-  return response.data;
+  // API returns {count, calendars} - extract calendars array
+  return response.data?.calendars || response.data || [];
 };
 
 // Events
@@ -35,7 +36,8 @@ export const getEvents = async (
       calendar_id: calendarId,
     },
   });
-  return response.data;
+  // API returns {count, events} - extract events array
+  return response.data?.events || response.data || [];
 };
 
 export const getTodayEvents = async (
@@ -45,7 +47,7 @@ export const getTodayEvents = async (
   const response = await api.get('/calendar/today', {
     params: { nc_user: ncUser, nc_pass: ncPass },
   });
-  return response.data;
+  return response.data?.events || response.data || [];
 };
 
 export const getWeekEvents = async (
@@ -55,8 +57,23 @@ export const getWeekEvents = async (
   const response = await api.get('/calendar/week', {
     params: { nc_user: ncUser, nc_pass: ncPass },
   });
-  return response.data;
+  return response.data?.events || response.data || [];
 };
+
+// Convert frontend RecurrenceRule to backend format
+function convertRecurrenceToBackend(recurrence?: CreateEventData['recurrence']) {
+  if (!recurrence) return undefined;
+
+  return {
+    freq: recurrence.frequency.toUpperCase(),
+    interval: recurrence.interval || 1,
+    by_day: recurrence.byDay,
+    by_month_day: recurrence.byMonthDay,
+    by_month: recurrence.byMonth,
+    count: recurrence.count,
+    until: recurrence.until,
+  };
+}
 
 export const createEvent = async (
   ncUser: string,
@@ -70,8 +87,10 @@ export const createEvent = async (
     end: data.end,
     location: data.location || '',
     description: data.description || '',
+    all_day: data.allDay || false,
     attendees: data.attendees || [],
     send_invites: data.sendInvites ?? true,
+    recurrence: convertRecurrenceToBackend(data.recurrence),
   }, {
     params: { nc_user: ncUser, nc_pass: ncPass },
   });
@@ -84,7 +103,15 @@ export const updateEvent = async (
   eventUid: string,
   data: UpdateEventData
 ): Promise<CalendarEvent> => {
-  const response = await api.put(`/calendar/events/${eventUid}`, data, {
+  const response = await api.put(`/calendar/events/${eventUid}`, {
+    title: data.title,
+    start: data.start,
+    end: data.end,
+    location: data.location,
+    description: data.description,
+    all_day: data.allDay,
+    recurrence: data.recurrence ? convertRecurrenceToBackend(data.recurrence) : undefined,
+  }, {
     params: { nc_user: ncUser, nc_pass: ncPass },
   });
   return response.data;
@@ -98,6 +125,40 @@ export const deleteEvent = async (
   await api.delete(`/calendar/events/${eventUid}`, {
     params: { nc_user: ncUser, nc_pass: ncPass },
   });
+};
+
+// Recurring event instance management
+export const updateEventInstance = async (
+  ncUser: string,
+  ncPass: string,
+  eventUid: string,
+  instanceDate: string,
+  data: UpdateEventData,
+  calendarId: string = 'personal'
+): Promise<{ success: boolean; exception_event_uid: string }> => {
+  const response = await api.put(`/calendar/events/${eventUid}/instance/${instanceDate}`, {
+    title: data.title,
+    start: data.start,
+    end: data.end,
+    location: data.location,
+    description: data.description,
+  }, {
+    params: { nc_user: ncUser, nc_pass: ncPass, calendar_id: calendarId },
+  });
+  return response.data;
+};
+
+export const deleteEventInstance = async (
+  ncUser: string,
+  ncPass: string,
+  eventUid: string,
+  instanceDate: string,
+  calendarId: string = 'personal'
+): Promise<{ success: boolean }> => {
+  const response = await api.delete(`/calendar/events/${eventUid}/instance/${instanceDate}`, {
+    params: { nc_user: ncUser, nc_pass: ncPass, calendar_id: calendarId },
+  });
+  return response.data;
 };
 
 // Helper functions
@@ -131,3 +192,80 @@ export function isEventOnDate(event: CalendarEvent, date: Date): boolean {
 
   return eventStart <= dayEnd && eventEnd >= dayStart;
 }
+
+// Reminders
+export interface ReminderResponse {
+  id: string;
+  event_uid: string;
+  reminder_type: string;
+  minutes_before: number;
+  trigger_time: string;
+  status: string;
+}
+
+export const addReminder = async (
+  ncUser: string,
+  ncPass: string,
+  eventUid: string,
+  reminderType: string,
+  minutesBefore: number,
+  calendarId: string = 'personal'
+): Promise<ReminderResponse> => {
+  const response = await api.post(`/calendar/events/${eventUid}/reminders`, {
+    reminder_type: reminderType,
+    minutes_before: minutesBefore,
+  }, {
+    params: { nc_user: ncUser, nc_pass: ncPass, calendar_id: calendarId },
+  });
+  return response.data;
+};
+
+export const getEventReminders = async (
+  ncUser: string,
+  ncPass: string,
+  eventUid: string
+): Promise<ReminderResponse[]> => {
+  const response = await api.get(`/calendar/events/${eventUid}/reminders`, {
+    params: { nc_user: ncUser, nc_pass: ncPass },
+  });
+  return response.data;
+};
+
+export const deleteReminder = async (
+  ncUser: string,
+  ncPass: string,
+  eventUid: string,
+  reminderId: string
+): Promise<void> => {
+  await api.delete(`/calendar/events/${eventUid}/reminders/${reminderId}`, {
+    params: { nc_user: ncUser, nc_pass: ncPass },
+  });
+};
+
+// Search
+export interface SearchResult {
+  query: string;
+  count: number;
+  events: CalendarEvent[];
+}
+
+export const searchEvents = async (
+  ncUser: string,
+  ncPass: string,
+  query: string,
+  start?: string,
+  end?: string,
+  calendarIds?: string[]
+): Promise<SearchResult> => {
+  const response = await api.get('/calendar/search', {
+    params: {
+      nc_user: ncUser,
+      nc_pass: ncPass,
+      query,
+      start,
+      end,
+      calendar_ids: calendarIds?.join(','),
+    },
+  });
+  return response.data;
+};

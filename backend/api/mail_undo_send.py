@@ -72,8 +72,8 @@ class CancelResponse(BaseModel):
 @router.post("", response_model=SendWithUndoResponse)
 @limiter.limit(RateLimits.MAIL_SEND)
 async def send_with_undo(
-    request_obj: Request,
-    request: SendWithUndoRequest,
+    request: Request,
+    send_data: SendWithUndoRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """
@@ -87,23 +87,23 @@ async def send_with_undo(
     user_id = current_user.get("id") or current_user.get("user_id")
 
     # Validate recipients
-    if not request.to:
+    if not send_data.to:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="At least one recipient is required"
         )
 
     # Validate delay
-    delay = min(max(5, request.delay_seconds or DEFAULT_UNDO_DELAY), 120)  # 5-120 seconds
+    delay = min(max(5, send_data.delay_seconds or DEFAULT_UNDO_DELAY), 120)  # 5-120 seconds
 
     # Build email data
     email_data = {
-        "to": request.to,
-        "cc": request.cc or [],
-        "bcc": request.bcc or [],
-        "subject": request.subject,
-        "body": request.body,
-        "is_html": request.is_html if request.is_html is not None else True
+        "to": send_data.to,
+        "cc": send_data.cc or [],
+        "bcc": send_data.bcc or [],
+        "subject": send_data.subject,
+        "body": send_data.body,
+        "is_html": send_data.is_html if send_data.is_html is not None else True
     }
 
     try:
@@ -132,7 +132,7 @@ async def send_with_undo(
 @router.post("/attachments", response_model=SendWithUndoResponse)
 @limiter.limit(RateLimits.MAIL_SEND)
 async def send_with_undo_attachments(
-    request_obj: Request,
+    request: Request,
     to: str = Form(...),
     subject: str = Form(...),
     body: str = Form(...),

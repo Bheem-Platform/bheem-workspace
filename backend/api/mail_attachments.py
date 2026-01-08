@@ -285,13 +285,22 @@ def download_attachment(
         # Set disposition header
         disposition = 'inline' if inline else 'attachment'
 
+        # Build headers for proper PDF/file viewing
+        headers = {
+            'Content-Disposition': f'{disposition}; filename="{filename}"',
+            'Content-Length': str(len(content)),
+            'Accept-Ranges': 'bytes',
+            'Cache-Control': 'private, max-age=3600',
+        }
+
+        # For PDFs, add headers that help with browser viewing
+        if 'pdf' in content_type.lower():
+            headers['X-Content-Type-Options'] = 'nosniff'
+
         return StreamingResponse(
             io.BytesIO(content),
             media_type=content_type,
-            headers={
-                'Content-Disposition': f'{disposition}; filename="{filename}"',
-                'Content-Length': str(len(content))
-            }
+            headers=headers
         )
 
     except HTTPException:

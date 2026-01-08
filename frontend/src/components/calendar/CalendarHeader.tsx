@@ -1,9 +1,14 @@
 import dayjs from 'dayjs';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCalendarStore } from '@/stores/calendarStore';
-import type { CalendarViewType } from '@/types/calendar';
+import CalendarSearchBar from './CalendarSearchBar';
+import type { CalendarViewType, CalendarEvent } from '@/types/calendar';
 
-export default function CalendarHeader() {
+interface CalendarHeaderProps {
+  onEventClick?: (event: CalendarEvent) => void;
+}
+
+export default function CalendarHeader({ onEventClick }: CalendarHeaderProps = {}) {
   const { currentDate, viewType, navigateDate, setViewType } = useCalendarStore();
 
   const getDateRangeText = () => {
@@ -67,23 +72,29 @@ export default function CalendarHeader() {
         </h1>
       </div>
 
-      {/* View Toggle */}
-      <div className="flex items-center bg-gray-100 rounded-lg p-1">
-        {viewOptions.map((option) => (
-          <button
-            key={option.value}
-            onClick={() => setViewType(option.value)}
-            className={`
-              px-4 py-2 text-sm font-medium rounded-md transition-colors
-              ${viewType === option.value
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-600 hover:text-gray-900'
-              }
-            `}
-          >
-            {option.label}
-          </button>
-        ))}
+      {/* Search and View Toggle */}
+      <div className="flex items-center gap-4">
+        {/* Search Bar */}
+        <CalendarSearchBar onEventClick={onEventClick} />
+
+        {/* View Toggle */}
+        <div className="flex items-center bg-gray-100 rounded-lg p-1">
+          {viewOptions.map((option) => (
+            <button
+              key={option.value}
+              onClick={() => setViewType(option.value)}
+              className={`
+                px-4 py-2 text-sm font-medium rounded-md transition-colors
+                ${viewType === option.value
+                  ? 'bg-white text-gray-900 shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+                }
+              `}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
       </div>
     </div>
   );
