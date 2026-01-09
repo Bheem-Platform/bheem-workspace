@@ -99,7 +99,7 @@ export default function FileGrid({ onFileOpen }: FileGridProps) {
                 onSelect={() => toggleFileSelection(file.id)}
                 onClick={() => {
                   if (file.type === 'folder') {
-                    navigateTo(file.path);
+                    navigateTo(file.path, file.id);
                   } else {
                     onFileOpen(file);
                   }
@@ -127,7 +127,7 @@ export default function FileGrid({ onFileOpen }: FileGridProps) {
           onSelect={() => toggleFileSelection(file.id)}
           onClick={() => {
             if (file.type === 'folder') {
-              navigateTo(file.path);
+              navigateTo(file.path, file.id);
             } else {
               onFileOpen(file);
             }

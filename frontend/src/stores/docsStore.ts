@@ -3,10 +3,14 @@ import * as docsApi from '@/lib/docsApi';
 import { useCredentialsStore } from './credentialsStore';
 import type { FileItem, UploadProgress } from '@/types/docs';
 
+// Flag to use V2 API (ERP-based, uses JWT auth) vs Nextcloud API
+const USE_V2_API = true;
+
 interface DocsState {
   // Data
   files: FileItem[];
   currentPath: string;
+  currentFolderId: string | null; // For v2 API folder navigation
   pathHistory: string[];
 
   // Selection
@@ -38,7 +42,7 @@ interface DocsState {
   error: string | null;
 
   // Actions - Files
-  fetchFiles: (path?: string) => Promise<void>;
+  fetchFiles: (path?: string, folderId?: string) => Promise<void>;
   createFolder: (name: string) => Promise<boolean>;
   uploadFiles: (files: File[]) => Promise<void>;
   downloadFile: (file: FileItem) => Promise<void>;
@@ -51,7 +55,7 @@ interface DocsState {
   createShareLink: (path: string, expiresDays?: number) => Promise<string | null>;
 
   // Actions - Navigation
-  navigateTo: (path: string) => void;
+  navigateTo: (path: string, folderId?: string) => void;
   navigateUp: () => void;
   navigateBack: () => void;
 
@@ -84,6 +88,7 @@ interface DocsState {
 const initialState = {
   files: [],
   currentPath: '/',
+  currentFolderId: null as string | null,
   pathHistory: ['/'],
   selectedFiles: [],
   viewMode: 'grid' as const,
@@ -106,31 +111,78 @@ const initialState = {
 export const useDocsStore = create<DocsState>((set, get) => ({
   ...initialState,
 
-  fetchFiles: async (path?: string) => {
-    const credentials = useCredentialsStore.getState().getNextcloudCredentials();
-    if (!credentials) {
-      set({ error: 'Nextcloud credentials not found' });
-      return;
-    }
-
-    const targetPath = path || get().currentPath;
+  fetchFiles: async (path?: string, folderId?: string) => {
     set((state) => ({ loading: { ...state.loading, files: true }, error: null }));
 
     try {
-      const result = await docsApi.listFiles(
-        credentials.username,
-        credentials.password,
-        targetPath
-      );
+      if (USE_V2_API) {
+        // Use v2 API - fetch both folders and documents
+        const targetFolderId = folderId ?? get().currentFolderId;
 
-      // Sort files
-      const { sortBy, sortOrder } = get();
-      const sortedFiles = sortFiles(result.files, sortBy, sortOrder);
+        const [folders, docsResult] = await Promise.all([
+          docsApi.listFoldersV2(targetFolderId || undefined),
+          docsApi.listDocumentsV2({ folderId: targetFolderId || undefined })
+        ]);
 
-      set({
-        files: sortedFiles,
-        currentPath: targetPath,
-      });
+        // Convert folders to FileItem format
+        const folderItems: FileItem[] = folders.map((f) => ({
+          id: f.id,
+          name: f.name,
+          path: f.path,
+          type: 'folder' as const,
+          size: 0,
+          modified: f.created_at || new Date().toISOString(),
+          isShared: false,
+          permissions: 'admin' as const,
+          isFavorite: false,
+        }));
+
+        // Convert documents to FileItem format
+        const docItems: FileItem[] = docsResult.documents.map((d) => ({
+          id: d.id,
+          name: d.title || d.file_name,
+          path: `/${d.file_name}`,
+          type: 'file' as const,
+          size: d.file_size,
+          modified: d.updated_at || d.created_at || new Date().toISOString(),
+          mimeType: d.mime_type,
+          isShared: false,
+          permissions: 'admin' as const,
+          isFavorite: false,
+        }));
+
+        const allFiles = [...folderItems, ...docItems];
+        const { sortBy, sortOrder } = get();
+        const sortedFiles = sortFiles(allFiles, sortBy, sortOrder);
+
+        set({
+          files: sortedFiles,
+          currentFolderId: targetFolderId,
+          currentPath: path || '/',
+        });
+      } else {
+        // Legacy Nextcloud API
+        const credentials = useCredentialsStore.getState().getNextcloudCredentials();
+        if (!credentials) {
+          set({ error: 'Nextcloud credentials not found' });
+          return;
+        }
+
+        const targetPath = path || get().currentPath;
+        const result = await docsApi.listFiles(
+          credentials.username,
+          credentials.password,
+          targetPath
+        );
+
+        const { sortBy, sortOrder } = get();
+        const sortedFiles = sortFiles(result.files, sortBy, sortOrder);
+
+        set({
+          files: sortedFiles,
+          currentPath: targetPath,
+        });
+      }
     } catch (error: any) {
       set({ error: error.response?.data?.detail || 'Failed to fetch files' });
     } finally {
@@ -139,18 +191,27 @@ export const useDocsStore = create<DocsState>((set, get) => ({
   },
 
   createFolder: async (name: string) => {
-    const credentials = useCredentialsStore.getState().getNextcloudCredentials();
-    if (!credentials) return false;
-
     set((state) => ({ loading: { ...state.loading, action: true }, error: null }));
 
     try {
-      await docsApi.createFolder(
-        credentials.username,
-        credentials.password,
-        get().currentPath,
-        name
-      );
+      if (USE_V2_API) {
+        // Use v2 API with JWT auth
+        const { currentFolderId } = get();
+        await docsApi.createFolderV2(name, currentFolderId || undefined);
+      } else {
+        // Legacy Nextcloud API
+        const credentials = useCredentialsStore.getState().getNextcloudCredentials();
+        if (!credentials) {
+          set({ error: 'Nextcloud credentials not found' });
+          return false;
+        }
+        await docsApi.createFolder(
+          credentials.username,
+          credentials.password,
+          get().currentPath,
+          name
+        );
+      }
 
       await get().fetchFiles();
       set({ isCreateFolderModalOpen: false });
@@ -164,9 +225,6 @@ export const useDocsStore = create<DocsState>((set, get) => ({
   },
 
   uploadFiles: async (files: File[]) => {
-    const credentials = useCredentialsStore.getState().getNextcloudCredentials();
-    if (!credentials) return;
-
     set({ isUploading: true });
 
     // Add files to upload queue
@@ -189,19 +247,40 @@ export const useDocsStore = create<DocsState>((set, get) => ({
       }));
 
       try {
-        await docsApi.uploadFile(
-          credentials.username,
-          credentials.password,
-          get().currentPath,
-          file,
-          (progress) => {
-            set((state) => ({
-              uploadQueue: state.uploadQueue.map((item, idx) =>
-                idx === i ? { ...item, progress } : item
-              ),
-            }));
+        if (USE_V2_API) {
+          // Use v2 API with JWT auth
+          const { currentFolderId } = get();
+          await docsApi.uploadDocumentV2(
+            file,
+            { folderId: currentFolderId || undefined },
+            (progress) => {
+              set((state) => ({
+                uploadQueue: state.uploadQueue.map((item, idx) =>
+                  idx === i ? { ...item, progress } : item
+                ),
+              }));
+            }
+          );
+        } else {
+          // Legacy Nextcloud API
+          const credentials = useCredentialsStore.getState().getNextcloudCredentials();
+          if (!credentials) {
+            throw new Error('Nextcloud credentials not found');
           }
-        );
+          await docsApi.uploadFile(
+            credentials.username,
+            credentials.password,
+            get().currentPath,
+            file,
+            (progress) => {
+              set((state) => ({
+                uploadQueue: state.uploadQueue.map((item, idx) =>
+                  idx === i ? { ...item, progress } : item
+                ),
+              }));
+            }
+          );
+        }
 
         set((state) => ({
           uploadQueue: state.uploadQueue.map((item, idx) =>
@@ -227,15 +306,25 @@ export const useDocsStore = create<DocsState>((set, get) => ({
   },
 
   downloadFile: async (file: FileItem) => {
-    const credentials = useCredentialsStore.getState().getNextcloudCredentials();
-    if (!credentials) return;
-
     try {
-      const blob = await docsApi.downloadFile(
-        credentials.username,
-        credentials.password,
-        file.path
-      );
+      let blob: Blob;
+
+      if (USE_V2_API) {
+        // Use v2 API with JWT auth
+        blob = await docsApi.downloadDocumentV2(file.id);
+      } else {
+        // Legacy Nextcloud API
+        const credentials = useCredentialsStore.getState().getNextcloudCredentials();
+        if (!credentials) {
+          set({ error: 'Nextcloud credentials not found' });
+          return;
+        }
+        blob = await docsApi.downloadFile(
+          credentials.username,
+          credentials.password,
+          file.path
+        );
+      }
 
       // Create download link
       const url = window.URL.createObjectURL(blob);
@@ -251,15 +340,31 @@ export const useDocsStore = create<DocsState>((set, get) => ({
     }
   },
 
-  deleteFiles: async (paths: string[]) => {
-    const credentials = useCredentialsStore.getState().getNextcloudCredentials();
-    if (!credentials) return false;
-
+  deleteFiles: async (pathsOrIds: string[]) => {
     set((state) => ({ loading: { ...state.loading, action: true }, error: null }));
 
     try {
-      for (const path of paths) {
-        await docsApi.deleteFile(credentials.username, credentials.password, path);
+      if (USE_V2_API) {
+        // Use v2 API - pathsOrIds are actually file/folder IDs
+        const { files } = get();
+        for (const id of pathsOrIds) {
+          const file = files.find(f => f.id === id);
+          if (file?.type === 'folder') {
+            await docsApi.deleteFolderV2(id);
+          } else {
+            await docsApi.deleteDocumentV2(id);
+          }
+        }
+      } else {
+        // Legacy Nextcloud API
+        const credentials = useCredentialsStore.getState().getNextcloudCredentials();
+        if (!credentials) {
+          set({ error: 'Nextcloud credentials not found' });
+          return false;
+        }
+        for (const path of pathsOrIds) {
+          await docsApi.deleteFile(credentials.username, credentials.password, path);
+        }
       }
 
       await get().fetchFiles();
@@ -341,13 +446,14 @@ export const useDocsStore = create<DocsState>((set, get) => ({
     }
   },
 
-  navigateTo: (path: string) => {
+  navigateTo: (path: string, folderId?: string) => {
     set((state) => ({
       currentPath: path,
+      currentFolderId: folderId || null,
       pathHistory: [...state.pathHistory, path],
       selectedFiles: [],
     }));
-    get().fetchFiles(path);
+    get().fetchFiles(path, folderId);
   },
 
   navigateUp: () => {

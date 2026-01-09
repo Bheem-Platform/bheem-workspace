@@ -42,52 +42,80 @@ class UserWorkspaceService:
     async def get_user_workspace(
         self,
         db: AsyncSession,
-        user_id: str
+        user_id: str,
+        current_user: Dict = None
     ) -> Dict[str, Any]:
         """
         Get all workspace resources for a user
         Returns: email config, file access, meeting rooms, calendar
         """
-        # Get user from ERP
-        result = await db.execute(text("""
-            SELECT u.id, u.username, u.email, u.company_id, u.role,
-                   p.first_name, p.last_name, c.name as company_name, c.domain
-            FROM auth.users u
-            LEFT JOIN contact_management.persons p ON u.person_id = p.id
-            LEFT JOIN public.companies c ON u.company_id = c.id
-            WHERE u.id = :user_id AND u.is_active = true
-        """), {"user_id": user_id})
+        user = None
+        email = None
 
-        user = result.fetchone()
-        if not user:
-            return None
+        # Try to get user from ERP database (auth.users)
+        # Note: auth.users may not exist in this database - skip if not available
+        try:
+            result = await db.execute(text("""
+                SELECT u.id, u.username, u.email, u.company_id, u.role,
+                       p.first_name, p.last_name, c.name as company_name, c.domain
+                FROM auth.users u
+                LEFT JOIN contact_management.persons p ON u.person_id = p.id
+                LEFT JOIN public.companies c ON u.company_id = c.id
+                WHERE u.id = :user_id AND u.is_active = true
+            """), {"user_id": user_id})
+            user = result.fetchone()
+            if user:
+                email = self._get_user_email(user._asdict())
+        except Exception as e:
+            # Database query failed - table might not exist
+            # IMPORTANT: Rollback to clear failed transaction state
+            print(f"[UserWorkspace] Database query failed (auth.users not in this db): {e}")
+            await db.rollback()
+            user = None
 
-        email = self._get_user_email(user._asdict())
+        # If database query failed, use current_user from JWT token
+        if not user and current_user:
+            email = current_user.get('email') or current_user.get('username')
+            if email and '@' not in email:
+                email = None
 
         # Also get workspace role from TenantUser (if user belongs to a workspace)
         workspace_role = None
         tenant_info = None
         try:
+            print(f"[UserWorkspace] Looking up tenant_user for user_id: {user_id}, email: {email}")
+            # Query includes tenant owner check - if user's email matches owner_email, treat as admin
             tenant_result = await db.execute(text("""
-                SELECT tu.role, tu.tenant_id, t.name as tenant_name, t.slug as tenant_slug
+                SELECT tu.role, tu.tenant_id, t.name as tenant_name, t.slug as tenant_slug, t.owner_email,
+                       CASE WHEN LOWER(tu.email) = LOWER(t.owner_email) OR LOWER(:user_email) = LOWER(t.owner_email)
+                            THEN 'admin'
+                            ELSE tu.role
+                       END as effective_role
                 FROM workspace.tenant_users tu
                 JOIN workspace.tenants t ON tu.tenant_id = t.id
                 WHERE tu.user_id = :user_id AND tu.is_active = true
                 LIMIT 1
-            """), {"user_id": user_id})
+            """), {"user_id": user_id, "user_email": email or ""})
             tenant_user = tenant_result.fetchone()
+            print(f"[UserWorkspace] tenant_user result: {tenant_user}")
             if tenant_user:
-                workspace_role = tenant_user.role
+                # Use effective_role which considers owner_email match
+                workspace_role = tenant_user.effective_role
                 tenant_info = {
                     "id": str(tenant_user.tenant_id),
                     "name": tenant_user.tenant_name,
                     "slug": tenant_user.tenant_slug
                 }
-        except Exception:
+                print(f"[UserWorkspace] Found workspace_role: {workspace_role} (db role: {tenant_user.role}), tenant: {tenant_info}")
+            else:
+                print(f"[UserWorkspace] No tenant_user found for user_id: {user_id}")
+        except Exception as e:
+            print(f"[UserWorkspace] Error looking up tenant_user: {e}")
             pass  # Workspace tables might not exist
 
-        return {
-            "user": {
+        # Build user info from database or JWT token
+        if user:
+            user_info = {
                 "id": str(user.id),
                 "username": user.username,
                 "email": email,
@@ -97,7 +125,26 @@ class UserWorkspaceService:
                 "role": user.role,
                 "workspace_role": workspace_role,
                 "tenant": tenant_info
-            },
+            }
+            user_role = user.role
+        elif current_user:
+            user_info = {
+                "id": str(current_user.get("id", current_user.get("user_id", ""))),
+                "username": current_user.get("username", ""),
+                "email": email,
+                "name": current_user.get("username", "User"),
+                "company": current_user.get("company_code", ""),
+                "company_domain": None,
+                "role": current_user.get("role", "User"),
+                "workspace_role": workspace_role,
+                "tenant": tenant_info
+            }
+            user_role = current_user.get("role", "User")
+        else:
+            return None
+
+        return {
+            "user": user_info,
             "workspace": {
                 "email": {
                     "enabled": email is not None,
@@ -121,7 +168,7 @@ class UserWorkspaceService:
                 },
                 "meetings": {
                     "enabled": True,
-                    "can_create": user.role in ['SuperAdmin', 'Admin', 'Manager', 'Employee'],
+                    "can_create": user_role in ['SuperAdmin', 'Admin', 'Manager', 'Employee'],
                     "server_url": "wss://meet.bheem.cloud"
                 }
             }

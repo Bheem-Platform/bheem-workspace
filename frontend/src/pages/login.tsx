@@ -15,6 +15,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false); // Flag to prevent auto-redirect during login
 
   // Login form
   const [loginData, setLoginData] = useState({
@@ -42,17 +43,18 @@ export default function LoginPage() {
     }
   }, [selectedPlan]);
 
-  // If already authenticated, redirect
+  // If already authenticated (and not currently logging in), redirect
   useEffect(() => {
-    if (!isLoading && isAuthenticated) {
+    if (!isLoading && isAuthenticated && !isLoggingIn) {
       router.push(redirectTo || '/dashboard');
     }
-  }, [isAuthenticated, isLoading, router, redirectTo]);
+  }, [isAuthenticated, isLoading, router, redirectTo, isLoggingIn]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
+    setIsLoggingIn(true); // Prevent auto-redirect while we calculate the correct destination
 
     try {
       // Login via Bheem Passport (through backend)
@@ -62,7 +64,6 @@ export default function LoginPage() {
       });
 
       const { access_token, user } = response.data;
-      setAuth(access_token, user);
 
       // Determine redirect based on user role
       // SuperAdmin goes to super-admin panel
@@ -91,6 +92,9 @@ export default function LoginPage() {
 
       // Use redirect param if specified, otherwise use role-based redirect
       const finalRedirect = redirectTo || targetUrl;
+
+      // Now set auth state and redirect
+      setAuth(access_token, user);
       router.push(finalRedirect);
     } catch (err: any) {
       console.error('Login error:', err);
@@ -104,6 +108,7 @@ export default function LoginPage() {
       } else {
         setError('Unable to connect to authentication service');
       }
+      setIsLoggingIn(false); // Reset flag on error
     } finally {
       setLoading(false);
     }

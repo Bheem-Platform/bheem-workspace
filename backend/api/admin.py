@@ -793,6 +793,44 @@ async def add_tenant_user(
         temp_password=result.temp_password  # Show temp password only on creation
     )
 
+
+@router.get("/tenants/{tenant_id}/users/{user_id}", response_model=UserResponse)
+async def get_tenant_user(
+    tenant_id: str,
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get a specific user in tenant"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
+    result = await db.execute(
+        select(TenantUser).where(
+            and_(
+                TenantUser.tenant_id == resolved_id,
+                TenantUser.user_id == uuid.UUID(user_id)
+            )
+        )
+    )
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found in tenant")
+
+    return UserResponse(
+        id=str(user.id),
+        tenant_id=str(user.tenant_id),
+        user_id=str(user.user_id),
+        email=user.email,
+        display_name=user.display_name,
+        role=user.role,
+        is_active=user.is_active,
+        permissions=user.permissions or {},
+        invited_at=user.invited_at,
+        joined_at=user.joined_at,
+        created_at=user.created_at
+    )
+
+
 @router.patch("/tenants/{tenant_id}/users/{user_id}", response_model=UserResponse)
 async def update_tenant_user(
     tenant_id: str,
@@ -1307,6 +1345,105 @@ async def verify_domain(
 
     return verification_results
 
+
+@router.get("/tenants/{tenant_id}/domains/{domain_id}")
+async def get_domain(
+    tenant_id: str,
+    domain_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get a specific domain details"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
+    result = await db.execute(
+        select(Domain).where(
+            and_(
+                Domain.id == uuid.UUID(domain_id),
+                Domain.tenant_id == resolved_id
+            )
+        )
+    )
+    domain = result.scalar_one_or_none()
+
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+
+    return DomainResponse(
+        id=str(domain.id),
+        tenant_id=str(domain.tenant_id),
+        domain=domain.domain,
+        domain_type=domain.domain_type,
+        is_primary=domain.is_primary,
+        is_active=domain.is_active,
+        verification_token=domain.verification_token,
+        txt_verified=domain.txt_verified,
+        mx_verified=domain.mx_verified,
+        spf_verified=domain.spf_verified,
+        dkim_verified=domain.dkim_verified,
+        verified_at=domain.verified_at,
+        created_at=domain.created_at
+    )
+
+
+@router.patch("/tenants/{tenant_id}/domains/{domain_id}")
+async def update_domain(
+    tenant_id: str,
+    domain_id: str,
+    is_primary: bool = None,
+    is_active: bool = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin())
+):
+    """Update domain settings (Admin or SuperAdmin)"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
+    result = await db.execute(
+        select(Domain).where(
+            and_(
+                Domain.id == uuid.UUID(domain_id),
+                Domain.tenant_id == resolved_id
+            )
+        )
+    )
+    domain = result.scalar_one_or_none()
+
+    if not domain:
+        raise HTTPException(status_code=404, detail="Domain not found")
+
+    if is_primary is not None:
+        if is_primary:
+            # Unset primary from other domains first
+            await db.execute(
+                Domain.__table__.update().where(
+                    and_(
+                        Domain.tenant_id == resolved_id,
+                        Domain.id != domain.id
+                    )
+                ).values(is_primary=False)
+            )
+        domain.is_primary = is_primary
+
+    if is_active is not None:
+        domain.is_active = is_active
+
+    await db.commit()
+
+    await log_activity(
+        db,
+        action="domain_updated",
+        tenant_id=str(resolved_id),
+        entity_type="domain",
+        description=f"Updated domain: {domain.domain}"
+    )
+
+    return {
+        "message": "Domain updated successfully",
+        "id": str(domain.id),
+        "domain": domain.domain,
+        "is_primary": domain.is_primary,
+        "is_active": domain.is_active
+    }
+
+
 @router.delete("/tenants/{tenant_id}/domains/{domain_id}")
 async def remove_domain(
     tenant_id: str,
@@ -1346,7 +1483,10 @@ async def list_mail_domains(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """List mail domains from Mailcow (requires authentication)"""
+    """List mail domains from Mailcow with fallback to database domains"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
+
+    # Try to get domains from Mailcow first
     raw_domains = await mailcow_service.get_domains()
 
     def safe_int(val, default=0):
@@ -1371,6 +1511,32 @@ async def list_mail_domains(
                 "max_mailboxes": safe_int(d.get("max_num_mboxes_for_domain", 0)),
                 "quota_mb": max_quota / (1024 * 1024) if max_quota else 0,
                 "used_quota_mb": bytes_total / (1024 * 1024) if bytes_total else 0,
+            })
+
+    # If Mailcow returned empty, fallback to database domains (verified email domains)
+    if not domains:
+        db_result = await db.execute(
+            select(Domain).where(
+                and_(
+                    Domain.tenant_id == resolved_id,
+                    Domain.domain_type == "email",
+                    Domain.is_active == True
+                )
+            )
+        )
+        db_domains = db_result.scalars().all()
+
+        for d in db_domains:
+            domains.append({
+                "id": str(d.id),
+                "domain": d.domain,
+                "is_active": d.is_active,
+                "mailboxes": 0,  # Unknown without Mailcow
+                "max_mailboxes": 100,  # Default
+                "quota_mb": 10240,  # Default 10GB
+                "used_quota_mb": 0,
+                "source": "database",  # Indicate fallback source
+                "note": "Mailcow API unavailable - using database record"
             })
 
     return domains
@@ -1467,6 +1633,19 @@ async def delete_mailbox(
     # Resolve tenant_id (supports UUID or slug)
     resolved_id = await resolve_tenant_id(tenant_id, db)
 
+    # Actually delete the mailbox from Mailcow
+    try:
+        result = await mailcow_service.delete_mailbox(email)
+        if not result or (isinstance(result, dict) and result.get("type") == "error"):
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to delete mailbox from mail server: {result.get('msg', 'Unknown error')}"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete mailbox: {str(e)}")
+
     await log_activity(
         db,
         action="mailbox_deleted",
@@ -1475,7 +1654,69 @@ async def delete_mailbox(
         description=f"Deleted mailbox: {email}"
     )
 
-    return {"message": "Mailbox deleted", "email": email}
+    return {"message": "Mailbox deleted successfully", "email": email}
+
+
+@router.get("/tenants/{tenant_id}/mail/mailboxes/{email}")
+async def get_mailbox(
+    tenant_id: str,
+    email: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Get a specific mailbox details"""
+    await resolve_tenant_id(tenant_id, db)
+
+    mailbox_info = await mailcow_service.get_mailbox_info(email)
+    if not mailbox_info:
+        raise HTTPException(status_code=404, detail="Mailbox not found")
+
+    return {
+        "email": email,
+        "name": mailbox_info.get("name", ""),
+        "quota_mb": mailbox_info.get("quota", 0) // (1024 * 1024) if mailbox_info.get("quota") else 0,
+        "quota_used_mb": mailbox_info.get("quota_used", 0) // (1024 * 1024) if mailbox_info.get("quota_used") else 0,
+        "messages": mailbox_info.get("messages", 0),
+        "active": mailbox_info.get("active", False),
+        "created": mailbox_info.get("created", None),
+        "modified": mailbox_info.get("modified", None)
+    }
+
+
+@router.patch("/tenants/{tenant_id}/mail/mailboxes/{email}")
+async def update_mailbox(
+    tenant_id: str,
+    email: str,
+    name: str = None,
+    quota_mb: int = None,
+    active: bool = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_admin())
+):
+    """Update mailbox settings (Admin or SuperAdmin)"""
+    resolved_id = await resolve_tenant_id(tenant_id, db)
+
+    if name is None and quota_mb is None and active is None:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    try:
+        result = await mailcow_service.update_mailbox(email, name=name, quota_mb=quota_mb, active=active)
+        if isinstance(result, dict) and result.get("type") == "error":
+            raise HTTPException(status_code=500, detail=result.get("msg", "Update failed"))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update mailbox: {str(e)}")
+
+    await log_activity(
+        db,
+        action="mailbox_updated",
+        tenant_id=str(resolved_id),
+        entity_type="mailbox",
+        description=f"Updated mailbox: {email}"
+    )
+
+    return {"message": "Mailbox updated successfully", "email": email}
 
 @router.get("/tenants/{tenant_id}/mail/stats")
 async def get_mail_stats(
@@ -1728,6 +1969,192 @@ async def grant_project_access(
         "access_level": access.access_level
     }
 
+
+@router.get("/developers/{developer_id}")
+async def get_developer(
+    developer_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_superadmin())
+):
+    """Get a specific developer's details (SuperAdmin only)"""
+    dev_result = await db.execute(
+        select(Developer).where(Developer.id == uuid.UUID(developer_id))
+    )
+    developer = dev_result.scalar_one_or_none()
+
+    if not developer:
+        raise HTTPException(status_code=404, detail="Developer not found")
+
+    # Get developer's projects
+    projects_result = await db.execute(
+        select(DeveloperProject).where(DeveloperProject.developer_id == developer.id)
+    )
+    projects = projects_result.scalars().all()
+
+    return {
+        "id": str(developer.id),
+        "name": developer.name,
+        "email": developer.email,
+        "company": developer.company,
+        "website": developer.website,
+        "api_key": developer.api_key,
+        "is_active": developer.is_active,
+        "created_at": developer.created_at.isoformat() if developer.created_at else None,
+        "projects": [
+            {
+                "id": str(p.id),
+                "project_name": p.project_name,
+                "access_level": p.access_level,
+                "git_branch_pattern": p.git_branch_pattern,
+                "can_push_to_main": p.can_push_to_main,
+                "can_deploy_staging": p.can_deploy_staging,
+                "can_deploy_production": p.can_deploy_production,
+                "created_at": p.created_at.isoformat() if p.created_at else None
+            }
+            for p in projects
+        ]
+    }
+
+
+@router.patch("/developers/{developer_id}")
+async def update_developer(
+    developer_id: str,
+    name: str = None,
+    email: str = None,
+    company: str = None,
+    website: str = None,
+    is_active: bool = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_superadmin())
+):
+    """Update developer details (SuperAdmin only)"""
+    dev_result = await db.execute(
+        select(Developer).where(Developer.id == uuid.UUID(developer_id))
+    )
+    developer = dev_result.scalar_one_or_none()
+
+    if not developer:
+        raise HTTPException(status_code=404, detail="Developer not found")
+
+    if name is not None:
+        developer.name = name
+    if email is not None:
+        developer.email = email
+    if company is not None:
+        developer.company = company
+    if website is not None:
+        developer.website = website
+    if is_active is not None:
+        developer.is_active = is_active
+
+    await db.commit()
+
+    return {
+        "message": "Developer updated successfully",
+        "id": str(developer.id),
+        "name": developer.name,
+        "email": developer.email,
+        "company": developer.company,
+        "is_active": developer.is_active
+    }
+
+
+@router.delete("/developers/{developer_id}")
+async def delete_developer(
+    developer_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_superadmin())
+):
+    """Delete a developer (SuperAdmin only)"""
+    dev_result = await db.execute(
+        select(Developer).where(Developer.id == uuid.UUID(developer_id))
+    )
+    developer = dev_result.scalar_one_or_none()
+
+    if not developer:
+        raise HTTPException(status_code=404, detail="Developer not found")
+
+    # Delete developer's projects first
+    await db.execute(
+        DeveloperProject.__table__.delete().where(DeveloperProject.developer_id == developer.id)
+    )
+
+    # Delete the developer
+    await db.delete(developer)
+    await db.commit()
+
+    return {"message": "Developer deleted successfully", "id": developer_id}
+
+
+@router.post("/developers/{developer_id}/regenerate-key")
+async def regenerate_developer_api_key(
+    developer_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_superadmin())
+):
+    """Regenerate API key for a developer (SuperAdmin only)"""
+    import secrets
+
+    dev_result = await db.execute(
+        select(Developer).where(Developer.id == uuid.UUID(developer_id))
+    )
+    developer = dev_result.scalar_one_or_none()
+
+    if not developer:
+        raise HTTPException(status_code=404, detail="Developer not found")
+
+    # Generate new API key
+    new_api_key = f"bw_{secrets.token_urlsafe(32)}"
+    developer.api_key = new_api_key
+
+    await db.commit()
+
+    return {
+        "message": "API key regenerated successfully",
+        "id": str(developer.id),
+        "api_key": new_api_key
+    }
+
+
+@router.get("/developers/{developer_id}/projects")
+async def list_developer_projects(
+    developer_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_superadmin())
+):
+    """List all projects for a developer (SuperAdmin only)"""
+    dev_result = await db.execute(
+        select(Developer).where(Developer.id == uuid.UUID(developer_id))
+    )
+    developer = dev_result.scalar_one_or_none()
+
+    if not developer:
+        raise HTTPException(status_code=404, detail="Developer not found")
+
+    projects_result = await db.execute(
+        select(DeveloperProject).where(DeveloperProject.developer_id == developer.id)
+    )
+    projects = projects_result.scalars().all()
+
+    return {
+        "developer_id": developer_id,
+        "developer_name": developer.name,
+        "projects": [
+            {
+                "id": str(p.id),
+                "project_name": p.project_name,
+                "access_level": p.access_level,
+                "git_branch_pattern": p.git_branch_pattern,
+                "can_push_to_main": p.can_push_to_main,
+                "can_deploy_staging": p.can_deploy_staging,
+                "can_deploy_production": p.can_deploy_production,
+                "created_at": p.created_at.isoformat() if p.created_at else None
+            }
+            for p in projects
+        ]
+    }
+
+
 # ==================== ACTIVITY LOG ENDPOINTS ====================
 
 @router.get("/tenants/{tenant_id}/activity", response_model=List[ActivityLogResponse])
@@ -1737,6 +2164,8 @@ async def get_activity_log(
     current_user: dict = Depends(get_current_user),
     user_id: Optional[str] = None,
     action: Optional[str] = None,
+    from_date: Optional[datetime] = None,
+    to_date: Optional[datetime] = None,
     limit: int = Query(50, ge=1, le=200)
 ):
     """Get activity log for tenant (requires authentication)"""
@@ -1749,6 +2178,10 @@ async def get_activity_log(
         query = query.where(ActivityLogModel.user_id == uuid.UUID(user_id))
     if action:
         query = query.where(ActivityLogModel.action == action)
+    if from_date:
+        query = query.where(ActivityLogModel.created_at >= from_date)
+    if to_date:
+        query = query.where(ActivityLogModel.created_at <= to_date)
 
     query = query.order_by(ActivityLogModel.created_at.desc()).limit(limit)
 

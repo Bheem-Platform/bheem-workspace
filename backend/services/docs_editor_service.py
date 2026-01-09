@@ -263,30 +263,36 @@ class DocsEditorService:
             # Generate HTML for search
             html_content = self.export_service.tiptap_to_html(content)
 
+            content_json = json.dumps(content)
+            file_size = len(content_json.encode('utf-8'))
+            doc_id = str(uuid4())
+            storage_bucket = 'bheem-dms'
+            storage_path = f"bheem-docs/{str(company_id) if company_id else 'shared'}/{doc_id}.bdoc"
+
             cur.execute("""
                 INSERT INTO dms.documents (
-                    title, description, document_type, status,
-                    file_name, file_extension, mime_type,
-                    company_id, tenant_id, folder_id,
+                    id, title, description, document_type, status,
+                    file_name, file_extension, file_size, mime_type,
+                    storage_bucket, storage_path, company_id, folder_id,
                     editor_content, editor_content_html, is_editable,
                     created_by, last_edited_by, last_edited_at,
                     created_at, updated_at, is_active
                 ) VALUES (
-                    %s, %s, %s::dms.documenttype, 'ACTIVE'::dms.documentstatus,
-                    %s, 'bdoc', 'application/json',
-                    %s, %s, %s,
+                    %s, %s, %s, %s::dms.documenttype, 'ACTIVE'::dms.documentstatus,
+                    %s, 'bdoc', %s, 'application/json',
+                    %s, %s, %s, %s,
                     %s, %s, true,
                     %s, %s, NOW(),
                     NOW(), NOW(), true
                 )
                 RETURNING *
             """, (
-                title, description, document_type,
-                f"{title}.bdoc",
+                doc_id, title, description, document_type,
+                f"{title}.bdoc", file_size,
+                storage_bucket, storage_path,
                 str(company_id) if company_id else None,
-                str(tenant_id) if tenant_id else None,
                 str(folder_id) if folder_id else None,
-                json.dumps(content), html_content,
+                content_json, html_content,
                 str(created_by), str(created_by)
             ))
 

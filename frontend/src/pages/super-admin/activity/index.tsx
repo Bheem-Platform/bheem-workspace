@@ -30,10 +30,12 @@ export default function PlatformActivityPage() {
     if (selectedTenant) {
       fetchActivityLogs(selectedTenant, {
         action: actionFilter || undefined,
+        from_date: dateRange.from || undefined,
+        to_date: dateRange.to || undefined,
         limit: 50,
       });
     }
-  }, [selectedTenant, actionFilter, fetchActivityLogs]);
+  }, [selectedTenant, actionFilter, dateRange.from, dateRange.to, fetchActivityLogs]);
 
   return (
     <AdminLayout

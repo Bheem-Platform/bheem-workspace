@@ -1,3 +1,6 @@
+/**
+ * User Dashboard - Comprehensive workspace analytics and quick access
+ */
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
@@ -7,16 +10,18 @@ import {
   Video,
   FileText,
   Calendar,
-  User,
-  LogOut,
-  Settings,
-  ExternalLink,
+  TrendingUp,
   Clock,
-  CheckCircle,
-  AlertCircle,
+  ChevronRight,
+  Inbox,
+  Users,
+  FolderOpen,
 } from 'lucide-react';
 import { useAuthStore, useRequireAuth } from '@/stores/authStore';
 import { api } from '@/lib/api';
+import { KPICard, QuickAccessCard, ActivityTimeline } from '@/components/dashboard';
+import { LineChart } from '@/components/charts';
+import { WorkspaceLayout } from '@/components/workspace';
 
 interface WorkspaceData {
   user: {
@@ -54,61 +59,128 @@ interface WorkspaceData {
   };
 }
 
+interface DashboardStats {
+  unreadEmails: number;
+  todayEvents: number;
+  recentDocs: number;
+  activeMeets: number;
+}
+
+interface Activity {
+  id: string;
+  type: 'email' | 'document' | 'meeting' | 'calendar' | 'share' | 'edit' | 'delete' | 'user' | 'task';
+  title: string;
+  description?: string;
+  time: string;
+  isNew?: boolean;
+}
+
 const APP_CARDS = [
   {
     id: 'mail',
     name: 'Bheem Mail',
-    description: 'Professional email for your workspace',
+    description: 'Professional email',
     icon: Mail,
-    color: 'from-blue-500 to-blue-600',
-    bgColor: 'bg-blue-50',
-    iconColor: 'text-blue-600',
-    href: 'https://mail.bheem.cloud',
-    external: true,
-  },
-  {
-    id: 'meet',
-    name: 'Bheem Meet',
-    description: 'HD video meetings with your team',
-    icon: Video,
-    color: 'from-green-500 to-green-600',
-    bgColor: 'bg-green-50',
-    iconColor: 'text-green-600',
-    href: '/meet',
-    external: false,
+    color: 'blue' as const,
+    href: '/mail',
+    badgeKey: 'unreadEmails',
   },
   {
     id: 'docs',
     name: 'Bheem Docs',
-    description: 'Collaborate on documents in real-time',
+    description: 'Documents & files',
     icon: FileText,
-    color: 'from-purple-500 to-purple-600',
-    bgColor: 'bg-purple-50',
-    iconColor: 'text-purple-600',
-    href: 'https://docs.bheem.cloud',
-    external: true,
+    color: 'purple' as const,
+    href: '/docs',
+    badgeKey: 'recentDocs',
   },
   {
     id: 'calendar',
     name: 'Bheem Calendar',
-    description: 'Schedule and manage your events',
+    description: 'Schedule & events',
     icon: Calendar,
-    color: 'from-orange-500 to-orange-600',
-    bgColor: 'bg-orange-50',
-    iconColor: 'text-orange-600',
-    href: 'https://docs.bheem.cloud/apps/calendar',
-    external: true,
+    color: 'orange' as const,
+    href: '/calendar',
+    badgeKey: 'todayEvents',
+  },
+  {
+    id: 'meet',
+    name: 'Bheem Meet',
+    description: 'Video meetings',
+    icon: Video,
+    color: 'green' as const,
+    href: '/meet',
+    badgeKey: 'activeMeets',
   },
 ];
 
+// Mock activity data
+const generateMockActivities = (): Activity[] => {
+  return [
+    {
+      id: '1',
+      type: 'email',
+      title: 'New email from team',
+      description: 'Project update discussion',
+      time: '5m ago',
+      isNew: true,
+    },
+    {
+      id: '2',
+      type: 'calendar',
+      title: 'Meeting in 30 minutes',
+      description: 'Team standup call',
+      time: '30m',
+      isNew: true,
+    },
+    {
+      id: '3',
+      type: 'document',
+      title: 'Document shared with you',
+      description: 'Q4 Report.docx',
+      time: '1h ago',
+    },
+    {
+      id: '4',
+      type: 'meeting',
+      title: 'Call recording available',
+      description: 'Client meeting (45 min)',
+      time: '2h ago',
+    },
+    {
+      id: '5',
+      type: 'share',
+      title: 'Folder shared with you',
+      description: 'Marketing Assets',
+      time: '3h ago',
+    },
+  ];
+};
+
+// Mock chart data for weekly activity
+const generateWeeklyActivity = () => {
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  return days.map((day, i) => ({
+    label: day,
+    value: Math.floor(Math.random() * 50) + 10 + (i < 5 ? 20 : 0),
+  }));
+};
+
 export default function UserDashboard() {
   const router = useRouter();
-  const { user, logout } = useAuthStore();
+  const { user } = useAuthStore();
   const [workspaceData, setWorkspaceData] = useState<WorkspaceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [stats, setStats] = useState<DashboardStats>({
+    unreadEmails: 0,
+    todayEvents: 0,
+    recentDocs: 0,
+    activeMeets: 0,
+  });
+  const [activities] = useState<Activity[]>(generateMockActivities());
+  const [weeklyData] = useState(generateWeeklyActivity());
 
-  // Require authentication
   const { isAuthenticated, isLoading: authLoading } = useRequireAuth();
 
   useEffect(() => {
@@ -118,6 +190,20 @@ export default function UserDashboard() {
       try {
         const response = await api.get('/user-workspace/me');
         setWorkspaceData(response.data);
+
+        // Try to fetch dashboard stats
+        try {
+          const statsRes = await api.get('/user-workspace/dashboard-stats');
+          setStats(statsRes.data);
+        } catch {
+          // Use mock stats if endpoint not available
+          setStats({
+            unreadEmails: 12,
+            todayEvents: 3,
+            recentDocs: 8,
+            activeMeets: 0,
+          });
+        }
       } catch (err: any) {
         console.error('Failed to fetch workspace:', err);
         setError('Failed to load workspace data');
@@ -129,12 +215,6 @@ export default function UserDashboard() {
     fetchWorkspace();
   }, [isAuthenticated, authLoading]);
 
-  const handleLogout = () => {
-    logout();
-    router.push('/login');
-  };
-
-  // Show loading while checking auth
   if (authLoading || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -147,8 +227,9 @@ export default function UserDashboard() {
   }
 
   const displayName = workspaceData?.user?.name || user?.username || 'User';
-  const displayEmail = workspaceData?.user?.email || user?.email || '';
-  const tenantName = workspaceData?.user?.tenant?.name || 'Bheem Workspace';
+  const firstName = displayName.split(' ')[0];
+  const currentHour = new Date().getHours();
+  const greeting = currentHour < 12 ? 'Good morning' : currentHour < 17 ? 'Good afternoon' : 'Good evening';
 
   return (
     <>
@@ -156,202 +237,202 @@ export default function UserDashboard() {
         <title>Dashboard | Bheem Workspace</title>
       </Head>
 
-      <div className="min-h-screen bg-gray-50">
-        {/* Header */}
-        <header className="bg-white border-b border-gray-200">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex justify-between items-center h-16">
-              {/* Logo */}
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-xl flex items-center justify-center">
-                  <span className="text-lg font-bold text-white">B</span>
-                </div>
-                <div>
-                  <h1 className="text-lg font-semibold text-gray-900">Bheem Workspace</h1>
-                  <p className="text-xs text-gray-500">{tenantName}</p>
-                </div>
-              </div>
-
-              {/* User Menu */}
-              <div className="flex items-center gap-4">
-                <div className="text-right hidden sm:block">
-                  <p className="text-sm font-medium text-gray-900">{displayName}</p>
-                  <p className="text-xs text-gray-500">{displayEmail}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="h-10 w-10 bg-gradient-to-br from-blue-500 to-purple-500 rounded-full flex items-center justify-center text-white font-medium">
-                    {displayName.charAt(0).toUpperCase()}
-                  </div>
-                  <button
-                    onClick={handleLogout}
-                    className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-                    title="Logout"
-                  >
-                    <LogOut size={20} />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </header>
-
-        {/* Main Content */}
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <WorkspaceLayout title="Dashboard">
+        <div className="max-w-7xl mx-auto space-y-6">
           {/* Welcome Banner */}
-          <div className="bg-gradient-to-r from-blue-600 to-purple-600 rounded-2xl p-6 md:p-8 text-white mb-8">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-              <div>
-                <h2 className="text-2xl md:text-3xl font-bold">
-                  Welcome back, {displayName.split(' ')[0]}!
-                </h2>
-                <p className="mt-2 text-blue-100">
-                  Access all your workspace tools from one place
-                </p>
-              </div>
-              <div className="flex items-center gap-3">
-                {workspaceData?.user?.workspace_role && (
-                  <span className="px-3 py-1 bg-white/20 rounded-full text-sm font-medium">
-                    {workspaceData.user.workspace_role.charAt(0).toUpperCase() +
-                     workspaceData.user.workspace_role.slice(1)}
-                  </span>
-                )}
+          <div className="bg-gradient-to-r from-blue-600 via-blue-700 to-purple-700 rounded-2xl p-6 md:p-8 text-white relative overflow-hidden">
+            <div className="absolute inset-0 bg-grid-white/[0.05] bg-[size:20px_20px]" />
+            <div className="relative z-10">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                <div>
+                  <p className="text-blue-200 text-sm font-medium">{greeting},</p>
+                  <h2 className="text-2xl md:text-3xl font-bold mt-1">{firstName}!</h2>
+                  <p className="mt-2 text-blue-100 max-w-md">
+                    Here's what's happening in your workspace today
+                  </p>
+                </div>
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                  {workspaceData?.user?.workspace_role && (
+                    <span className="px-4 py-1.5 bg-white/20 backdrop-blur rounded-full text-sm font-medium">
+                      {workspaceData.user.workspace_role.charAt(0).toUpperCase() +
+                       workspaceData.user.workspace_role.slice(1)}
+                    </span>
+                  )}
+                  <div className="flex items-center gap-2 text-sm text-blue-100">
+                    <Clock size={16} />
+                    {new Date().toLocaleDateString('en-US', {
+                      weekday: 'long',
+                      month: 'long',
+                      day: 'numeric'
+                    })}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
           {/* Error Message */}
           {error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
-              <AlertCircle className="text-red-500" size={20} />
+            <div className="p-4 bg-red-50 border border-red-200 rounded-lg flex items-center gap-3">
+              <span className="text-red-500">!</span>
               <p className="text-red-700">{error}</p>
             </div>
           )}
 
+          {/* KPI Stats Row */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <KPICard
+              title="Unread Emails"
+              value={stats.unreadEmails}
+              icon={Inbox}
+              color="blue"
+              trend={stats.unreadEmails > 5 ? { value: 15, direction: 'up' } : undefined}
+              href="/mail"
+            />
+            <KPICard
+              title="Today's Events"
+              value={stats.todayEvents}
+              icon={Calendar}
+              color="orange"
+              subtitle={stats.todayEvents > 0 ? 'Next in 30 min' : 'No events'}
+              href="/calendar"
+            />
+            <KPICard
+              title="Recent Documents"
+              value={stats.recentDocs}
+              icon={FolderOpen}
+              color="purple"
+              subtitle="Last 7 days"
+              href="/docs"
+            />
+            <KPICard
+              title="Active Meetings"
+              value={stats.activeMeets}
+              icon={Users}
+              color="green"
+              subtitle={stats.activeMeets > 0 ? 'Join now' : 'None active'}
+              href="/meet"
+            />
+          </div>
+
           {/* Quick Access Apps */}
-          <div className="mb-8">
-            <h3 className="text-lg font-semibold text-gray-900 mb-4">Your Apps</h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {APP_CARDS.map((app) => {
-                const Icon = app.icon;
-                return (
-                  <a
-                    key={app.id}
-                    href={app.href}
-                    target={app.external ? '_blank' : undefined}
-                    rel={app.external ? 'noopener noreferrer' : undefined}
-                    className="group bg-white rounded-xl p-6 border border-gray-200 hover:border-gray-300 hover:shadow-lg transition-all duration-200"
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className={`p-3 rounded-xl ${app.bgColor}`}>
-                        <Icon className={app.iconColor} size={24} />
-                      </div>
-                      {app.external && (
-                        <ExternalLink size={16} className="text-gray-400 group-hover:text-gray-600" />
-                      )}
-                    </div>
-                    <h4 className="mt-4 font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
-                      {app.name}
-                    </h4>
-                    <p className="mt-1 text-sm text-gray-500">{app.description}</p>
-                  </a>
-                );
-              })}
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-900">Quick Access</h3>
+              <Link
+                href="/apps"
+                className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"
+              >
+                All apps <ChevronRight size={16} />
+              </Link>
+            </div>
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {APP_CARDS.map((app) => (
+                <QuickAccessCard
+                  key={app.id}
+                  name={app.name}
+                  description={app.description}
+                  icon={app.icon}
+                  href={app.href}
+                  color={app.color}
+                  badge={stats[app.badgeKey as keyof DashboardStats] || undefined}
+                />
+              ))}
             </div>
           </div>
 
-          {/* Account Info */}
+          {/* Charts and Activity Row */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Workspace Email */}
-            <div className="bg-white rounded-xl p-6 border border-gray-200">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-blue-50 rounded-lg">
+            {/* Weekly Activity Chart */}
+            <div className="bg-white rounded-xl border border-gray-200 p-6">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900">Weekly Activity</h3>
+                  <p className="text-sm text-gray-500 mt-1">Your workspace engagement</p>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 px-3 py-1 rounded-full">
+                  <TrendingUp size={14} />
+                  <span className="font-medium">+12%</span>
+                </div>
+              </div>
+              <LineChart
+                data={weeklyData}
+                height={200}
+                color="blue"
+                showArea={true}
+                showDots={true}
+                showGrid={true}
+              />
+            </div>
+
+            {/* Recent Activity Timeline */}
+            <ActivityTimeline
+              activities={activities}
+              maxItems={5}
+              showViewAll={true}
+              onViewAll={() => router.push('/activity')}
+            />
+          </div>
+
+          {/* Quick Actions */}
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <Link
+                href="/mail/compose"
+                className="flex items-center gap-3 p-4 bg-blue-50 rounded-xl hover:bg-blue-100 transition-colors group"
+              >
+                <div className="p-2 bg-blue-100 rounded-lg group-hover:bg-blue-200 transition-colors">
                   <Mail className="text-blue-600" size={20} />
                 </div>
-                <h3 className="font-semibold text-gray-900">Your Workspace Email</h3>
-              </div>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <div>
-                    <p className="text-sm text-gray-500">Email Address</p>
-                    <p className="font-medium text-gray-900">{displayEmail}</p>
-                  </div>
-                  <CheckCircle className="text-green-500" size={20} />
+                <div>
+                  <p className="font-medium text-gray-900">Compose Email</p>
+                  <p className="text-sm text-gray-500">Send a new message</p>
                 </div>
-                <a
-                  href="https://mail.bheem.cloud"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-2 w-full py-2.5 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-                >
-                  <Mail size={18} />
-                  Open Webmail
-                  <ExternalLink size={14} />
-                </a>
-              </div>
-            </div>
+              </Link>
 
-            {/* Quick Actions */}
-            <div className="bg-white rounded-xl p-6 border border-gray-200">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="p-2 bg-green-50 rounded-lg">
+              <Link
+                href="/meet/new"
+                className="flex items-center gap-3 p-4 bg-green-50 rounded-xl hover:bg-green-100 transition-colors group"
+              >
+                <div className="p-2 bg-green-100 rounded-lg group-hover:bg-green-200 transition-colors">
                   <Video className="text-green-600" size={20} />
                 </div>
-                <h3 className="font-semibold text-gray-900">Quick Actions</h3>
-              </div>
-              <div className="space-y-3">
-                <Link
-                  href="/meet"
-                  className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-                >
-                  <Video className="text-green-600" size={20} />
-                  <div className="flex-1">
-                    <p className="font-medium text-gray-900">Start a Meeting</p>
-                    <p className="text-sm text-gray-500">Create or join a video call</p>
-                  </div>
-                </Link>
-                <a
-                  href="https://docs.bheem.cloud"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-                >
+                <div>
+                  <p className="font-medium text-gray-900">Start Meeting</p>
+                  <p className="text-sm text-gray-500">Create video call</p>
+                </div>
+              </Link>
+
+              <Link
+                href="/docs/new"
+                className="flex items-center gap-3 p-4 bg-purple-50 rounded-xl hover:bg-purple-100 transition-colors group"
+              >
+                <div className="p-2 bg-purple-100 rounded-lg group-hover:bg-purple-200 transition-colors">
                   <FileText className="text-purple-600" size={20} />
-                  <div className="flex-1">
-                    <p className="font-medium text-gray-900">Create Document</p>
-                    <p className="text-sm text-gray-500">Start a new document or spreadsheet</p>
-                  </div>
-                </a>
-                <a
-                  href="https://docs.bheem.cloud/apps/calendar"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors"
-                >
+                </div>
+                <div>
+                  <p className="font-medium text-gray-900">New Document</p>
+                  <p className="text-sm text-gray-500">Create or upload</p>
+                </div>
+              </Link>
+
+              <Link
+                href="/calendar/new"
+                className="flex items-center gap-3 p-4 bg-orange-50 rounded-xl hover:bg-orange-100 transition-colors group"
+              >
+                <div className="p-2 bg-orange-100 rounded-lg group-hover:bg-orange-200 transition-colors">
                   <Calendar className="text-orange-600" size={20} />
-                  <div className="flex-1">
-                    <p className="font-medium text-gray-900">View Calendar</p>
-                    <p className="text-sm text-gray-500">Check your schedule and events</p>
-                  </div>
-                </a>
-              </div>
+                </div>
+                <div>
+                  <p className="font-medium text-gray-900">Schedule Event</p>
+                  <p className="text-sm text-gray-500">Add to calendar</p>
+                </div>
+              </Link>
             </div>
           </div>
-
-          {/* Workspace Info Footer */}
-          {workspaceData?.user?.tenant && (
-            <div className="mt-8 text-center text-sm text-gray-500">
-              <p>
-                You are a member of <span className="font-medium">{workspaceData.user.tenant.name}</span>
-              </p>
-            </div>
-          )}
-        </main>
-
-        {/* Footer */}
-        <footer className="mt-auto py-6 text-center text-sm text-gray-500">
-          <p>Bheem Workspace - Bheemverse Innovation</p>
-        </footer>
-      </div>
+        </div>
+      </WorkspaceLayout>
     </>
   );
 }

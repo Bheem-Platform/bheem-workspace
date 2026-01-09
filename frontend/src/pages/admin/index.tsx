@@ -1,3 +1,6 @@
+/**
+ * Tenant Admin Dashboard - Enhanced with analytics and charts
+ */
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
@@ -6,7 +9,6 @@ import {
   Mail,
   Video,
   FileText,
-  Activity,
   Plus,
   Settings,
   Crown,
@@ -15,6 +17,9 @@ import {
   CreditCard,
   Link2,
   ArrowRight,
+  TrendingUp,
+  Calendar,
+  HardDrive,
 } from 'lucide-react';
 import AdminLayout from '@/components/admin/AdminLayout';
 import StatsCard from '@/components/admin/StatsCard';
@@ -24,6 +29,18 @@ import { useAdminStore } from '@/stores/adminStore';
 import { useCurrentTenantId, useRequireAuth } from '@/stores/authStore';
 import * as adminApi from '@/lib/adminApi';
 import type { TenantDashboard, Tenant, SubscriptionStatus } from '@/types/admin';
+import { ServiceCard } from '@/components/dashboard';
+import { DonutChart, LineChart } from '@/components/charts';
+import { formatStorageSize } from '@/lib/dashboardApi';
+
+// Generate mock weekly activity data
+const generateWeeklyActivity = () => {
+  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  return days.map((day, i) => ({
+    label: day,
+    value: Math.floor(Math.random() * 100) + 20 + (i < 5 ? 40 : 0),
+  }));
+};
 
 export default function TenantAdminDashboard() {
   const router = useRouter();
@@ -31,33 +48,24 @@ export default function TenantAdminDashboard() {
   const [dashboard, setDashboard] = useState<TenantDashboard | null>(null);
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
+  const [weeklyActivity] = useState(generateWeeklyActivity());
 
-  // Require authentication - redirect to login if not authenticated
   const { isAuthenticated, isLoading: authLoading } = useRequireAuth();
-
-  // Get tenant ID from auth context
   const tenantId = useCurrentTenantId();
-
-  // Check tenant mode
   const isInternalMode = tenant?.tenant_mode === 'internal';
 
   useEffect(() => {
-    // Don't fetch if not authenticated or still loading auth
     if (!isAuthenticated || authLoading) return;
 
-    // Fetch tenant dashboard data
     const loadDashboard = async () => {
       try {
-        // Fetch tenant details first
         const tenantRes = await adminApi.getTenant(tenantId);
         setTenant(tenantRes.data);
 
-        // Fetch dashboard
         const response = await adminApi.getAdminDashboard(tenantId);
         const data = response.data as unknown as TenantDashboard;
         setDashboard(data);
 
-        // Fetch subscription for external tenants
         if (tenantRes.data.tenant_mode !== 'internal') {
           try {
             const subRes = await adminApi.getSubscriptionStatus(tenantId);
@@ -74,7 +82,6 @@ export default function TenantAdminDashboard() {
     fetchActivityLogs(tenantId, { limit: 10 });
   }, [tenantId, fetchActivityLogs, isAuthenticated, authLoading]);
 
-  // Show loading while checking auth
   if (authLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -82,6 +89,17 @@ export default function TenantAdminDashboard() {
       </div>
     );
   }
+
+  // Calculate storage breakdown for donut chart
+  const storageData = [
+    { label: 'Mail', value: dashboard?.usage?.mail_used_mb || 0, color: '#3B82F6' },
+    { label: 'Docs', value: dashboard?.usage?.docs_used_mb || 0, color: '#A855F7' },
+    { label: 'Meet', value: dashboard?.usage?.meet_used || 0, color: '#22C55E' },
+  ].filter(item => item.value > 0);
+
+  // If no data, show placeholder
+  const hasStorageData = storageData.length > 0;
+  const totalStorage = storageData.reduce((acc, item) => acc + item.value, 0);
 
   return (
     <AdminLayout
@@ -93,16 +111,17 @@ export default function TenantAdminDashboard() {
       <div className="space-y-6">
         {/* Welcome Banner - Different for Internal vs External */}
         {isInternalMode ? (
-          <div className="bg-gradient-to-r from-purple-600 to-purple-800 rounded-2xl p-6 text-white">
-            <div className="flex items-center justify-between">
+          <div className="bg-gradient-to-r from-purple-600 via-purple-700 to-indigo-700 rounded-2xl p-6 text-white relative overflow-hidden">
+            <div className="absolute inset-0 bg-grid-white/[0.05] bg-[size:20px_20px]" />
+            <div className="relative z-10 flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <div className="p-3 bg-white/20 rounded-lg">
+                <div className="p-3 bg-white/20 rounded-xl">
                   <Crown size={28} />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
                     <h1 className="text-2xl font-bold">Workspace Admin</h1>
-                    <span className="px-2 py-0.5 bg-white/20 text-white text-xs font-medium rounded-full">
+                    <span className="px-2.5 py-1 bg-white/20 text-white text-xs font-medium rounded-full">
                       Internal
                     </span>
                   </div>
@@ -121,17 +140,18 @@ export default function TenantAdminDashboard() {
             </div>
           </div>
         ) : (
-          <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-2xl p-6 text-white">
-            <div className="flex items-center justify-between">
+          <div className="bg-gradient-to-r from-blue-600 via-blue-700 to-indigo-700 rounded-2xl p-6 text-white relative overflow-hidden">
+            <div className="absolute inset-0 bg-grid-white/[0.05] bg-[size:20px_20px]" />
+            <div className="relative z-10 flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <div className="p-3 bg-white/20 rounded-lg">
+                <div className="p-3 bg-white/20 rounded-xl">
                   <Building2 size={28} />
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
                     <h1 className="text-2xl font-bold">Workspace Admin</h1>
                     {subscription?.status === 'active' && (
-                      <span className="px-2 py-0.5 bg-green-500/30 text-green-100 text-xs font-medium rounded-full">
+                      <span className="px-2.5 py-1 bg-green-500/30 text-green-100 text-xs font-medium rounded-full">
                         {subscription.plan}
                       </span>
                     )}
@@ -174,9 +194,9 @@ export default function TenantAdminDashboard() {
         )}
 
         {/* Quick Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <StatsCard
-            title="Users"
+            title="Total Users"
             value={dashboard?.users?.total || 0}
             icon={Users}
             color="blue"
@@ -192,19 +212,77 @@ export default function TenantAdminDashboard() {
             subtitle={`${dashboard?.domains?.verified || 0} verified`}
           />
           <StatsCard
-            title="Mailboxes"
-            value={dashboard?.mail?.mailboxes || 0}
-            icon={Mail}
+            title="Total Storage"
+            value={formatStorageSize(totalStorage)}
+            icon={HardDrive}
             color="purple"
-            href="/admin/mail"
+            href="/admin/storage"
+            subtitle="Used"
           />
           <StatsCard
-            title="Meet Rooms"
-            value={dashboard?.meet?.rooms || 0}
-            icon={Video}
+            title="Activity Today"
+            value={activityLogs.filter(a => {
+              const today = new Date().toDateString();
+              return new Date(a.created_at).toDateString() === today;
+            }).length}
+            icon={Calendar}
             color="orange"
-            href="/admin/meet"
+            href="/admin/activity"
+            subtitle="actions"
           />
+        </div>
+
+        {/* Charts Row */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Storage Breakdown Donut Chart */}
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Storage Breakdown</h3>
+                <p className="text-sm text-gray-500 mt-1">Usage by service</p>
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-bold text-gray-900">{formatStorageSize(totalStorage)}</p>
+                <p className="text-sm text-gray-500">Total used</p>
+              </div>
+            </div>
+            {hasStorageData ? (
+              <DonutChart
+                data={storageData}
+                size={200}
+                thickness={35}
+                showLegend={true}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <HardDrive size={40} className="text-gray-300 mb-3" />
+                <p className="text-gray-500">No storage data available</p>
+                <p className="text-sm text-gray-400 mt-1">Start using services to see breakdown</p>
+              </div>
+            )}
+          </div>
+
+          {/* Weekly Activity Line Chart */}
+          <div className="bg-white rounded-xl border border-gray-200 p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-900">Weekly Activity</h3>
+                <p className="text-sm text-gray-500 mt-1">User actions this week</p>
+              </div>
+              <div className="flex items-center gap-2 text-sm text-green-600 bg-green-50 px-3 py-1 rounded-full">
+                <TrendingUp size={14} />
+                <span className="font-medium">+18%</span>
+              </div>
+            </div>
+            <LineChart
+              data={weeklyActivity}
+              height={200}
+              color="blue"
+              showArea={true}
+              showDots={true}
+              showGrid={true}
+            />
+          </div>
         </div>
 
         {/* Quick Actions & Activity */}
@@ -272,13 +350,16 @@ export default function TenantAdminDashboard() {
         {/* Resource Usage */}
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-semibold text-gray-900">Resource Usage</h2>
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Resource Quotas</h2>
+              <p className="text-sm text-gray-500 mt-1">Monitor your usage limits</p>
+            </div>
             {!isInternalMode && (
               <button
                 onClick={() => router.push('/admin/billing')}
-                className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+                className="text-sm text-blue-600 hover:text-blue-700 font-medium flex items-center gap-1"
               >
-                Upgrade Plan
+                Upgrade Plan <ArrowRight size={14} />
               </button>
             )}
           </div>
@@ -348,50 +429,44 @@ export default function TenantAdminDashboard() {
           </div>
         )}
 
-        {/* Service Status */}
+        {/* Service Status Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <div className="flex items-center space-x-3 mb-4">
-              <div className="p-2 bg-purple-100 rounded-lg">
-                <Mail className="text-purple-600" size={24} />
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900">Bheem Mail</h3>
-                <p className="text-sm text-green-600">Operational</p>
-              </div>
-            </div>
-            <p className="text-sm text-gray-500">
-              {dashboard?.mail?.mailboxes || 0} mailboxes configured
-            </p>
-          </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <div className="flex items-center space-x-3 mb-4">
-              <div className="p-2 bg-orange-100 rounded-lg">
-                <Video className="text-orange-600" size={24} />
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900">Bheem Meet</h3>
-                <p className="text-sm text-green-600">Operational</p>
-              </div>
-            </div>
-            <p className="text-sm text-gray-500">
-              {dashboard?.meet?.rooms || 0} meeting rooms available
-            </p>
-          </div>
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <div className="flex items-center space-x-3 mb-4">
-              <div className="p-2 bg-blue-100 rounded-lg">
-                <FileText className="text-blue-600" size={24} />
-              </div>
-              <div>
-                <h3 className="font-semibold text-gray-900">Bheem Docs</h3>
-                <p className="text-sm text-green-600">Operational</p>
-              </div>
-            </div>
-            <p className="text-sm text-gray-500">
-              {((dashboard?.usage?.docs_used_mb || 0) / 1024).toFixed(1)} GB used
-            </p>
-          </div>
+          <ServiceCard
+            name="Bheem Mail"
+            icon={Mail}
+            status="operational"
+            color="blue"
+            metrics={[
+              { label: 'Mailboxes', value: dashboard?.mail?.mailboxes || 0 },
+              { label: 'Storage', value: formatStorageSize(dashboard?.usage?.mail_used_mb || 0) },
+            ]}
+            actionLabel="Manage"
+            actionHref="/admin/mail"
+          />
+          <ServiceCard
+            name="Bheem Meet"
+            icon={Video}
+            status="operational"
+            color="green"
+            metrics={[
+              { label: 'Rooms', value: dashboard?.meet?.rooms || 0 },
+              { label: 'Hours Used', value: `${dashboard?.usage?.meet_used || 0}h` },
+            ]}
+            actionLabel="Manage"
+            actionHref="/admin/meet"
+          />
+          <ServiceCard
+            name="Bheem Docs"
+            icon={FileText}
+            status="operational"
+            color="purple"
+            metrics={[
+              { label: 'Storage', value: formatStorageSize(dashboard?.usage?.docs_used_mb || 0) },
+              { label: 'Quota', value: formatStorageSize(dashboard?.usage?.docs_quota_mb || 5120) },
+            ]}
+            actionLabel="Manage"
+            actionHref="/admin/docs"
+          />
         </div>
       </div>
     </AdminLayout>

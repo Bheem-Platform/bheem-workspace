@@ -245,12 +245,16 @@ class DocsDocumentService:
             is_editable = mime_type in editable_mimes or extension in editable_exts
 
             # Insert document record
+            import json
+            tags_json = json.dumps(tags) if tags else '[]'
+            metadata_json = json.dumps(custom_metadata) if custom_metadata else '{}'
+
             cur.execute("""
                 INSERT INTO dms.documents (
                     title, description, document_type, status,
                     file_name, file_extension, file_size, mime_type,
                     storage_path, storage_bucket, folder_id,
-                    company_id, tenant_id, entity_type, entity_id,
+                    company_id, entity_type, entity_id,
                     tags, custom_metadata, is_editable, checksum,
                     current_version, version_count,
                     created_by, created_at, updated_at, is_active
@@ -258,8 +262,8 @@ class DocsDocumentService:
                     %s, %s, %s::dms.documenttype, 'ACTIVE'::dms.documentstatus,
                     %s, %s, %s, %s,
                     %s, %s, %s,
-                    %s, %s, %s::dms.entitytype, %s,
-                    %s, %s, %s, %s,
+                    %s, %s::dms.entitytype, %s,
+                    %s::text[], %s::jsonb, %s, %s,
                     1, 1,
                     %s, NOW(), NOW(), true
                 )
@@ -269,9 +273,9 @@ class DocsDocumentService:
                 filename, extension, storage_result['file_size'], mime_type,
                 storage_result['storage_path'], storage_result['storage_bucket'],
                 str(folder_id) if folder_id else None,
-                str(company_id), str(tenant_id) if tenant_id else None,
+                str(company_id),
                 entity_type, str(entity_id) if entity_id else None,
-                tags or [], custom_metadata or {},
+                tags or [], metadata_json,
                 is_editable, storage_result['checksum'],
                 str(created_by)
             ))
@@ -492,7 +496,18 @@ class DocsDocumentService:
                 LIMIT %s OFFSET %s
             """, params + [limit, offset])
 
-            documents = [dict(row) for row in cur.fetchall()]
+            documents = []
+            for row in cur.fetchall():
+                doc = dict(row)
+                # Convert datetime objects to ISO format strings
+                if doc.get('created_at'):
+                    doc['created_at'] = doc['created_at'].isoformat() if hasattr(doc['created_at'], 'isoformat') else str(doc['created_at'])
+                if doc.get('updated_at'):
+                    doc['updated_at'] = doc['updated_at'].isoformat() if hasattr(doc['updated_at'], 'isoformat') else str(doc['updated_at'])
+                # Convert UUID to string
+                if doc.get('id'):
+                    doc['id'] = str(doc['id'])
+                documents.append(doc)
 
             return {
                 'documents': documents,
@@ -842,15 +857,18 @@ class DocsDocumentService:
         details: Optional[Dict] = None
     ):
         """Log document action to audit trail."""
+        import json
         cur = conn.cursor()
         try:
+            # Convert details dict to JSON string for PostgreSQL
+            details_json = json.dumps(details) if details else '{}'
             cur.execute("""
                 INSERT INTO dms.document_audit_logs (
                     document_id, action, action_details, user_id, timestamp
                 ) VALUES (
-                    %s, %s::dms.auditaction, %s, %s, NOW()
+                    %s, %s::dms.auditaction, %s::jsonb, %s, NOW()
                 )
-            """, (str(document_id), action.value, details or {}, str(user_id)))
+            """, (str(document_id), action.value, details_json, str(user_id)))
         finally:
             cur.close()
 

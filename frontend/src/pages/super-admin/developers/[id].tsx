@@ -67,15 +67,29 @@ export default function DeveloperDetailPage() {
   };
 
   const handleRegenerateKey = async () => {
-    // API would regenerate key here
+    if (!id || typeof id !== 'string') return;
+    try {
+      const response = await adminApi.regenerateDeveloperApiKey(id);
+      // Update developer with new API key
+      if (developer) {
+        setDeveloper({ ...developer, api_key: response.data.api_key });
+      }
+      await fetchDevelopers();
+    } catch (err) {
+      console.error('Failed to regenerate API key:', err);
+    }
     setShowRegenerateDialog(false);
-    // In a real implementation, call the API and refresh
   };
 
   const handleDelete = async () => {
-    // API would delete developer here
+    if (!id || typeof id !== 'string') return;
+    try {
+      await adminApi.deleteDeveloper(id);
+      router.push('/super-admin/developers');
+    } catch (err) {
+      console.error('Failed to delete developer:', err);
+    }
     setShowDeleteDialog(false);
-    router.push('/super-admin/developers');
   };
 
   if (loading.developers || !developer) {

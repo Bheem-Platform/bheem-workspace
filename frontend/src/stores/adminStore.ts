@@ -73,7 +73,7 @@ interface AdminState {
   createDeveloper: (data: Parameters<typeof adminApi.createDeveloper>[0]) => Promise<Developer | null>;
 
   // Actions - Activity
-  fetchActivityLogs: (tenantId: string, params?: { limit?: number; action?: string }) => Promise<void>;
+  fetchActivityLogs: (tenantId: string, params?: { limit?: number; action?: string; from_date?: string; to_date?: string }) => Promise<void>;
 
   // Aliases for convenience
   users: TenantUser[];

@@ -69,6 +69,9 @@ export const updateTenantUser = (tenantId: string, userId: string, data: TenantU
 export const removeTenantUser = (tenantId: string, userId: string) =>
   api.delete(`/admin/tenants/${tenantId}/users/${userId}`);
 
+export const getTenantUser = (tenantId: string, userId: string) =>
+  api.get<TenantUser>(`/admin/tenants/${tenantId}/users/${userId}`);
+
 // ==================== DOMAINS ====================
 
 export const listDomains = (tenantId: string) =>
@@ -86,6 +89,14 @@ export const verifyDomain = (tenantId: string, domainId: string) =>
 export const removeDomain = (tenantId: string, domainId: string) =>
   api.delete(`/admin/tenants/${tenantId}/domains/${domainId}`);
 
+export const getDomain = (tenantId: string, domainId: string) =>
+  api.get<Domain>(`/admin/tenants/${tenantId}/domains/${domainId}`);
+
+export const updateDomain = (tenantId: string, domainId: string, data: {
+  is_primary?: boolean;
+  is_active?: boolean;
+}) => api.patch(`/admin/tenants/${tenantId}/domains/${domainId}`, null, { params: data });
+
 // ==================== MAIL ====================
 
 export const listMailDomains = (tenantId: string) =>
@@ -99,6 +110,15 @@ export const createMailbox = (tenantId: string, data: MailboxCreate) =>
 
 export const deleteMailbox = (tenantId: string, email: string) =>
   api.delete(`/admin/tenants/${tenantId}/mail/mailboxes/${encodeURIComponent(email)}`);
+
+export const getMailbox = (tenantId: string, email: string) =>
+  api.get(`/admin/tenants/${tenantId}/mail/mailboxes/${encodeURIComponent(email)}`);
+
+export const updateMailbox = (tenantId: string, email: string, data: {
+  name?: string;
+  quota_mb?: number;
+  active?: boolean;
+}) => api.patch(`/admin/tenants/${tenantId}/mail/mailboxes/${encodeURIComponent(email)}`, null, { params: data });
 
 export const getMailStats = (tenantId: string) =>
   api.get<MailStats>(`/admin/tenants/${tenantId}/mail/stats`);
@@ -228,11 +248,33 @@ export const createDeveloper = (data: DeveloperCreate) =>
 export const grantProjectAccess = (developerId: string, data: DeveloperProjectAccess) =>
   api.post(`/admin/developers/${developerId}/projects`, data);
 
+export const getDeveloper = (developerId: string) =>
+  api.get<Developer>(`/admin/developers/${developerId}`);
+
+export const updateDeveloper = (developerId: string, data: {
+  name?: string;
+  email?: string;
+  company?: string;
+  website?: string;
+  is_active?: boolean;
+}) => api.patch(`/admin/developers/${developerId}`, null, { params: data });
+
+export const deleteDeveloper = (developerId: string) =>
+  api.delete(`/admin/developers/${developerId}`);
+
+export const regenerateDeveloperApiKey = (developerId: string) =>
+  api.post<{ api_key: string }>(`/admin/developers/${developerId}/regenerate-key`);
+
+export const listDeveloperProjects = (developerId: string) =>
+  api.get(`/admin/developers/${developerId}/projects`);
+
 // ==================== ACTIVITY LOG ====================
 
 export const getActivityLog = (tenantId: string, params?: {
   user_id?: string;
   action?: string;
+  from_date?: string;
+  to_date?: string;
   limit?: number;
 }) => api.get<ActivityLog[]>(`/admin/tenants/${tenantId}/activity`, { params });
 

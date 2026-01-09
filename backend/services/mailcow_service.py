@@ -71,6 +71,15 @@ class MailcowService:
             return result
         return []
 
+    async def get_mailbox_info(self, email: str) -> dict:
+        """Get specific mailbox info including message counts"""
+        result = await self._api_request("GET", f"get/mailbox/{email}")
+        if isinstance(result, dict):
+            return result
+        elif isinstance(result, list) and len(result) > 0:
+            return result[0]
+        return None
+
     async def get_domains(self) -> List[dict]:
         """Get all domains from Mailcow"""
         result = await self._api_request("GET", "get/domain/all")
@@ -78,6 +87,30 @@ class MailcowService:
         if isinstance(result, list):
             return result
         return []
+
+    async def delete_mailbox(self, email: str) -> dict:
+        """Delete a mailbox from Mailcow"""
+        data = [email]  # Mailcow expects an array of emails to delete
+        return await self._api_request("POST", "delete/mailbox", data)
+
+    async def update_mailbox(self, email: str, name: str = None, quota_mb: int = None, active: bool = None) -> dict:
+        """Update mailbox settings (name, quota, active status)"""
+        attr = {}
+        if name is not None:
+            attr["name"] = name
+        if quota_mb is not None:
+            attr["quota"] = quota_mb
+        if active is not None:
+            attr["active"] = "1" if active else "0"
+
+        if not attr:
+            return {"error": "No attributes to update"}
+
+        data = {
+            "items": [email],
+            "attr": attr
+        }
+        return await self._api_request("POST", "edit/mailbox", data)
 
     async def update_mailbox_password(self, email: str, new_password: str) -> dict:
         """Update mailbox password - syncs with Bheem Core password"""

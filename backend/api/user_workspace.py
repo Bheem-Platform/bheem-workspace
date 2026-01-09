@@ -52,7 +52,11 @@ async def get_my_workspace(
     - Calendar config (CalDAV settings)
     - Meeting config (LiveKit settings)
     """
-    workspace = await user_workspace_service.get_user_workspace(db, current_user["id"])
+    workspace = await user_workspace_service.get_user_workspace(
+        db,
+        current_user["id"],
+        current_user=current_user
+    )
 
     if not workspace:
         raise HTTPException(
@@ -344,7 +348,7 @@ async def get_workspace_dashboard(
         }
 
     # Get workspace config
-    workspace = await user_workspace_service.get_user_workspace(db, current_user["id"])
+    workspace = await user_workspace_service.get_user_workspace(db, current_user["id"], current_user=current_user)
 
     # Get recent emails
     try:
@@ -399,6 +403,90 @@ async def get_workspace_dashboard(
             "meet": f"https://workspace.bheem.cloud/meet"
         }
     }
+
+
+# ============== DASHBOARD STATS ==============
+
+@router.get("/dashboard-stats")
+async def get_dashboard_stats(
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get dashboard statistics for current user.
+    Returns counts of unread emails, today's events, recent docs, active meetings.
+
+    Note: Some stats require mailbox access. Returns 0 if unable to fetch.
+    """
+    from services.mailcow_service import mailcow_service
+    from datetime import datetime, timedelta
+
+    email = current_user.get("email") or current_user.get("username")
+    stats = {
+        "unreadEmails": 0,
+        "todayEvents": 0,
+        "recentDocs": 0,
+        "activeMeets": 0
+    }
+
+    # Try to get unread email count from Mailcow API
+    if email and '@' in email:
+        try:
+            # Use Mailcow API to get mailbox stats
+            mailbox_info = await mailcow_service.get_mailbox_info(email)
+            if mailbox_info:
+                stats["unreadEmails"] = mailbox_info.get("messages_unread", 0)
+        except Exception as e:
+            print(f"[DashboardStats] Could not get email stats: {e}")
+
+    # Try to get today's calendar events count
+    try:
+        from sqlalchemy import text
+        today = datetime.utcnow().date()
+        result = await db.execute(text("""
+            SELECT COUNT(*) FROM workspace.calendar_events
+            WHERE user_id = :user_id
+            AND DATE(start_time) = :today
+        """), {"user_id": current_user["id"], "today": today})
+        row = result.fetchone()
+        if row:
+            stats["todayEvents"] = row[0]
+    except Exception as e:
+        # Table might not exist
+        pass
+
+    # Try to get recent documents count
+    try:
+        from sqlalchemy import text
+        week_ago = datetime.utcnow() - timedelta(days=7)
+        result = await db.execute(text("""
+            SELECT COUNT(*) FROM dms.documents
+            WHERE created_by = :user_id
+            AND created_at >= :week_ago
+        """), {"user_id": current_user["id"], "week_ago": week_ago})
+        row = result.fetchone()
+        if row:
+            stats["recentDocs"] = row[0]
+    except Exception as e:
+        # Table might not exist
+        pass
+
+    # Try to get active meetings count
+    try:
+        from sqlalchemy import text
+        result = await db.execute(text("""
+            SELECT COUNT(*) FROM workspace.meeting_rooms
+            WHERE host_user_id = :user_id
+            AND status = 'active'
+        """), {"user_id": current_user["id"]})
+        row = result.fetchone()
+        if row:
+            stats["activeMeets"] = row[0]
+    except Exception as e:
+        # Table might not exist
+        pass
+
+    return stats
 
 
 # ============== PROVISIONING ==============

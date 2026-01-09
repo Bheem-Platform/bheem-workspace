@@ -340,3 +340,171 @@ async def list_all_docs_users(
         "users": users,
         "total": len(users)
     }
+
+
+# ==================== NEXTCLOUD HEALTH & SYNC ENDPOINTS ====================
+
+@router.get("/docs/health")
+async def check_nextcloud_health(
+    current_user: dict = Depends(require_superadmin())
+):
+    """
+    Check Nextcloud connectivity and authentication status.
+    Returns detailed status about the Nextcloud connection.
+    """
+    import httpx
+    from core.config import settings
+
+    result = {
+        "nextcloud_url": settings.NEXTCLOUD_URL,
+        "admin_user": settings.NEXTCLOUD_ADMIN_USER,
+        "status": "unknown",
+        "version": None,
+        "auth_status": "unknown",
+        "errors": []
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0, verify=False) as client:
+            # Check basic connectivity
+            status_response = await client.get(f"{settings.NEXTCLOUD_URL}/status.php")
+            if status_response.status_code == 200:
+                status_data = status_response.json()
+                result["status"] = "online"
+                result["version"] = status_data.get("versionstring")
+                result["installed"] = status_data.get("installed", False)
+                result["maintenance"] = status_data.get("maintenance", False)
+            else:
+                result["status"] = "unreachable"
+                result["errors"].append(f"Status endpoint returned {status_response.status_code}")
+                return result
+
+            # Check authentication
+            auth_response = await client.get(
+                f"{settings.NEXTCLOUD_URL}/ocs/v2.php/cloud/users",
+                auth=(settings.NEXTCLOUD_ADMIN_USER, settings.NEXTCLOUD_ADMIN_PASSWORD),
+                headers={"OCS-APIREQUEST": "true", "Accept": "application/json"}
+            )
+
+            if auth_response.status_code == 200:
+                data = auth_response.json()
+                if data.get("ocs", {}).get("meta", {}).get("statuscode") == 200:
+                    result["auth_status"] = "authenticated"
+                    users = data.get("ocs", {}).get("data", {}).get("users", [])
+                    result["user_count"] = len(users)
+                else:
+                    result["auth_status"] = "failed"
+                    result["errors"].append(data.get("ocs", {}).get("meta", {}).get("message", "Auth failed"))
+            else:
+                result["auth_status"] = "failed"
+                result["errors"].append(f"Auth endpoint returned {auth_response.status_code}")
+
+    except Exception as e:
+        result["status"] = "error"
+        result["errors"].append(str(e))
+
+    return result
+
+
+class NextcloudSyncRequest(BaseModel):
+    tenant_id: Optional[str] = None
+    password: str = "Bheem@1234"  # Default temp password for synced users
+    dry_run: bool = True  # Preview without creating
+
+
+@router.post("/docs/sync-users")
+async def sync_workspace_users_to_nextcloud(
+    request: NextcloudSyncRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_superadmin())
+):
+    """
+    Sync existing workspace users to Nextcloud.
+    Creates Nextcloud accounts for users who don't have one.
+
+    - dry_run=True: Preview which users would be created
+    - dry_run=False: Actually create the users
+    """
+    from sqlalchemy import text
+    from services.nextcloud_user_service import nextcloud_user_service
+
+    # First check if Nextcloud auth is working
+    health = await nextcloud_user_service.health_check()
+    if not health:
+        raise HTTPException(
+            status_code=503,
+            detail="Nextcloud service is not available. Please check credentials in .env file (NEXTCLOUD_ADMIN_USER, NEXTCLOUD_ADMIN_PASSWORD)"
+        )
+
+    # Get all workspace users
+    query = """
+        SELECT tu.id, tu.user_id, tu.email, tu.name, tu.role, t.slug as tenant_slug, t.name as tenant_name
+        FROM workspace.tenant_users tu
+        JOIN workspace.tenants t ON tu.tenant_id = t.id
+        WHERE tu.is_active = true
+    """
+    params = {}
+
+    if request.tenant_id:
+        query += " AND (t.id::text = :tenant_id OR t.slug = :tenant_id)"
+        params["tenant_id"] = request.tenant_id
+
+    result = await db.execute(text(query), params)
+    users = result.fetchall()
+
+    sync_results = {
+        "total_users": len(users),
+        "to_create": [],
+        "already_exists": [],
+        "created": [],
+        "failed": [],
+        "dry_run": request.dry_run
+    }
+
+    for user in users:
+        email = user.email
+        if not email:
+            continue
+
+        # Use email local part as username for Nextcloud
+        nc_username = email.split("@")[0] if "@" in email else str(user.user_id)
+
+        # Check if user exists in Nextcloud
+        exists_result = await nextcloud_user_service.get_user(nc_username)
+
+        if exists_result.get("status") == "found":
+            sync_results["already_exists"].append({
+                "email": email,
+                "nc_username": nc_username,
+                "name": user.name,
+                "tenant": user.tenant_slug
+            })
+        else:
+            user_info = {
+                "email": email,
+                "nc_username": nc_username,
+                "name": user.name or email,
+                "tenant": user.tenant_slug
+            }
+
+            if request.dry_run:
+                sync_results["to_create"].append(user_info)
+            else:
+                # Actually create the user
+                create_result = await nextcloud_user_service.create_user(
+                    user_id=nc_username,
+                    email=email,
+                    display_name=user.name or email,
+                    password=request.password,
+                    quota="1 GB"
+                )
+
+                if create_result.get("status") in ["created", "exists"]:
+                    sync_results["created"].append(user_info)
+                else:
+                    sync_results["failed"].append({
+                        **user_info,
+                        "error": create_result.get("error", "Unknown error")
+                    })
+
+    return sync_results

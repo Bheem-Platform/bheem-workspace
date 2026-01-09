@@ -752,8 +752,20 @@ class UserProvisioningService:
             return result
 
     async def _get_tenant_user(self, tenant_id: uuid.UUID, user_id: str) -> Optional[TenantUser]:
-        """Get tenant user by ID"""
+        """Get tenant user by ID (TenantUser.id, not TenantUser.user_id)"""
         try:
+            # First try to find by TenantUser.id (the primary key)
+            result = await self.db.execute(
+                select(TenantUser).where(
+                    TenantUser.tenant_id == tenant_id,
+                    TenantUser.id == uuid.UUID(user_id)
+                )
+            )
+            user = result.scalar_one_or_none()
+            if user:
+                return user
+
+            # Fallback: try to find by TenantUser.user_id (external user reference)
             result = await self.db.execute(
                 select(TenantUser).where(
                     TenantUser.tenant_id == tenant_id,

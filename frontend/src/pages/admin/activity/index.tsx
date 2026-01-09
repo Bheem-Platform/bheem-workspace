@@ -32,9 +32,11 @@ export default function TenantActivityPage() {
     if (!isAuthenticated || authLoading) return;
     fetchActivityLogs(tenantId, {
       action: actionFilter || undefined,
+      from_date: dateRange.from || undefined,
+      to_date: dateRange.to || undefined,
       limit: 100,
     });
-  }, [tenantId, actionFilter, fetchActivityLogs, isAuthenticated, authLoading]);
+  }, [tenantId, actionFilter, dateRange.from, dateRange.to, fetchActivityLogs, isAuthenticated, authLoading]);
 
   // Show loading while checking auth
   if (authLoading) {

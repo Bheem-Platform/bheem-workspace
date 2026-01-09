@@ -104,10 +104,16 @@ export default function MailSettingsPage() {
   };
 
   const handleDeleteMailbox = async () => {
-    // API would delete mailbox here
+    if (!selectedMailbox) return;
+    try {
+      await adminApi.deleteMailbox(tenantId, selectedMailbox.email);
+      await loadMailData();
+    } catch (err: any) {
+      console.error('Failed to delete mailbox:', err);
+      setCreateError(err.response?.data?.detail || 'Failed to delete mailbox');
+    }
     setShowDeleteDialog(false);
     setSelectedMailbox(null);
-    await loadMailData();
   };
 
   // Use active mail domains from Mailcow

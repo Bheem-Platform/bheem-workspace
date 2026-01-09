@@ -190,7 +190,7 @@ async def create_event(
     if not event_uid:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create event"
+            detail="Failed to create event. This could mean: 1) User doesn't exist in Nextcloud (requires admin to create user first), 2) Invalid Nextcloud credentials, 3) Calendar doesn't exist"
         )
 
     # Send calendar invites to attendees
