@@ -6,6 +6,10 @@ import axios from 'axios';
 
 const api = axios.create({
   baseURL: '/api/v1',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  withCredentials: true,  // Send cookies with requests
 });
 
 // Add auth token to requests
@@ -38,11 +42,22 @@ export interface Document {
     name: string;
     email: string;
   };
+  // File info for uploaded documents
+  mime_type?: string;
+  file_name?: string;
+  file_size?: number;
+  storage_path?: string;
+  document_type?: string;
 }
 
 export const getDocument = async (documentId: string): Promise<Document> => {
-  const response = await api.get(`/docs/editor/${documentId}`);
-  return response.data;
+  const response = await api.get(`/docs/editor/documents/${documentId}`);
+  const data = response.data;
+  // Map editor_content to content for frontend compatibility
+  return {
+    ...data,
+    content: data.editor_content || data.content,
+  };
 };
 
 export const createDocument = async (data: {
@@ -51,36 +66,36 @@ export const createDocument = async (data: {
   template_id?: string;
   folder_id?: string;
 }): Promise<Document> => {
-  const response = await api.post('/docs/editor', data);
+  const response = await api.post('/docs/editor/documents', data);
   return response.data;
 };
 
 export const saveDocument = async (documentId: string, content: any, createVersion = false): Promise<void> => {
-  await api.put(`/docs/editor/${documentId}/content`, {
+  await api.put(`/docs/editor/documents/${documentId}/content`, {
     content,
     create_version: createVersion,
   });
 };
 
 export const updateDocumentTitle = async (documentId: string, title: string): Promise<void> => {
-  await api.patch(`/docs/editor/${documentId}`, { title });
+  await api.patch(`/docs/editor/documents/${documentId}`, { title });
 };
 
 export const deleteDocument = async (documentId: string): Promise<void> => {
-  await api.delete(`/docs/editor/${documentId}`);
+  await api.delete(`/docs/editor/documents/${documentId}`);
 };
 
 export const duplicateDocument = async (documentId: string): Promise<Document> => {
-  const response = await api.post(`/docs/editor/${documentId}/duplicate`);
+  const response = await api.post(`/docs/editor/documents/${documentId}/duplicate`);
   return response.data;
 };
 
 export const moveDocument = async (documentId: string, folderId: string): Promise<void> => {
-  await api.post(`/docs/editor/${documentId}/move`, { folder_id: folderId });
+  await api.post(`/docs/editor/documents/${documentId}/move`, { folder_id: folderId });
 };
 
 export const toggleFavorite = async (documentId: string, isFavorite: boolean): Promise<void> => {
-  await api.patch(`/docs/editor/${documentId}`, { is_favorite: isFavorite });
+  await api.patch(`/docs/editor/documents/${documentId}`, { is_favorite: isFavorite });
 };
 
 // ===========================================
@@ -109,7 +124,7 @@ export interface Comment {
 }
 
 export const getComments = async (documentId: string): Promise<Comment[]> => {
-  const response = await api.get(`/docs/comments/${documentId}`);
+  const response = await api.get(`/docs/comments/documents/${documentId}`);
   return response.data.comments || [];
 };
 
@@ -119,7 +134,7 @@ export const addComment = async (
   position?: { start: number; end: number },
   selectionText?: string
 ): Promise<Comment> => {
-  const response = await api.post(`/docs/comments/${documentId}`, {
+  const response = await api.post(`/docs/comments/documents/${documentId}`, {
     content,
     position,
     selection_text: selectionText,
@@ -132,18 +147,18 @@ export const replyToComment = async (
   commentId: string,
   content: string
 ): Promise<Comment> => {
-  const response = await api.post(`/docs/comments/${documentId}/${commentId}/reply`, {
+  const response = await api.post(`/docs/comments/${commentId}/reply`, {
     content,
   });
   return response.data;
 };
 
 export const resolveComment = async (documentId: string, commentId: string): Promise<void> => {
-  await api.post(`/docs/comments/${documentId}/${commentId}/resolve`);
+  await api.post(`/docs/comments/${commentId}/resolve`);
 };
 
 export const deleteComment = async (documentId: string, commentId: string): Promise<void> => {
-  await api.delete(`/docs/comments/${documentId}/${commentId}`);
+  await api.delete(`/docs/comments/${commentId}`);
 };
 
 export const editComment = async (
@@ -151,7 +166,7 @@ export const editComment = async (
   commentId: string,
   content: string
 ): Promise<void> => {
-  await api.put(`/docs/comments/${documentId}/${commentId}`, { content });
+  await api.put(`/docs/comments/${commentId}`, { content });
 };
 
 export const addReaction = async (
@@ -159,7 +174,7 @@ export const addReaction = async (
   commentId: string,
   emoji: string
 ): Promise<void> => {
-  await api.post(`/docs/comments/${documentId}/${commentId}/react`, { emoji });
+  await api.post(`/docs/comments/${commentId}/reactions`, { emoji });
 };
 
 // ===========================================
@@ -183,21 +198,21 @@ export interface Version {
 }
 
 export const getVersionHistory = async (documentId: string): Promise<Version[]> => {
-  const response = await api.get(`/docs/editor/${documentId}/versions`);
+  const response = await api.get(`/docs/editor/documents/${documentId}/versions`);
   return response.data.versions || [];
 };
 
 export const getVersion = async (documentId: string, versionId: string): Promise<Version> => {
-  const response = await api.get(`/docs/editor/${documentId}/versions/${versionId}`);
+  const response = await api.get(`/docs/editor/documents/${documentId}/versions/${versionId}`);
   return response.data;
 };
 
 export const restoreVersion = async (documentId: string, versionId: string): Promise<void> => {
-  await api.post(`/docs/editor/${documentId}/versions/${versionId}/restore`);
+  await api.post(`/docs/editor/documents/${documentId}/versions/${versionId}/restore`);
 };
 
 export const createNamedVersion = async (documentId: string, title: string): Promise<Version> => {
-  const response = await api.post(`/docs/editor/${documentId}/versions`, { title });
+  const response = await api.post(`/docs/editor/documents/${documentId}/versions`, { title });
   return response.data;
 };
 
@@ -239,7 +254,7 @@ export const saveAsTemplate = async (
   description?: string,
   category?: string
 ): Promise<Template> => {
-  const response = await api.post(`/docs/editor/${documentId}/save-as-template`, {
+  const response = await api.post(`/docs/editor/documents/${documentId}/save-as-template`, {
     name,
     description,
     category,
@@ -257,10 +272,24 @@ export const exportDocument = async (
   documentId: string,
   format: ExportFormat
 ): Promise<Blob> => {
-  const response = await api.get(`/docs/editor/${documentId}/export/${format}`, {
+  const response = await api.post(`/docs/editor/documents/${documentId}/export`, {
+    format,
+  }, {
     responseType: 'blob',
   });
   return response.data;
+};
+
+// Get file download URL for uploaded documents
+export const getFileDownloadUrl = async (documentId: string): Promise<string> => {
+  const response = await api.get(`/docs/editor/documents/${documentId}/download-url`);
+  return response.data.url;
+};
+
+// Get file content for text files (CSV, TXT, etc.)
+export const getFileContent = async (documentId: string): Promise<string> => {
+  const response = await api.get(`/docs/editor/documents/${documentId}/file-content`);
+  return response.data.content;
 };
 
 // ===========================================
@@ -393,7 +422,7 @@ export interface ShareSettings {
 }
 
 export const getShareSettings = async (documentId: string): Promise<ShareSettings> => {
-  const response = await api.get(`/docs/editor/${documentId}/share`);
+  const response = await api.get(`/docs/editor/documents/${documentId}/share`);
   return response.data;
 };
 
@@ -401,7 +430,7 @@ export const updateShareSettings = async (
   documentId: string,
   settings: Partial<ShareSettings>
 ): Promise<ShareSettings> => {
-  const response = await api.put(`/docs/editor/${documentId}/share`, settings);
+  const response = await api.put(`/docs/editor/documents/${documentId}/share`, settings);
   return response.data;
 };
 
@@ -410,7 +439,7 @@ export const createShareLink = async (
   accessLevel: 'view' | 'comment' | 'edit',
   expiresInDays?: number
 ): Promise<{ share_link: string; expires_at?: string }> => {
-  const response = await api.post(`/docs/editor/${documentId}/share/link`, {
+  const response = await api.post(`/docs/editor/documents/${documentId}/share/link`, {
     access_level: accessLevel,
     expires_in_days: expiresInDays,
   });
@@ -418,7 +447,7 @@ export const createShareLink = async (
 };
 
 export const revokeShareLink = async (documentId: string): Promise<void> => {
-  await api.delete(`/docs/editor/${documentId}/share/link`);
+  await api.delete(`/docs/editor/documents/${documentId}/share/link`);
 };
 
 // ===========================================

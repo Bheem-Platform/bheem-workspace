@@ -12,6 +12,7 @@ interface DocsState {
   currentPath: string;
   currentFolderId: string | null; // For v2 API folder navigation
   pathHistory: string[];
+  folderIdHistory: (string | null)[]; // Track folder IDs for V2 API navigation
 
   // Selection
   selectedFiles: string[];
@@ -90,6 +91,7 @@ const initialState = {
   currentPath: '/',
   currentFolderId: null as string | null,
   pathHistory: ['/'],
+  folderIdHistory: [null] as (string | null)[], // Start with root (null)
   selectedFiles: [],
   viewMode: 'grid' as const,
   sortBy: 'name' as const,
@@ -152,13 +154,14 @@ export const useDocsStore = create<DocsState>((set, get) => ({
         }));
 
         const allFiles = [...folderItems, ...docItems];
-        const { sortBy, sortOrder } = get();
+        const { sortBy, sortOrder, currentPath: existingPath } = get();
         const sortedFiles = sortFiles(allFiles, sortBy, sortOrder);
 
         set({
           files: sortedFiles,
           currentFolderId: targetFolderId,
-          currentPath: path || '/',
+          // Only update currentPath if explicitly provided, otherwise keep existing
+          currentPath: path !== undefined ? path : existingPath,
         });
       } else {
         // Legacy Nextcloud API
@@ -428,18 +431,28 @@ export const useDocsStore = create<DocsState>((set, get) => ({
     }
   },
 
-  createShareLink: async (path: string, expiresDays = 7) => {
-    const credentials = useCredentialsStore.getState().getNextcloudCredentials();
-    if (!credentials) return null;
-
+  createShareLink: async (fileId: string, expiresDays = 7) => {
     try {
-      const result = await docsApi.createShareLink(
-        credentials.username,
-        credentials.password,
-        path,
-        expiresDays
-      );
-      return result.share_url;
+      if (USE_V2_API) {
+        // Use V2 API presigned URL for sharing
+        const expiresInSeconds = expiresDays * 24 * 60 * 60;
+        const result = await docsApi.getPresignedUrlV2(fileId, expiresInSeconds);
+        return result.url;
+      } else {
+        // Legacy Nextcloud API
+        const credentials = useCredentialsStore.getState().getNextcloudCredentials();
+        if (!credentials) {
+          set({ error: 'Nextcloud credentials required for sharing' });
+          return null;
+        }
+        const result = await docsApi.createShareLink(
+          credentials.username,
+          credentials.password,
+          fileId, // In legacy mode, this is the file path
+          expiresDays
+        );
+        return result.share_url;
+      }
     } catch (error: any) {
       set({ error: error.response?.data?.detail || 'Failed to create share link' });
       return null;
@@ -451,32 +464,57 @@ export const useDocsStore = create<DocsState>((set, get) => ({
       currentPath: path,
       currentFolderId: folderId || null,
       pathHistory: [...state.pathHistory, path],
+      folderIdHistory: [...state.folderIdHistory, folderId || null],
       selectedFiles: [],
     }));
     get().fetchFiles(path, folderId);
   },
 
   navigateUp: () => {
-    const { currentPath } = get();
-    if (currentPath === '/') return;
+    const { currentPath, folderIdHistory } = get();
+    if (currentPath === '/' || folderIdHistory.length <= 1) return;
+
+    // Pop the current folder from history
+    const newFolderIdHistory = [...folderIdHistory];
+    newFolderIdHistory.pop();
+    const parentFolderId = newFolderIdHistory[newFolderIdHistory.length - 1];
 
     const parts = currentPath.split('/').filter(Boolean);
     parts.pop();
-    const parentPath = '/' + parts.join('/');
+    const parentPath = '/' + parts.join('/') || '/';
 
-    get().navigateTo(parentPath);
+    set({
+      pathHistory: get().pathHistory.slice(0, -1),
+      folderIdHistory: newFolderIdHistory,
+    });
+
+    // Navigate to parent with the parent folder ID
+    set({
+      currentPath: parentPath,
+      currentFolderId: parentFolderId,
+      selectedFiles: [],
+    });
+    get().fetchFiles(parentPath, parentFolderId || undefined);
   },
 
   navigateBack: () => {
-    const { pathHistory } = get();
+    const { pathHistory, folderIdHistory } = get();
     if (pathHistory.length <= 1) return;
 
-    const newHistory = [...pathHistory];
-    newHistory.pop();
-    const previousPath = newHistory[newHistory.length - 1];
+    const newPathHistory = [...pathHistory];
+    const newFolderIdHistory = [...folderIdHistory];
+    newPathHistory.pop();
+    newFolderIdHistory.pop();
+    const previousPath = newPathHistory[newPathHistory.length - 1];
+    const previousFolderId = newFolderIdHistory[newFolderIdHistory.length - 1];
 
-    set({ pathHistory: newHistory });
-    get().fetchFiles(previousPath);
+    set({
+      pathHistory: newPathHistory,
+      folderIdHistory: newFolderIdHistory,
+      currentPath: previousPath,
+      currentFolderId: previousFolderId,
+    });
+    get().fetchFiles(previousPath, previousFolderId || undefined);
   },
 
   selectFile: (fileId: string) => {

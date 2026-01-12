@@ -1,36 +1,28 @@
 import { api } from './api';
 import type { Calendar, CalendarEvent, CreateEventData, UpdateEventData } from '@/types/calendar';
 
-// Get Nextcloud credentials from store
-const getCredentials = () => {
-  // These will be passed as params
-  return {};
-};
+/**
+ * Calendar API - Uses workspace credentials automatically
+ *
+ * The backend automatically retrieves credentials from your mail session.
+ * Just login to Mail with your workspace email/password, and Calendar works!
+ */
 
 // Calendars
-export const getCalendars = async (
-  ncUser: string,
-  ncPass: string
-): Promise<Calendar[]> => {
-  const response = await api.get('/calendar/calendars', {
-    params: { nc_user: ncUser, nc_pass: ncPass },
-  });
+export const getCalendars = async (): Promise<Calendar[]> => {
+  const response = await api.get('/calendar/calendars');
   // API returns {count, calendars} - extract calendars array
   return response.data?.calendars || response.data || [];
 };
 
 // Events
 export const getEvents = async (
-  ncUser: string,
-  ncPass: string,
   start?: string,
   end?: string,
   calendarId?: string
 ): Promise<CalendarEvent[]> => {
   const response = await api.get('/calendar/events', {
     params: {
-      nc_user: ncUser,
-      nc_pass: ncPass,
       start,
       end,
       calendar_id: calendarId,
@@ -40,23 +32,13 @@ export const getEvents = async (
   return response.data?.events || response.data || [];
 };
 
-export const getTodayEvents = async (
-  ncUser: string,
-  ncPass: string
-): Promise<CalendarEvent[]> => {
-  const response = await api.get('/calendar/today', {
-    params: { nc_user: ncUser, nc_pass: ncPass },
-  });
+export const getTodayEvents = async (): Promise<CalendarEvent[]> => {
+  const response = await api.get('/calendar/today');
   return response.data?.events || response.data || [];
 };
 
-export const getWeekEvents = async (
-  ncUser: string,
-  ncPass: string
-): Promise<CalendarEvent[]> => {
-  const response = await api.get('/calendar/week', {
-    params: { nc_user: ncUser, nc_pass: ncPass },
-  });
+export const getWeekEvents = async (): Promise<CalendarEvent[]> => {
+  const response = await api.get('/calendar/week');
   return response.data?.events || response.data || [];
 };
 
@@ -76,8 +58,6 @@ function convertRecurrenceToBackend(recurrence?: CreateEventData['recurrence']) 
 }
 
 export const createEvent = async (
-  ncUser: string,
-  ncPass: string,
   data: CreateEventData
 ): Promise<CalendarEvent> => {
   const response = await api.post('/calendar/events', {
@@ -91,15 +71,11 @@ export const createEvent = async (
     attendees: data.attendees || [],
     send_invites: data.sendInvites ?? true,
     recurrence: convertRecurrenceToBackend(data.recurrence),
-  }, {
-    params: { nc_user: ncUser, nc_pass: ncPass },
   });
   return response.data;
 };
 
 export const updateEvent = async (
-  ncUser: string,
-  ncPass: string,
   eventUid: string,
   data: UpdateEventData
 ): Promise<CalendarEvent> => {
@@ -111,26 +87,18 @@ export const updateEvent = async (
     description: data.description,
     all_day: data.allDay,
     recurrence: data.recurrence ? convertRecurrenceToBackend(data.recurrence) : undefined,
-  }, {
-    params: { nc_user: ncUser, nc_pass: ncPass },
   });
   return response.data;
 };
 
 export const deleteEvent = async (
-  ncUser: string,
-  ncPass: string,
   eventUid: string
 ): Promise<void> => {
-  await api.delete(`/calendar/events/${eventUid}`, {
-    params: { nc_user: ncUser, nc_pass: ncPass },
-  });
+  await api.delete(`/calendar/events/${eventUid}`);
 };
 
 // Recurring event instance management
 export const updateEventInstance = async (
-  ncUser: string,
-  ncPass: string,
   eventUid: string,
   instanceDate: string,
   data: UpdateEventData,
@@ -143,20 +111,18 @@ export const updateEventInstance = async (
     location: data.location,
     description: data.description,
   }, {
-    params: { nc_user: ncUser, nc_pass: ncPass, calendar_id: calendarId },
+    params: { calendar_id: calendarId },
   });
   return response.data;
 };
 
 export const deleteEventInstance = async (
-  ncUser: string,
-  ncPass: string,
   eventUid: string,
   instanceDate: string,
   calendarId: string = 'personal'
 ): Promise<{ success: boolean }> => {
   const response = await api.delete(`/calendar/events/${eventUid}/instance/${instanceDate}`, {
-    params: { nc_user: ncUser, nc_pass: ncPass, calendar_id: calendarId },
+    params: { calendar_id: calendarId },
   });
   return response.data;
 };
@@ -204,8 +170,6 @@ export interface ReminderResponse {
 }
 
 export const addReminder = async (
-  ncUser: string,
-  ncPass: string,
   eventUid: string,
   reminderType: string,
   minutesBefore: number,
@@ -215,31 +179,23 @@ export const addReminder = async (
     reminder_type: reminderType,
     minutes_before: minutesBefore,
   }, {
-    params: { nc_user: ncUser, nc_pass: ncPass, calendar_id: calendarId },
+    params: { calendar_id: calendarId },
   });
   return response.data;
 };
 
 export const getEventReminders = async (
-  ncUser: string,
-  ncPass: string,
   eventUid: string
 ): Promise<ReminderResponse[]> => {
-  const response = await api.get(`/calendar/events/${eventUid}/reminders`, {
-    params: { nc_user: ncUser, nc_pass: ncPass },
-  });
+  const response = await api.get(`/calendar/events/${eventUid}/reminders`);
   return response.data;
 };
 
 export const deleteReminder = async (
-  ncUser: string,
-  ncPass: string,
   eventUid: string,
   reminderId: string
 ): Promise<void> => {
-  await api.delete(`/calendar/events/${eventUid}/reminders/${reminderId}`, {
-    params: { nc_user: ncUser, nc_pass: ncPass },
-  });
+  await api.delete(`/calendar/events/${eventUid}/reminders/${reminderId}`);
 };
 
 // Search
@@ -250,8 +206,6 @@ export interface SearchResult {
 }
 
 export const searchEvents = async (
-  ncUser: string,
-  ncPass: string,
   query: string,
   start?: string,
   end?: string,
@@ -259,8 +213,6 @@ export const searchEvents = async (
 ): Promise<SearchResult> => {
   const response = await api.get('/calendar/search', {
     params: {
-      nc_user: ncUser,
-      nc_pass: ncPass,
       query,
       start,
       end,
@@ -269,3 +221,43 @@ export const searchEvents = async (
   });
   return response.data;
 };
+
+// Legacy functions for backward compatibility (deprecated - will be removed)
+// These accept credentials but ignore them - backend uses mail session automatically
+
+/** @deprecated Use getCalendars() instead - credentials are now automatic */
+export const getCalendarsWithCreds = async (
+  _ncUser: string,
+  _ncPass: string
+): Promise<Calendar[]> => getCalendars();
+
+/** @deprecated Use getEvents() instead - credentials are now automatic */
+export const getEventsWithCreds = async (
+  _ncUser: string,
+  _ncPass: string,
+  start?: string,
+  end?: string,
+  calendarId?: string
+): Promise<CalendarEvent[]> => getEvents(start, end, calendarId);
+
+/** @deprecated Use createEvent() instead - credentials are now automatic */
+export const createEventWithCreds = async (
+  _ncUser: string,
+  _ncPass: string,
+  data: CreateEventData
+): Promise<CalendarEvent> => createEvent(data);
+
+/** @deprecated Use updateEvent() instead - credentials are now automatic */
+export const updateEventWithCreds = async (
+  _ncUser: string,
+  _ncPass: string,
+  eventUid: string,
+  data: UpdateEventData
+): Promise<CalendarEvent> => updateEvent(eventUid, data);
+
+/** @deprecated Use deleteEvent() instead - credentials are now automatic */
+export const deleteEventWithCreds = async (
+  _ncUser: string,
+  _ncPass: string,
+  eventUid: string
+): Promise<void> => deleteEvent(eventUid);

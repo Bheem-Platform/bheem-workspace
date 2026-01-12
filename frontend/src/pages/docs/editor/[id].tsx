@@ -14,6 +14,7 @@ import AIAssistant from '@/components/docs/editor/AIAssistant';
 import FindReplace from '@/components/docs/editor/FindReplace';
 import ShareModal from '@/components/docs/ShareModal';
 import { useDocsStore } from '@/stores/docsStore';
+import { useRequireAuth, useAuthStore } from '@/stores/authStore';
 import * as docsEditorApi from '@/lib/docsEditorApi';
 
 // Dynamic import to avoid SSR issues with Tiptap
@@ -49,7 +50,42 @@ interface Document {
     name: string;
     email: string;
   };
+  // File info for uploaded documents
+  mime_type?: string;
+  file_name?: string;
+  file_size?: number;
+  storage_path?: string;
+  document_type?: string;
 }
+
+// Check if document is an uploaded file (not a rich text document)
+const isUploadedFile = (doc: Document): boolean => {
+  // If it has a storage_path and mime_type that's not a bheem doc, it's an uploaded file
+  if (doc.storage_path && doc.mime_type) {
+    const editableMimeTypes = ['application/vnd.bheem.document', 'text/html'];
+    return !editableMimeTypes.includes(doc.mime_type);
+  }
+  return false;
+};
+
+// Check if file content can be displayed as text
+const isTextFile = (mimeType?: string): boolean => {
+  if (!mimeType) return false;
+  return mimeType.startsWith('text/') ||
+         mimeType === 'application/json' ||
+         mimeType === 'application/xml';
+};
+
+// Check if file is a PDF
+const isPdfFile = (mimeType?: string): boolean => {
+  return mimeType === 'application/pdf';
+};
+
+// Check if file is an image
+const isImageFile = (mimeType?: string): boolean => {
+  if (!mimeType) return false;
+  return mimeType.startsWith('image/');
+};
 
 interface Collaborator {
   id: string;
@@ -67,12 +103,18 @@ export default function DocumentEditorPage() {
   const { id } = router.query;
   const documentId = id as string;
 
+  // Auth check
+  const { isAuthenticated, isLoading: authLoading } = useRequireAuth();
+  const user = useAuthStore((state) => state.user);
+
   // Document state
   const [docData, setDocData] = useState<Document | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [fileContent, setFileContent] = useState<string | null>(null);
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null);
 
   // UI state
   const [showComments, setShowComments] = useState(false);
@@ -92,22 +134,44 @@ export default function DocumentEditorPage() {
   const [comments, setComments] = useState<any[]>([]);
   const [versions, setVersions] = useState<any[]>([]);
 
-  // Current user (would come from auth context)
+  // Current user from auth
   const currentUser = {
-    id: 'current-user',
-    name: 'Current User',
-    email: 'user@example.com',
+    id: user?.id || 'current-user',
+    name: user?.username || 'Current User',
+    email: user?.email || 'user@example.com',
   };
 
-  // Fetch document on mount
+  // Fetch document on mount (only when authenticated)
   useEffect(() => {
-    if (!documentId) return;
+    if (!documentId || authLoading || !isAuthenticated) return;
 
     const fetchDocument = async () => {
       setLoading(true);
       try {
         const doc = await docsEditorApi.getDocument(documentId);
+        console.log('Loaded document:', doc);
+        console.log('Document content:', doc.content);
         setDocData(doc);
+
+        // Check if it's an uploaded file
+        if (isUploadedFile(doc)) {
+          // For text files, fetch content
+          if (isTextFile(doc.mime_type)) {
+            try {
+              const content = await docsEditorApi.getFileContent(documentId);
+              setFileContent(content);
+            } catch (e) {
+              console.error('Failed to load file content:', e);
+            }
+          }
+          // Get download URL
+          try {
+            const url = await docsEditorApi.getFileDownloadUrl(documentId);
+            setDownloadUrl(url);
+          } catch (e) {
+            console.error('Failed to get download URL:', e);
+          }
+        }
 
         // Also fetch comments
         const commentsData = await docsEditorApi.getComments(documentId);
@@ -121,7 +185,7 @@ export default function DocumentEditorPage() {
     };
 
     fetchDocument();
-  }, [documentId]);
+  }, [documentId, authLoading, isAuthenticated]);
 
   // Handle content changes
   const handleContentChange = useCallback((content: any) => {
@@ -281,6 +345,15 @@ export default function DocumentEditorPage() {
     };
   }, []);
 
+  // Show loading while checking auth
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" />
+      </div>
+    );
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
@@ -353,16 +426,80 @@ export default function DocumentEditorPage() {
 
         {/* Main content area */}
         <div className="flex-1 flex overflow-hidden">
-          {/* Editor */}
+          {/* Editor or File Preview */}
           <div className="flex-1 p-4 overflow-auto">
             <div className="max-w-4xl mx-auto">
-              <TiptapEditor
-                content={docData.content}
-                onChange={handleContentChange}
-                onSave={handleSave}
-                placeholder="Start typing your document..."
-                className="min-h-[calc(100vh-200px)]"
-              />
+              {isUploadedFile(docData) ? (
+                /* File Preview for uploaded documents */
+                <div className="bg-white rounded-lg shadow-sm border p-6">
+                  <div className="flex items-center justify-between mb-6">
+                    <div>
+                      <h2 className="text-lg font-semibold text-gray-900">{docData.file_name || docData.title}</h2>
+                      <p className="text-sm text-gray-500">
+                        {docData.mime_type} • {docData.file_size ? `${(docData.file_size / 1024).toFixed(1)} KB` : 'Unknown size'}
+                      </p>
+                    </div>
+                    {downloadUrl && (
+                      <a
+                        href={downloadUrl}
+                        download={docData.file_name}
+                        className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        Download File
+                      </a>
+                    )}
+                  </div>
+
+                  {/* File preview based on type */}
+                  {isPdfFile(docData.mime_type) && downloadUrl ? (
+                    /* PDF Preview */
+                    <div className="border rounded-lg overflow-hidden">
+                      <iframe
+                        src={downloadUrl}
+                        className="w-full h-[70vh]"
+                        title={docData.file_name || 'PDF Preview'}
+                      />
+                    </div>
+                  ) : isImageFile(docData.mime_type) && downloadUrl ? (
+                    /* Image Preview */
+                    <div className="border rounded-lg overflow-hidden p-4 bg-gray-50 flex items-center justify-center">
+                      <img
+                        src={downloadUrl}
+                        alt={docData.file_name || 'Image Preview'}
+                        className="max-w-full max-h-[70vh] object-contain"
+                      />
+                    </div>
+                  ) : isTextFile(docData.mime_type) && fileContent ? (
+                    /* Text file content preview */
+                    <div className="border rounded-lg overflow-hidden">
+                      <div className="bg-gray-100 px-4 py-2 border-b">
+                        <span className="text-sm font-medium text-gray-600">File Contents</span>
+                      </div>
+                      <pre className="p-4 overflow-auto max-h-[60vh] text-sm font-mono bg-gray-50 whitespace-pre-wrap">
+                        {fileContent}
+                      </pre>
+                    </div>
+                  ) : (
+                    /* No preview available */
+                    <div className="flex flex-col items-center justify-center py-16 text-gray-500">
+                      <svg className="w-16 h-16 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                      <p className="text-lg font-medium">Preview not available</p>
+                      <p className="text-sm">Download the file to view its contents</p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* TiptapEditor for rich text documents */
+                <TiptapEditor
+                  content={docData.content}
+                  onChange={handleContentChange}
+                  onSave={handleSave}
+                  placeholder="Start typing your document..."
+                  className="min-h-[calc(100vh-200px)]"
+                />
+              )}
             </div>
           </div>
 

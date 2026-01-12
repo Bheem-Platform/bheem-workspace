@@ -423,3 +423,14 @@ export const getStorageUsageV2 = async (): Promise<{
   const response = await api.get('/docs/v2/storage/usage');
   return response.data;
 };
+
+// Get presigned URL for sharing (V2 API)
+export const getPresignedUrlV2 = async (
+  documentId: string,
+  expiresIn: number = 604800 // 7 days in seconds
+): Promise<{ url: string; expires_in: number; storage_path?: string }> => {
+  const response = await api.get(`/docs/v2/documents/${documentId}/presigned-url`, {
+    params: { expires_in: expiresIn },
+  });
+  return response.data;
+};

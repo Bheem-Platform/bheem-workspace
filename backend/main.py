@@ -85,7 +85,10 @@ app = FastAPI(
     title="Bheem Workspace",
     description="Unified Collaboration Platform - Meet, Docs, Mail, Admin",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/api-docs",      # Changed from /docs to avoid conflict with Bheem Docs
+    redoc_url="/api-redoc",    # Changed from /redoc
+    openapi_url="/api-openapi.json"  # Changed from /openapi.json
 )
 
 app.add_middleware(

@@ -15,7 +15,8 @@ import type { CalendarEvent } from '@/types/calendar';
 
 export default function CalendarPage() {
   const { isAuthenticated: isLoggedIn, isLoading: authLoading } = useRequireAuth();
-  const { isNextcloudAuthenticated } = useCredentialsStore();
+  // Calendar now uses mail session credentials automatically
+  const { isMailAuthenticated } = useCredentialsStore();
 
   const {
     viewType,
@@ -33,19 +34,20 @@ export default function CalendarPage() {
   } = useCalendarStore();
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [showCredentialsPrompt, setShowCredentialsPrompt] = useState(false);
+  const [showMailLoginPrompt, setShowMailLoginPrompt] = useState(false);
 
   // Fetch calendars and events on mount
+  // Calendar now uses mail session automatically - no separate Nextcloud login needed
   useEffect(() => {
     if (!authLoading && isLoggedIn) {
-      if (!isNextcloudAuthenticated) {
-        setShowCredentialsPrompt(true);
+      if (!isMailAuthenticated) {
+        setShowMailLoginPrompt(true);
       } else {
         fetchCalendars();
         fetchEvents();
       }
     }
-  }, [authLoading, isLoggedIn, isNextcloudAuthenticated]);
+  }, [authLoading, isLoggedIn, isMailAuthenticated]);
 
   // Keyboard shortcuts
   useHotkeys('c', () => openEventModal(), { enabled: !isEventModalOpen });
@@ -83,10 +85,11 @@ export default function CalendarPage() {
     );
   }
 
-  // Show credentials prompt if not authenticated with Nextcloud
-  if (showCredentialsPrompt) {
-    return <NextcloudLoginPrompt onSuccess={() => {
-      setShowCredentialsPrompt(false);
+  // Show mail login prompt if not authenticated with mail
+  // Calendar uses the same credentials as Mail - no separate login needed
+  if (showMailLoginPrompt) {
+    return <MailLoginPrompt onSuccess={() => {
+      setShowMailLoginPrompt(false);
       fetchCalendars();
       fetchEvents();
     }} />;
@@ -264,31 +267,33 @@ function ScheduleView({ onEventClick }: { onEventClick: (event: CalendarEvent) =
   );
 }
 
-// Nextcloud Login Prompt
-import { Lock, Cloud } from 'lucide-react';
+// Mail Login Prompt - Calendar uses mail session credentials
+import { Mail, Calendar as CalendarIcon, ArrowRight } from 'lucide-react';
 
-function NextcloudLoginPrompt({ onSuccess }: { onSuccess: () => void }) {
-  const { setNextcloudCredentials } = useCredentialsStore();
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+function MailLoginPrompt({ onSuccess }: { onSuccess: () => void }) {
+  const { isMailAuthenticated, checkMailSession } = useCredentialsStore();
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
+  // Check if user is already logged into mail
+  useEffect(() => {
+    const checkSession = async () => {
+      const isValid = await checkMailSession();
+      if (isValid) {
+        onSuccess();
+      }
+    };
+    checkSession();
+  }, []);
 
-    try {
-      // Store credentials
-      setNextcloudCredentials({ username, password });
-      onSuccess();
-    } catch (err: any) {
-      setError('Failed to save credentials');
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Poll for mail session changes
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      const isValid = await checkMailSession();
+      if (isValid) {
+        onSuccess();
+      }
+    }, 2000);
+    return () => clearInterval(interval);
+  }, []);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-blue-500 to-cyan-600">
@@ -296,66 +301,48 @@ function NextcloudLoginPrompt({ onSuccess }: { onSuccess: () => void }) {
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-20 h-20 bg-white/20 backdrop-blur-sm rounded-2xl mb-4">
-            <Cloud size={40} className="text-white" />
+            <CalendarIcon size={40} className="text-white" />
           </div>
           <h1 className="text-3xl font-bold text-white">Bheem Calendar</h1>
-          <p className="text-white/80 mt-2">Connect your Nextcloud account</p>
+          <p className="text-white/80 mt-2">Uses your workspace credentials</p>
         </div>
 
-        {/* Login Form */}
+        {/* Info Card */}
         <div className="bg-white rounded-2xl shadow-2xl p-8">
-          <form onSubmit={handleSubmit} className="space-y-5">
-            {error && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-                {error}
-              </div>
-            )}
-
-            <div>
-              <label htmlFor="username" className="block text-sm font-medium text-gray-700 mb-1">
-                Username
-              </label>
-              <input
-                id="username"
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="Your Nextcloud username"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                required
-              />
+          <div className="text-center space-y-4">
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-50 rounded-full mb-2">
+              <Mail size={32} className="text-blue-500" />
             </div>
 
-            <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
-                Password
-              </label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                <input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Your Nextcloud password"
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  required
-                />
-              </div>
+            <h2 className="text-xl font-semibold text-gray-900">
+              Login to Mail First
+            </h2>
+
+            <p className="text-gray-600">
+              Calendar uses your workspace email credentials. Simply login to Bheem Mail with your workspace email and password, then return here.
+            </p>
+
+            <div className="bg-blue-50 rounded-lg p-4 text-left">
+              <p className="text-sm text-blue-800 font-medium mb-2">How it works:</p>
+              <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
+                <li>Go to Bheem Mail</li>
+                <li>Login with your workspace credentials</li>
+                <li>Come back here - Calendar will work automatically!</li>
+              </ol>
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full py-3 px-4 bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-medium rounded-lg hover:from-blue-600 hover:to-cyan-600 disabled:opacity-50 transition-all"
+            <a
+              href="/mail"
+              className="inline-flex items-center justify-center gap-2 w-full py-3 px-4 bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-medium rounded-lg hover:from-blue-600 hover:to-cyan-600 transition-all"
             >
-              {loading ? 'Connecting...' : 'Connect Calendar'}
-            </button>
-          </form>
+              Go to Mail
+              <ArrowRight size={18} />
+            </a>
 
-          <p className="mt-6 text-center text-sm text-gray-500">
-            Your credentials are stored securely in your browser.
-          </p>
+            <p className="text-xs text-gray-400 mt-4">
+              This page will automatically redirect once you're logged in.
+            </p>
+          </div>
         </div>
 
         <div className="text-center mt-6">

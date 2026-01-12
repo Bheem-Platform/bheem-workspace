@@ -169,6 +169,7 @@ class DocsFolderService:
     async def list_folders(
         self,
         company_id: UUID,
+        user_id: Optional[UUID] = None,
         parent_id: Optional[UUID] = None,
         tenant_id: Optional[UUID] = None,
         include_document_count: bool = True
@@ -178,6 +179,7 @@ class DocsFolderService:
 
         Args:
             company_id: ERP company ID
+            user_id: Filter by folder owner (created_by) - required for user-specific folders
             parent_id: Parent folder ID (None for root folders)
             tenant_id: SaaS tenant ID
             include_document_count: Include document counts
@@ -191,6 +193,12 @@ class DocsFolderService:
         try:
             conditions = ["f.is_active = true", "f.company_id = %s"]
             params = [str(company_id)]
+
+            # User filter - show only folders created by this user
+            # This ensures each user only sees their own folders
+            if user_id:
+                conditions.append("f.created_by = %s")
+                params.append(str(user_id))
 
             if parent_id:
                 conditions.append("f.parent_id = %s")
@@ -236,10 +244,15 @@ class DocsFolderService:
     async def get_folder_tree(
         self,
         company_id: UUID,
+        user_id: Optional[UUID] = None,
         max_depth: int = 10
     ) -> List[Dict[str, Any]]:
         """
         Get complete folder tree structure.
+
+        Args:
+            company_id: ERP company ID
+            user_id: Filter by folder owner (created_by) - required for user-specific tree
 
         Returns nested folder structure for tree view.
         """
@@ -247,16 +260,26 @@ class DocsFolderService:
         cur = conn.cursor(cursor_factory=RealDictCursor)
 
         try:
-            # Get all folders
-            cur.execute("""
+            # Build conditions
+            conditions = ["f.company_id = %s", "f.is_active = true"]
+            params = [str(company_id)]
+
+            if user_id:
+                conditions.append("f.created_by = %s")
+                params.append(str(user_id))
+
+            where_clause = " AND ".join(conditions)
+
+            # Get all folders for this user
+            cur.execute(f"""
                 SELECT
                     f.id, f.name, f.description, f.path, f.level,
                     f.parent_id, f.color, f.icon, f.is_system,
                     (SELECT COUNT(*) FROM dms.documents WHERE folder_id = f.id AND is_active = true) as document_count
                 FROM dms.folders f
-                WHERE f.company_id = %s AND f.is_active = true
+                WHERE {where_clause}
                 ORDER BY f.path
-            """, (str(company_id),))
+            """, params)
 
             all_folders = [dict(row) for row in cur.fetchall()]
 

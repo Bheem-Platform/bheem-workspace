@@ -85,16 +85,24 @@ export default function DocsPage() {
     }
   };
 
-  // Fetch files on mount
+  // V2 API uses JWT auth, doesn't need Nextcloud credentials
+  const USE_V2_API = true;
+
+  // Fetch files on mount only (not on every path change - navigation handles that)
   useEffect(() => {
     if (!authLoading && isLoggedIn) {
-      if (!isNextcloudAuthenticated) {
+      if (USE_V2_API) {
+        // V2 API uses JWT auth - just fetch files
+        fetchFiles();
+      } else if (!isNextcloudAuthenticated) {
+        // Legacy API needs Nextcloud credentials
         setShowCredentialsPrompt(true);
       } else {
         fetchFiles();
       }
     }
-  }, [authLoading, isLoggedIn, isNextcloudAuthenticated, currentPath]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, isLoggedIn, isNextcloudAuthenticated]);
 
   // Drag and drop
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -115,7 +123,14 @@ export default function DocsPage() {
   );
 
   const handleFileOpen = (file: FileItem) => {
-    // Check if it's a Bheem Docs document (stored with special metadata or extension)
+    if (USE_V2_API) {
+      // V2 API: Open all documents in the Bheem Docs editor/viewer
+      // The editor will handle different file types appropriately
+      router.push(`/docs/editor/${file.id}`);
+      return;
+    }
+
+    // Legacy Nextcloud mode: Check file types
     const isBheemDoc = file.mimeType === 'application/vnd.bheem.document' ||
                        file.name.endsWith('.bheem') ||
                        file.path.includes('/bheem-docs/');
@@ -140,12 +155,13 @@ export default function DocsPage() {
   };
 
   const handleBulkDelete = async () => {
-    const filesToDelete = files
+    // V2 API expects file IDs, not paths
+    const fileIdsToDelete = files
       .filter((f) => selectedFiles.includes(f.id))
-      .map((f) => f.path);
+      .map((f) => f.id);
 
-    if (filesToDelete.length > 0) {
-      await deleteFiles(filesToDelete);
+    if (fileIdsToDelete.length > 0) {
+      await deleteFiles(fileIdsToDelete);
     }
   };
 
@@ -418,7 +434,8 @@ export default function DocsPage() {
             file={selectedForAction}
             onConfirm={() => {
               if (selectedForAction) {
-                deleteFiles([selectedForAction.path]);
+                // V2 API expects file ID, not path
+                deleteFiles([selectedForAction.id]);
               }
             }}
             onCancel={closeDeleteConfirm}

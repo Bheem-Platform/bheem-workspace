@@ -198,14 +198,14 @@ class NextcloudService:
     async def create_user(self, username: str, password: str, email: str = None) -> bool:
         """Create a new Nextcloud user via OCS API"""
         ocs_url = f"{self._get_ocs_url()}/cloud/users"
-        
+
         data = {
             "userid": username,
             "password": password
         }
         if email:
             data["email"] = email
-        
+
         async with httpx.AsyncClient(verify=False) as client:
             response = await client.post(
                 url=ocs_url,
@@ -214,6 +214,28 @@ class NextcloudService:
                 data=data
             )
             return response.status_code == 200
+
+    async def sync_password(self, username: str, new_password: str) -> bool:
+        """
+        Sync user password to Nextcloud.
+        Called after login to ensure Nextcloud password matches Bheem Passport password.
+        """
+        ocs_url = f"{self._get_ocs_url()}/cloud/users/{username}"
+
+        async with httpx.AsyncClient(verify=False) as client:
+            response = await client.put(
+                url=ocs_url,
+                auth=(self.admin_user, self.admin_pass),
+                headers={"OCS-APIREQUEST": "true"},
+                data={"key": "password", "value": new_password}
+            )
+
+            if response.status_code == 200:
+                print(f"[Nextcloud] Password synced for user: {username}")
+                return True
+            else:
+                print(f"[Nextcloud] Password sync failed for {username}: {response.status_code}")
+                return False
     
     async def user_exists(self, username: str) -> bool:
         """Check if a user exists"""

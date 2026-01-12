@@ -55,6 +55,9 @@ export default function TiptapEditor({
   const [isSaving, setIsSaving] = useState(false);
   const [wordCount, setWordCount] = useState({ words: 0, characters: 0 });
 
+  // Debug: log content prop
+  console.log('TiptapEditor received content:', content);
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -131,6 +134,7 @@ export default function TiptapEditor({
         class: 'prose prose-lg max-w-none focus:outline-none min-h-[500px] px-8 py-6',
       },
     },
+    immediatelyRender: false,  // Disable SSR to avoid hydration mismatches
   });
 
   const updateWordCount = useCallback((editor: any) => {

@@ -95,7 +95,8 @@ class DocsEditorService:
                     id, title, description, document_type, status,
                     editor_content, editor_content_html, is_editable,
                     current_version, last_edited_by, last_edited_at,
-                    created_at, updated_at
+                    created_at, updated_at,
+                    mime_type, file_name, file_size, storage_path, storage_bucket
                 FROM dms.documents
                 WHERE id = %s AND is_active = true AND deleted_at IS NULL
             """, (str(document_id),))

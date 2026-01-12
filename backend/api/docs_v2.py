@@ -269,14 +269,17 @@ async def list_documents(
 
     Supports filtering by folder, type, status, tags, and ERP entity.
     Full-text search available via the search parameter.
+    Each user only sees their own documents (created_by filter).
     """
     company_id = get_user_company_id(current_user)
+    user_id = UUID(current_user['id'])
 
     # Parse tags
     tag_list = [t.strip() for t in tags.split(',')] if tags else None
 
     result = await service.list_documents(
         company_id=company_id,
+        user_id=user_id,  # Filter by current user - each user sees only their docs
         folder_id=UUID(folder_id) if folder_id else None,
         document_type=document_type,
         status=status,
@@ -549,11 +552,13 @@ async def list_folders(
     service: DocsFolderService = Depends(get_folder_service),
     current_user: dict = Depends(get_current_user)
 ):
-    """List folders at a specific level."""
+    """List folders at a specific level. Each user only sees their own folders."""
     company_id = get_user_company_id(current_user)
+    user_id = UUID(current_user['id'])
 
     folders = await service.list_folders(
         company_id=company_id,
+        user_id=user_id,  # Filter by current user - each user sees only their folders
         parent_id=UUID(parent_id) if parent_id else None
     )
 
@@ -565,10 +570,11 @@ async def get_folder_tree(
     service: DocsFolderService = Depends(get_folder_service),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get complete folder tree structure."""
+    """Get complete folder tree structure. Each user only sees their own folders."""
     company_id = get_user_company_id(current_user)
+    user_id = UUID(current_user['id'])
 
-    tree = await service.get_folder_tree(company_id)
+    tree = await service.get_folder_tree(company_id, user_id=user_id)
     return {"tree": tree}
 
 

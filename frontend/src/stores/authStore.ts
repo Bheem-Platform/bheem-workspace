@@ -21,8 +21,8 @@ interface AuthState {
 
   // Actions
   initialize: () => Promise<void>;
-  setAuth: (token: string, user: User) => void;
-  logout: () => void;
+  setAuth: (token: string, user: User) => Promise<void>;
+  logout: () => Promise<void>;
   fetchCurrentUser: () => Promise<User | null>;
 }
 
@@ -81,14 +81,35 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 
-  setAuth: (token, user) => {
+  setAuth: async (token, user) => {
     if (typeof window !== 'undefined') {
       localStorage.setItem('auth_token', token);
     }
     set({ token, user, isAuthenticated: true, isLoading: false });
+
+    // Create SSO session for seamless cross-service authentication (mail, docs, meet)
+    try {
+      await api.post('/sso/session/create', {}, {
+        withCredentials: true  // Important: include cookies in request
+      });
+      console.log('[Auth] SSO session created for cross-service authentication');
+    } catch (error) {
+      console.warn('[Auth] Could not create SSO session:', error);
+      // Non-critical - user can still use the app, just might need to re-auth for external services
+    }
   },
 
-  logout: () => {
+  logout: async () => {
+    // Clear SSO session cookie first
+    try {
+      await api.post('/sso/logout', {}, {
+        withCredentials: true
+      });
+      console.log('[Auth] SSO session cleared');
+    } catch (error) {
+      console.warn('[Auth] Could not clear SSO session:', error);
+    }
+
     if (typeof window !== 'undefined') {
       localStorage.removeItem('auth_token');
     }

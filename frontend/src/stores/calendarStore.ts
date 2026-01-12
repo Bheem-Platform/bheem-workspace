@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import dayjs from 'dayjs';
 import * as calendarApi from '@/lib/calendarApi';
-import { useCredentialsStore } from './credentialsStore';
 import type {
   Calendar,
   CalendarEvent,
@@ -94,19 +93,11 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   ...initialState,
 
   fetchCalendars: async () => {
-    const credentials = useCredentialsStore.getState().getNextcloudCredentials();
-    if (!credentials) {
-      set({ error: 'Nextcloud credentials not found' });
-      return;
-    }
-
     set((state) => ({ loading: { ...state.loading, calendars: true }, error: null }));
 
     try {
-      const calendars = await calendarApi.getCalendars(
-        credentials.username,
-        credentials.password
-      );
+      // Uses mail session credentials automatically - no need to pass them
+      const calendars = await calendarApi.getCalendars();
 
       const mappedCalendars: Calendar[] = (calendars || []).map((c: any) => ({
         id: c.id || c.href,
@@ -124,16 +115,18 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         visibleCalendarIds: mappedCalendars.map((c) => c.id),
       });
     } catch (error: any) {
-      set({ error: error.response?.data?.detail || 'Failed to fetch calendars' });
+      const detail = error.response?.data?.detail;
+      if (detail?.includes('credentials required') || detail?.includes('login to Mail')) {
+        set({ error: 'Please login to Mail first to access your calendar.' });
+      } else {
+        set({ error: detail || 'Failed to fetch calendars' });
+      }
     } finally {
       set((state) => ({ loading: { ...state.loading, calendars: false } }));
     }
   },
 
   fetchEvents: async (start?: Date, end?: Date) => {
-    const credentials = useCredentialsStore.getState().getNextcloudCredentials();
-    if (!credentials) return;
-
     const { currentDate, viewType } = get();
 
     // Calculate date range based on view
@@ -160,9 +153,8 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     set((state) => ({ loading: { ...state.loading, events: true }, error: null }));
 
     try {
+      // Uses mail session credentials automatically - no need to pass them
       const events = await calendarApi.getEvents(
-        credentials.username,
-        credentials.password,
         rangeStart.toISOString(),
         rangeEnd.toISOString()
       );
@@ -200,24 +192,23 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
 
       set({ events: mappedEvents });
     } catch (error: any) {
-      set({ error: error.response?.data?.detail || 'Failed to fetch events' });
+      const detail = error.response?.data?.detail;
+      if (detail?.includes('credentials required') || detail?.includes('login to Mail')) {
+        set({ error: 'Please login to Mail first to access your calendar.' });
+      } else {
+        set({ error: detail || 'Failed to fetch events' });
+      }
     } finally {
       set((state) => ({ loading: { ...state.loading, events: false } }));
     }
   },
 
   createEvent: async (data: CreateEventData) => {
-    const credentials = useCredentialsStore.getState().getNextcloudCredentials();
-    if (!credentials) return false;
-
     set((state) => ({ loading: { ...state.loading, action: true }, error: null }));
 
     try {
-      await calendarApi.createEvent(
-        credentials.username,
-        credentials.password,
-        data
-      );
+      // Uses mail session credentials automatically
+      await calendarApi.createEvent(data);
 
       // Refresh events
       await get().fetchEvents();
@@ -232,18 +223,11 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   },
 
   updateEvent: async (uid: string, data: UpdateEventData) => {
-    const credentials = useCredentialsStore.getState().getNextcloudCredentials();
-    if (!credentials) return false;
-
     set((state) => ({ loading: { ...state.loading, action: true }, error: null }));
 
     try {
-      await calendarApi.updateEvent(
-        credentials.username,
-        credentials.password,
-        uid,
-        data
-      );
+      // Uses mail session credentials automatically
+      await calendarApi.updateEvent(uid, data);
 
       await get().fetchEvents();
       set({ isEventModalOpen: false, eventFormData: {}, isEditMode: false });
@@ -257,17 +241,11 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   },
 
   deleteEvent: async (uid: string) => {
-    const credentials = useCredentialsStore.getState().getNextcloudCredentials();
-    if (!credentials) return;
-
     set((state) => ({ loading: { ...state.loading, action: true } }));
 
     try {
-      await calendarApi.deleteEvent(
-        credentials.username,
-        credentials.password,
-        uid
-      );
+      // Uses mail session credentials automatically
+      await calendarApi.deleteEvent(uid);
 
       set((state) => ({
         events: state.events.filter((e) => e.uid !== uid),

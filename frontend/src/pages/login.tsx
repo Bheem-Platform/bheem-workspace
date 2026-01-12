@@ -93,8 +93,8 @@ export default function LoginPage() {
       // Use redirect param if specified, otherwise use role-based redirect
       const finalRedirect = redirectTo || targetUrl;
 
-      // Now set auth state and redirect
-      setAuth(access_token, user);
+      // Now set auth state (creates SSO session) and redirect
+      await setAuth(access_token, user);
       router.push(finalRedirect);
     } catch (err: any) {
       console.error('Login error:', err);
@@ -177,8 +177,8 @@ export default function LoginPage() {
         console.log('Tenant note:', tenantErr.response?.data?.detail || 'proceeding');
       }
 
-      // Step 4: Set auth and redirect
-      setAuth(access_token, user);
+      // Step 4: Set auth (creates SSO session) and redirect
+      await setAuth(access_token, user);
       setSuccess('Account created successfully! Redirecting...');
 
       setTimeout(() => {

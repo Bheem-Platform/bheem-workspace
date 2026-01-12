@@ -383,9 +383,58 @@ class DocsDocumentService:
             cur.close()
             conn.close()
 
+    async def get_presigned_url(
+        self,
+        document_id: str,
+        expires_in: int = 3600
+    ) -> Optional[str]:
+        """
+        Get a presigned URL for downloading a document file.
+
+        Args:
+            document_id: Document ID
+            expires_in: URL expiration time in seconds (default 1 hour)
+
+        Returns:
+            Presigned URL or None if file not found
+        """
+        import boto3
+        from botocore.config import Config
+
+        # Get document details
+        doc = await self.get_document(UUID(document_id))
+        if not doc or not doc.get('storage_path'):
+            return None
+
+        try:
+            s3 = boto3.client(
+                's3',
+                endpoint_url=settings.S3_ENDPOINT,
+                aws_access_key_id=settings.S3_ACCESS_KEY,
+                aws_secret_access_key=settings.S3_SECRET_KEY,
+                region_name=settings.S3_REGION,
+                config=Config(signature_version='s3v4')
+            )
+
+            url = s3.generate_presigned_url(
+                'get_object',
+                Params={
+                    'Bucket': doc.get('storage_bucket', settings.S3_BUCKET),
+                    'Key': doc['storage_path']
+                },
+                ExpiresIn=expires_in
+            )
+
+            return url
+
+        except Exception as e:
+            logger.error(f"Failed to generate presigned URL: {e}")
+            return None
+
     async def list_documents(
         self,
         company_id: UUID,
+        user_id: Optional[UUID] = None,
         folder_id: Optional[UUID] = None,
         tenant_id: Optional[UUID] = None,
         entity_type: Optional[str] = None,
@@ -402,6 +451,10 @@ class DocsDocumentService:
         """
         List documents with filtering and pagination.
 
+        Args:
+            company_id: ERP company ID
+            user_id: Filter by document owner (created_by) - required for user-specific docs
+
         Returns:
             Dict with documents list and total count
         """
@@ -415,6 +468,12 @@ class DocsDocumentService:
             # Company filter
             conditions.append("d.company_id = %s")
             params.append(str(company_id))
+
+            # User filter - show only documents created by this user
+            # This ensures each user only sees their own documents
+            if user_id:
+                conditions.append("d.created_by = %s")
+                params.append(str(user_id))
 
             # Folder filter
             if folder_id:

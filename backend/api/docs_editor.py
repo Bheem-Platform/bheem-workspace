@@ -425,6 +425,76 @@ async def save_editor_content(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.get("/documents/{document_id}/download-url")
+async def get_download_url(
+    document_id: str,
+    service: DocsEditorService = Depends(get_editor_service),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get a presigned download URL for an uploaded file.
+    """
+    from services.docs_document_service import DocsDocumentService
+
+    doc_service = DocsDocumentService()
+    url = await doc_service.get_presigned_url(document_id)
+
+    if not url:
+        raise HTTPException(status_code=404, detail="File not found or no storage path")
+
+    return {"url": url}
+
+
+@router.get("/documents/{document_id}/file-content")
+async def get_file_content(
+    document_id: str,
+    service: DocsEditorService = Depends(get_editor_service),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get the text content of an uploaded file (for text/csv/json files).
+    """
+    from services.docs_document_service import DocsDocumentService
+    import boto3
+    from core.config import settings
+
+    doc_service = DocsDocumentService()
+    doc = await doc_service.get_document(document_id)
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Check if it's a text file
+    mime_type = doc.get('mime_type', '')
+    if not (mime_type.startswith('text/') or mime_type in ['application/json', 'application/xml']):
+        raise HTTPException(status_code=400, detail="File is not a text file")
+
+    storage_path = doc.get('storage_path')
+    if not storage_path:
+        raise HTTPException(status_code=404, detail="No file stored")
+
+    try:
+        # Fetch from S3
+        s3 = boto3.client(
+            's3',
+            endpoint_url=settings.S3_ENDPOINT,
+            aws_access_key_id=settings.S3_ACCESS_KEY,
+            aws_secret_access_key=settings.S3_SECRET_KEY,
+            region_name=settings.S3_REGION
+        )
+
+        response = s3.get_object(
+            Bucket=doc.get('storage_bucket', settings.S3_BUCKET),
+            Key=storage_path
+        )
+
+        content = response['Body'].read().decode('utf-8')
+        return {"content": content}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read file: {str(e)}")
+
+
 # =============================================================================
 # COLLABORATION ENDPOINTS
 # =============================================================================

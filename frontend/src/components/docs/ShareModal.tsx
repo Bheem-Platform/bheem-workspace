@@ -19,7 +19,8 @@ export default function ShareModal({ isOpen, onClose }: ShareModalProps) {
 
   const handleCreateLink = async () => {
     setIsCreating(true);
-    const url = await createShareLink(selectedForAction.path, expiresDays);
+    // Use file ID for V2 API (path for legacy)
+    const url = await createShareLink(selectedForAction.id, expiresDays);
     if (url) {
       setShareUrl(url);
     }

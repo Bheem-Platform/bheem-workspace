@@ -12,6 +12,25 @@ from dateutil.rrule import rrule, DAILY, WEEKLY, MONTHLY, YEARLY, weekday
 from dateutil.rrule import MO, TU, WE, TH, FR, SA, SU
 from core.config import settings
 
+
+# CalDAV Exception Classes
+class CalDAVError(Exception):
+    """Base exception for CalDAV errors"""
+    pass
+
+class CalDAVRateLimitError(CalDAVError):
+    """Raised when Nextcloud rate limits requests (429)"""
+    pass
+
+class CalDAVAuthError(CalDAVError):
+    """Raised when authentication fails (401)"""
+    pass
+
+class CalDAVNotFoundError(CalDAVError):
+    """Raised when resource not found (404)"""
+    pass
+
+
 # Frequency mapping for dateutil.rrule
 FREQ_MAP = {
     'DAILY': DAILY,
@@ -279,6 +298,13 @@ class CalDAVService:
                 return event_uid
             else:
                 print(f"CalDAV create_event failed: status={response.status_code}, url={caldav_url}, response={response.text[:500]}")
+                # Raise specific exceptions for different error types
+                if response.status_code == 429:
+                    raise CalDAVRateLimitError("Too many requests to Nextcloud. Please wait a moment and try again.")
+                elif response.status_code == 401:
+                    raise CalDAVAuthError("Invalid Nextcloud credentials")
+                elif response.status_code == 404:
+                    raise CalDAVNotFoundError("Calendar not found or user doesn't exist in Nextcloud")
                 return None
     
     async def delete_event(

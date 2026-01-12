@@ -86,8 +86,8 @@ export default function AppSwitcher({
   // Auto-detect active app from route if not provided
   const currentApp = activeApp || detectActiveApp(router.pathname);
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     router.push('/login');
   };
 

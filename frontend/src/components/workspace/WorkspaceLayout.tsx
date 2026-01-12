@@ -52,8 +52,8 @@ export default function WorkspaceLayout({ children, title }: WorkspaceLayoutProp
   const displayEmail = user?.email || '';
   const tenantName = 'Bheem Workspace';
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     router.push('/login');
   };
 

@@ -42,9 +42,14 @@ async def jwks():
     }
 
 
+# SSO Session Cookie name
+SSO_SESSION_COOKIE = "bheem_sso_session"
+
+
 # Authorization endpoint
 @router.get("/authorize")
 async def authorize(
+    request: Request,
     client_id: str,
     redirect_uri: str,
     response_type: str = "code",
@@ -54,7 +59,7 @@ async def authorize(
     code_challenge: Optional[str] = None,
     code_challenge_method: Optional[str] = None
 ):
-    """OAuth2/OIDC Authorization endpoint - displays login form"""
+    """OAuth2/OIDC Authorization endpoint - checks session first, then displays login form"""
     # Validate client
     client = sso_service.get_client(client_id)
     if not client:
@@ -62,6 +67,35 @@ async def authorize(
 
     if redirect_uri not in client["redirect_uris"]:
         raise HTTPException(status_code=400, detail="Invalid redirect_uri")
+
+    # ═══════════════════════════════════════════════════════════════════
+    # CHECK FOR EXISTING SSO SESSION - Skip login if already authenticated
+    # ═══════════════════════════════════════════════════════════════════
+    session_id = request.cookies.get(SSO_SESSION_COOKIE)
+    if session_id:
+        session_data = sso_service.validate_session(session_id)
+        if session_data:
+            # User already authenticated - generate auth code and redirect immediately
+            code = sso_service.generate_authorization_code(
+                user_id=session_data["user_id"],
+                client_id=client_id,
+                redirect_uri=redirect_uri,
+                scope=scope,
+                code_challenge=code_challenge if code_challenge else None,
+                code_challenge_method=code_challenge_method if code_challenge_method else None
+            )
+
+            # Build redirect URL
+            redirect_params = f"code={code}"
+            if state:
+                redirect_params += f"&state={state}"
+
+            separator = "&" if "?" in redirect_uri else "?"
+
+            # Extend session (sliding expiration)
+            sso_service.extend_session(session_id)
+
+            return RedirectResponse(url=f"{redirect_uri}{separator}{redirect_params}", status_code=302)
 
     # Return login form
     login_html = f"""
@@ -230,6 +264,18 @@ async def authorize_submit(
     person = name_result.fetchone()
     full_name = f"{person.first_name} {person.last_name}" if person else user.username
 
+    # ═══════════════════════════════════════════════════════════════════
+    # CREATE SSO SESSION - For seamless login to other services
+    # ═══════════════════════════════════════════════════════════════════
+    session_id = sso_service.create_session(
+        user_id=user.id,
+        username=user.username,
+        email=user.email,
+        name=full_name,
+        company_id=user.company_id,
+        person_id=user.person_id
+    )
+
     # Generate authorization code
     code = sso_service.generate_authorization_code(
         user_id=user.id,
@@ -246,7 +292,25 @@ async def authorize_submit(
         redirect_params += f"&state={state}"
 
     separator = "&" if "?" in redirect_uri else "?"
-    return RedirectResponse(url=f"{redirect_uri}{separator}{redirect_params}", status_code=302)
+
+    # Create response with redirect
+    response = RedirectResponse(url=f"{redirect_uri}{separator}{redirect_params}", status_code=302)
+
+    # ═══════════════════════════════════════════════════════════════════
+    # SET SSO SESSION COOKIE - Works across all *.bheem.cloud subdomains
+    # ═══════════════════════════════════════════════════════════════════
+    response.set_cookie(
+        key=SSO_SESSION_COOKIE,
+        value=session_id,
+        max_age=86400,  # 24 hours
+        httponly=True,
+        secure=True,  # HTTPS only
+        samesite="lax",  # Allow cross-site navigation
+        domain=".bheem.cloud",  # Works across all subdomains
+        path="/"
+    )
+
+    return response
 
 
 @router.post("/token")
@@ -440,3 +504,159 @@ async def revoke(
         del refresh_tokens[token]
 
     return {"status": "success"}
+
+
+# ═══════════════════════════════════════════════════════════════════
+# SSO LOGOUT - Clear session and redirect
+# ═══════════════════════════════════════════════════════════════════
+
+@router.get("/logout")
+@router.post("/logout")
+async def sso_logout(
+    request: Request,
+    post_logout_redirect_uri: Optional[str] = None
+):
+    """
+    SSO Logout endpoint.
+    Clears the SSO session cookie and redirects to the specified URI or workspace home.
+    """
+    session_id = request.cookies.get(SSO_SESSION_COOKIE)
+
+    # Delete session from storage
+    if session_id:
+        sso_service.delete_session(session_id)
+
+    # Determine redirect URL
+    redirect_url = post_logout_redirect_uri or "https://workspace.bheem.cloud/login"
+
+    # Create response with redirect
+    response = RedirectResponse(url=redirect_url, status_code=302)
+
+    # Clear the SSO session cookie
+    response.delete_cookie(
+        key=SSO_SESSION_COOKIE,
+        domain=".bheem.cloud",
+        path="/"
+    )
+
+    return response
+
+
+@router.get("/session/check")
+async def check_session(request: Request):
+    """
+    Check if user has an active SSO session.
+    Returns user info if session exists, error if not.
+    """
+    session_id = request.cookies.get(SSO_SESSION_COOKIE)
+
+    if not session_id:
+        return JSONResponse(
+            status_code=401,
+            content={"authenticated": False, "error": "No session"}
+        )
+
+    session_data = sso_service.validate_session(session_id)
+
+    if not session_data:
+        return JSONResponse(
+            status_code=401,
+            content={"authenticated": False, "error": "Session expired"}
+        )
+
+    # Extend session
+    sso_service.extend_session(session_id)
+
+    return {
+        "authenticated": True,
+        "user": {
+            "id": session_data["user_id"],
+            "username": session_data["username"],
+            "email": session_data["email"],
+            "name": session_data["name"]
+        }
+    }
+
+
+@router.post("/session/create")
+async def create_session_from_token(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Create an SSO session from a valid JWT token.
+
+    Use this endpoint after logging in via API to establish an SSO session
+    that works across all Bheem services (mail, docs, meet).
+
+    Returns a response with the SSO session cookie set.
+    """
+    # Get user details from database for full name
+    user_id = current_user.get("id") or current_user.get("user_id") or current_user.get("sub")
+
+    try:
+        result = await db.execute(text("""
+            SELECT u.id, u.username, u.email, u.company_id, u.person_id,
+                   p.first_name, p.last_name
+            FROM auth.users u
+            LEFT JOIN contact_management.persons p ON u.person_id = p.id
+            WHERE u.id = :user_id
+        """), {"user_id": user_id})
+        user = result.fetchone()
+
+        if user:
+            full_name = f"{user.first_name} {user.last_name}" if user.first_name else user.username
+            email = user.email or current_user.get("email") or current_user.get("username")
+            company_id = user.company_id
+            person_id = user.person_id
+        else:
+            # Use info from token if database lookup fails
+            full_name = current_user.get("name") or current_user.get("username", "User")
+            email = current_user.get("email") or current_user.get("username")
+            company_id = current_user.get("company_id")
+            person_id = current_user.get("person_id")
+    except Exception as e:
+        # Use info from token if database query fails
+        print(f"[SSO] Database lookup failed, using token data: {e}")
+        await db.rollback()
+        full_name = current_user.get("name") or current_user.get("username", "User")
+        email = current_user.get("email") or current_user.get("username")
+        company_id = current_user.get("company_id")
+        person_id = current_user.get("person_id")
+
+    # Create SSO session
+    session_id = sso_service.create_session(
+        user_id=user_id,  # Keep as string/UUID - don't convert to int
+        username=current_user.get("username", "user"),
+        email=email,
+        name=full_name,
+        company_id=company_id,
+        person_id=person_id
+    )
+
+    # Return success with cookie
+    response = JSONResponse(content={
+        "success": True,
+        "message": "SSO session created",
+        "user": {
+            "id": user_id,
+            "username": current_user.get("username"),
+            "email": email,
+            "name": full_name
+        }
+    })
+
+    # Set SSO session cookie
+    response.set_cookie(
+        key=SSO_SESSION_COOKIE,
+        value=session_id,
+        max_age=86400,  # 24 hours
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        domain=".bheem.cloud",
+        path="/"
+    )
+
+    return response

@@ -15,6 +15,7 @@ from core.config import settings
 authorization_codes: Dict[str, Dict] = {}
 access_tokens: Dict[str, Dict] = {}
 refresh_tokens: Dict[str, Dict] = {}
+sso_sessions: Dict[str, Dict] = {}  # SSO session storage for seamless login
 
 class SSOConfig:
     """SSO Configuration for Bheem Workspace"""
@@ -279,6 +280,74 @@ class SSOService:
             ],
             "code_challenge_methods_supported": ["plain", "S256"]
         }
+
+    # ═══════════════════════════════════════════════════════════════════
+    # SSO SESSION MANAGEMENT - For seamless cross-service authentication
+    # ═══════════════════════════════════════════════════════════════════
+
+    def create_session(
+        self,
+        user_id,  # Can be int, str, or UUID
+        username: str,
+        email: str,
+        name: str,
+        company_id = None,
+        person_id = None
+    ) -> str:
+        """
+        Create an SSO session after successful authentication.
+        Returns session_id to be stored in cookie.
+        """
+        session_id = secrets.token_urlsafe(48)
+        sso_sessions[session_id] = {
+            "user_id": user_id,
+            "username": username,
+            "email": email,
+            "name": name,
+            "company_id": company_id,
+            "person_id": person_id,
+            "created_at": datetime.utcnow(),
+            "expires_at": datetime.utcnow() + timedelta(hours=24)  # 24-hour session
+        }
+        return session_id
+
+    def validate_session(self, session_id: str) -> Optional[Dict]:
+        """
+        Validate an SSO session by session_id.
+        Returns user info if valid, None if expired/invalid.
+        """
+        if not session_id or session_id not in sso_sessions:
+            return None
+
+        session = sso_sessions[session_id]
+
+        # Check expiration
+        if datetime.utcnow() > session["expires_at"]:
+            del sso_sessions[session_id]
+            return None
+
+        return {
+            "user_id": session["user_id"],
+            "username": session["username"],
+            "email": session["email"],
+            "name": session["name"],
+            "company_id": session["company_id"],
+            "person_id": session["person_id"]
+        }
+
+    def delete_session(self, session_id: str) -> bool:
+        """Delete an SSO session (logout)"""
+        if session_id in sso_sessions:
+            del sso_sessions[session_id]
+            return True
+        return False
+
+    def extend_session(self, session_id: str) -> bool:
+        """Extend session expiration (sliding expiration)"""
+        if session_id in sso_sessions:
+            sso_sessions[session_id]["expires_at"] = datetime.utcnow() + timedelta(hours=24)
+            return True
+        return False
 
 
 # Singleton instance

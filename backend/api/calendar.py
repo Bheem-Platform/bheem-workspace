@@ -8,10 +8,128 @@ from typing import Optional, List
 from datetime import datetime, timedelta
 
 from core.security import get_current_user
-from services.caldav_service import caldav_service
+from services.caldav_service import (
+    caldav_service,
+    CalDAVRateLimitError,
+    CalDAVAuthError,
+    CalDAVNotFoundError
+)
+from services.mail_session_service import mail_session_service
+from services.nextcloud_user_service import nextcloud_user_service
 from integrations.notify import notify_client
+import logging
+import secrets
+import string
+import hashlib
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/calendar", tags=["Bheem Calendar"])
+
+# Track users whose Nextcloud accounts are ready
+_nextcloud_ready_users = {}  # username -> nextcloud_password
+
+
+def generate_nextcloud_password(email: str, mail_password: str) -> str:
+    """
+    Generate a deterministic but strong password for Nextcloud.
+    This ensures the same password is generated each time for the same user.
+    """
+    # Create a deterministic seed from email + mail password
+    seed = hashlib.sha256(f"{email}:{mail_password}:nextcloud".encode()).hexdigest()[:16]
+    return f"Nc!{seed}Px"
+
+
+async def ensure_nextcloud_user(username: str, email: str, password: str) -> tuple:
+    """
+    Ensure Nextcloud user exists and return working credentials.
+    Returns (success, nextcloud_password)
+    """
+    # Check if already processed
+    if username in _nextcloud_ready_users:
+        return (True, _nextcloud_ready_users[username])
+
+    try:
+        # Check if user exists
+        user_check = await nextcloud_user_service.get_user(username)
+
+        if user_check.get("status") == "found":
+            # User exists - try to update password
+            result = await nextcloud_user_service.update_user(username, "password", password)
+            if result.get("status") == "updated" or not result.get("error"):
+                _nextcloud_ready_users[username] = password
+                logger.info(f"Synced Nextcloud password for existing user: {username}")
+                return (True, password)
+            else:
+                # Password rejected (probably security policy) - use generated password
+                nc_password = generate_nextcloud_password(email, password)
+                result = await nextcloud_user_service.update_user(username, "password", nc_password)
+                if result.get("status") == "updated" or not result.get("error"):
+                    _nextcloud_ready_users[username] = nc_password
+                    logger.info(f"Set generated Nextcloud password for user: {username}")
+                    return (True, nc_password)
+                else:
+                    logger.warning(f"Failed to update Nextcloud password: {result}")
+                    return (False, None)
+        else:
+            # User doesn't exist - create them
+            nc_password = generate_nextcloud_password(email, password)
+
+            create_result = await nextcloud_user_service.create_user(
+                user_id=username,
+                email=email,
+                display_name=username,
+                password=nc_password,
+                quota="5 GB"
+            )
+
+            if create_result.get("status") in ["created", "exists"]:
+                _nextcloud_ready_users[username] = nc_password
+                logger.info(f"Created Nextcloud user: {username}")
+                return (True, nc_password)
+            else:
+                logger.error(f"Failed to create Nextcloud user: {create_result}")
+                return (False, None)
+
+    except Exception as e:
+        logger.error(f"Error ensuring Nextcloud user: {e}")
+        return (False, None)
+
+
+async def get_nextcloud_credentials(current_user: dict, nc_user: str = None, nc_pass: str = None) -> tuple:
+    """
+    Get Nextcloud credentials from mail session or explicit parameters.
+    Returns (username, password) tuple.
+
+    Priority:
+    1. Explicit nc_user/nc_pass parameters (for backward compatibility)
+    2. Mail session credentials (workspace email/password)
+
+    Automatically creates Nextcloud user if needed and handles password policies.
+    """
+    # If explicit credentials provided, use them
+    if nc_pass:
+        username = nc_user or current_user.get("username", "")
+        return (username, nc_pass)
+
+    # Try to get credentials from mail session
+    credentials = mail_session_service.get_credentials(current_user["id"])
+    if credentials:
+        # Extract username from email (local part before @)
+        email = credentials["email"]
+        username = email.split("@")[0] if "@" in email else email
+        mail_password = credentials["password"]
+
+        # Ensure Nextcloud user exists and get working password
+        success, nc_password = await ensure_nextcloud_user(username, email, mail_password)
+
+        if success and nc_password:
+            return (username, nc_password)
+        else:
+            # Fallback to mail password (might work if user was manually created)
+            return (username, mail_password)
+
+    # No credentials available
+    return (None, None)
 
 # Schemas
 class RecurrenceRule(BaseModel):
@@ -89,21 +207,35 @@ async def get_calendars(
     nc_pass: str = None,
     current_user: dict = Depends(get_current_user)
 ):
-    """Get list of user's calendars from Nextcloud"""
-    username = nc_user or current_user["username"]
-    password = nc_pass or ""
+    """Get list of user's calendars from Nextcloud.
+
+    Credentials are automatically retrieved from your mail session.
+    If you're logged into mail with your workspace credentials, calendar works automatically.
+    """
+    username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
 
     if not password:
         return {
-            "message": "Nextcloud credentials required",
-            "note": "Provide nc_user and nc_pass query parameters"
+            "message": "Calendar credentials required",
+            "note": "Please login to Mail first, or provide nc_user and nc_pass query parameters"
         }
 
-    calendars = await caldav_service.get_calendars(username, password)
-    return {
-        "count": len(calendars),
-        "calendars": calendars
-    }
+    try:
+        calendars = await caldav_service.get_calendars(username, password)
+        return {
+            "count": len(calendars),
+            "calendars": calendars
+        }
+    except CalDAVAuthError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid calendar credentials. Please check your password."
+        )
+    except CalDAVRateLimitError:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests. Please wait a moment and try again."
+        )
 
 @router.get("/events")
 async def get_events(
@@ -114,14 +246,16 @@ async def get_events(
     nc_pass: str = None,
     current_user: dict = Depends(get_current_user)
 ):
-    """Get calendar events within a time range"""
-    username = nc_user or current_user["username"]
-    password = nc_pass or ""
+    """Get calendar events within a time range.
+
+    Credentials are automatically retrieved from your mail session.
+    """
+    username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
 
     if not password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Nextcloud credentials required"
+            detail="Calendar credentials required. Please login to Mail first."
         )
 
     # Default to current month if not specified
@@ -130,18 +264,29 @@ async def get_events(
     if not end:
         end = start + timedelta(days=31)
 
-    events = await caldav_service.get_events(username, password, calendar_id, start, end)
+    try:
+        events = await caldav_service.get_events(username, password, calendar_id, start, end)
 
-    # Expand recurring events into individual instances
-    expanded_events = caldav_service.expand_recurring_events(events, start, end)
+        # Expand recurring events into individual instances
+        expanded_events = caldav_service.expand_recurring_events(events, start, end)
 
-    return {
-        "calendar_id": calendar_id,
-        "start": start.isoformat(),
-        "end": end.isoformat(),
-        "count": len(expanded_events),
-        "events": expanded_events
-    }
+        return {
+            "calendar_id": calendar_id,
+            "start": start.isoformat(),
+            "end": end.isoformat(),
+            "count": len(expanded_events),
+            "events": expanded_events
+        }
+    except CalDAVAuthError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid calendar credentials."
+        )
+    except CalDAVRateLimitError:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests. Please wait and try again."
+        )
 
 @router.post("/events")
 async def create_event(
@@ -150,14 +295,16 @@ async def create_event(
     nc_pass: str = None,
     current_user: dict = Depends(get_current_user)
 ):
-    """Create a new calendar event"""
-    username = nc_user or current_user["username"]
-    password = nc_pass or ""
+    """Create a new calendar event.
+
+    Credentials are automatically retrieved from your mail session.
+    """
+    username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
 
     if not password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Nextcloud credentials required"
+            detail="Calendar credentials required. Please login to Mail first."
         )
 
     # Convert recurrence rule to dict for service
@@ -174,23 +321,39 @@ async def create_event(
             "until": request.recurrence.until
         }
 
-    event_uid = await caldav_service.create_event(
-        username=username,
-        password=password,
-        calendar_id=request.calendar_id,
-        title=request.title,
-        start=request.start,
-        end=request.end,
-        location=request.location or "",
-        description=request.description or "",
-        all_day=request.all_day,
-        recurrence=recurrence_dict
-    )
+    try:
+        event_uid = await caldav_service.create_event(
+            username=username,
+            password=password,
+            calendar_id=request.calendar_id,
+            title=request.title,
+            start=request.start,
+            end=request.end,
+            location=request.location or "",
+            description=request.description or "",
+            all_day=request.all_day,
+            recurrence=recurrence_dict
+        )
+    except CalDAVRateLimitError:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many requests to calendar server. Please wait a moment and try again."
+        )
+    except CalDAVAuthError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Nextcloud credentials. Please check your password."
+        )
+    except CalDAVNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Calendar not found or user doesn't exist in Nextcloud."
+        )
 
     if not event_uid:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create event. This could mean: 1) User doesn't exist in Nextcloud (requires admin to create user first), 2) Invalid Nextcloud credentials, 3) Calendar doesn't exist"
+            detail="Failed to create event. Please try again later."
         )
 
     # Send calendar invites to attendees
@@ -231,25 +394,33 @@ async def delete_event(
     nc_pass: str = None,
     current_user: dict = Depends(get_current_user)
 ):
-    """Delete a calendar event"""
-    username = nc_user or current_user["username"]
-    password = nc_pass or ""
+    """Delete a calendar event.
+
+    Credentials are automatically retrieved from your mail session.
+    """
+    username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
 
     if not password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Nextcloud credentials required"
+            detail="Calendar credentials required. Please login to Mail first."
         )
 
-    success = await caldav_service.delete_event(username, password, calendar_id, event_uid)
+    try:
+        success = await caldav_service.delete_event(username, password, calendar_id, event_uid)
 
-    if not success:
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to delete event"
+            )
+
+        return {"success": True, "deleted": event_uid}
+    except CalDAVAuthError:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to delete event"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid calendar credentials."
         )
-
-    return {"success": True, "deleted": event_uid}
 
 
 @router.put("/events/{event_uid}")
@@ -261,14 +432,16 @@ async def update_event(
     nc_pass: str = None,
     current_user: dict = Depends(get_current_user)
 ):
-    """Update an existing calendar event"""
-    username = nc_user or current_user["username"]
-    password = nc_pass or ""
+    """Update an existing calendar event.
+
+    Credentials are automatically retrieved from your mail session.
+    """
+    username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
 
     if not password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Nextcloud credentials required"
+            detail="Calendar credentials required. Please login to Mail first."
         )
 
     # Convert recurrence rule to dict for service
@@ -320,29 +493,37 @@ async def get_event(
     nc_pass: str = None,
     current_user: dict = Depends(get_current_user)
 ):
-    """Get a single calendar event by UID"""
-    username = nc_user or current_user["username"]
-    password = nc_pass or ""
+    """Get a single calendar event by UID.
+
+    Credentials are automatically retrieved from your mail session.
+    """
+    username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
 
     if not password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Nextcloud credentials required"
+            detail="Calendar credentials required. Please login to Mail first."
         )
 
-    event = await caldav_service.get_event(username, password, calendar_id, event_uid)
+    try:
+        event = await caldav_service.get_event(username, password, calendar_id, event_uid)
 
-    if not event:
+        if not event:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Event not found"
+            )
+
+        # Remove internal raw iCal from response
+        if "_raw_ical" in event:
+            del event["_raw_ical"]
+
+        return event
+    except CalDAVAuthError:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Event not found"
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid calendar credentials."
         )
-
-    # Remove internal raw iCal from response
-    if "_raw_ical" in event:
-        del event["_raw_ical"]
-
-    return event
 
 
 @router.get("/today")
@@ -352,27 +533,35 @@ async def get_today_events(
     nc_pass: str = None,
     current_user: dict = Depends(get_current_user)
 ):
-    """Get today's events for quick view"""
-    username = nc_user or current_user["username"]
-    password = nc_pass or ""
+    """Get today's events for quick view.
+
+    Credentials are automatically retrieved from your mail session.
+    """
+    username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
 
     if not password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Nextcloud credentials required"
+            detail="Calendar credentials required. Please login to Mail first."
         )
 
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     tomorrow = today + timedelta(days=1)
 
-    events = await caldav_service.get_events(username, password, calendar_id, today, tomorrow)
-    expanded_events = caldav_service.expand_recurring_events(events, today, tomorrow)
+    try:
+        events = await caldav_service.get_events(username, password, calendar_id, today, tomorrow)
+        expanded_events = caldav_service.expand_recurring_events(events, today, tomorrow)
 
-    return {
-        "date": today.date().isoformat(),
-        "count": len(expanded_events),
-        "events": expanded_events
-    }
+        return {
+            "date": today.date().isoformat(),
+            "count": len(expanded_events),
+            "events": expanded_events
+        }
+    except CalDAVAuthError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid calendar credentials."
+        )
 
 @router.get("/week")
 async def get_week_events(
@@ -381,14 +570,16 @@ async def get_week_events(
     nc_pass: str = None,
     current_user: dict = Depends(get_current_user)
 ):
-    """Get this week's events"""
-    username = nc_user or current_user["username"]
-    password = nc_pass or ""
+    """Get this week's events.
+
+    Credentials are automatically retrieved from your mail session.
+    """
+    username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
 
     if not password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Nextcloud credentials required"
+            detail="Calendar credentials required. Please login to Mail first."
         )
 
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -396,15 +587,21 @@ async def get_week_events(
     start_of_week = today - timedelta(days=today.weekday())
     end_of_week = start_of_week + timedelta(days=7)
 
-    events = await caldav_service.get_events(username, password, calendar_id, start_of_week, end_of_week)
-    expanded_events = caldav_service.expand_recurring_events(events, start_of_week, end_of_week)
+    try:
+        events = await caldav_service.get_events(username, password, calendar_id, start_of_week, end_of_week)
+        expanded_events = caldav_service.expand_recurring_events(events, start_of_week, end_of_week)
 
-    return {
-        "week_start": start_of_week.date().isoformat(),
-        "week_end": end_of_week.date().isoformat(),
-        "count": len(expanded_events),
-        "events": expanded_events
-    }
+        return {
+            "week_start": start_of_week.date().isoformat(),
+            "week_end": end_of_week.date().isoformat(),
+            "count": len(expanded_events),
+            "events": expanded_events
+        }
+    except CalDAVAuthError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid calendar credentials."
+        )
 
 
 # Recurring event instance management
@@ -431,14 +628,15 @@ async def update_event_instance(
     Update a single instance of a recurring event.
     Creates an exception event with RECURRENCE-ID.
     instance_date should be in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS).
+
+    Credentials are automatically retrieved from your mail session.
     """
-    username = nc_user or current_user["username"]
-    password = nc_pass or ""
+    username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
 
     if not password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Nextcloud credentials required"
+            detail="Calendar credentials required. Please login to Mail first."
         )
 
     # Parse instance date
@@ -493,14 +691,15 @@ async def delete_event_instance(
     Delete a single instance of a recurring event.
     Adds EXDATE to the master event to exclude this occurrence.
     instance_date should be in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS).
+
+    Credentials are automatically retrieved from your mail session.
     """
-    username = nc_user or current_user["username"]
-    password = nc_pass or ""
+    username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
 
     if not password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Nextcloud credentials required"
+            detail="Calendar credentials required. Please login to Mail first."
         )
 
     # Parse instance date
@@ -568,17 +767,18 @@ async def add_event_reminder(
     """
     Add a reminder to a calendar event.
     Supported types: browser, email, sms, whatsapp
+
+    Credentials are automatically retrieved from your mail session.
     """
     from services.calendar_reminder_service import calendar_reminder_service
     from core.database import async_session_maker
 
-    username = nc_user or current_user["username"]
-    password = nc_pass or ""
+    username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
 
     if not password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Nextcloud credentials required"
+            detail="Calendar credentials required. Please login to Mail first."
         )
 
     # Get event details
@@ -770,14 +970,15 @@ async def search_events(
     - start: Start date for search range (optional, defaults to 3 months ago)
     - end: End date for search range (optional, defaults to 3 months ahead)
     - calendar_ids: Comma-separated list of calendar IDs to search (optional)
+
+    Credentials are automatically retrieved from your mail session.
     """
-    username = nc_user or current_user["username"]
-    password = nc_pass or ""
+    username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
 
     if not password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Nextcloud credentials required"
+            detail="Calendar credentials required. Please login to Mail first."
         )
 
     # Default search range: 3 months before to 3 months after today

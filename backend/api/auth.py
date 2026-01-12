@@ -17,6 +17,7 @@ from core.security import (
 from core.config import settings
 from services.passport_client import get_passport_client, BheemPassportClient
 from services.mailcow_service import mailcow_service
+from services.nextcloud_service import nextcloud_service
 from integrations.notify import notify_client
 import asyncio
 import secrets
@@ -98,15 +99,18 @@ async def login(
                 company_code=request.company_code
             )
 
-            # Sync password to Mailcow (SSO - single password for all services)
+            # Sync password to Mailcow & Nextcloud (SSO - single password for all services)
             try:
                 email = result.get("user", {}).get("email") or request.username
                 if "@" in email:
                     asyncio.create_task(
                         mailcow_service.sync_password_to_mailcow(email, request.password)
                     )
+                    asyncio.create_task(
+                        nextcloud_service.sync_password(email, request.password)
+                    )
             except Exception as e:
-                print(f"Mailcow password sync skipped: {e}")
+                print(f"Password sync skipped: {e}")
 
             return LoginResponse(
                 access_token=result["access_token"],
@@ -175,14 +179,17 @@ async def _local_login(request: LoginRequest, db: AsyncSession) -> LoginResponse
         }
     )
 
-    # Sync password to Mailcow
+    # Sync password to Mailcow & Nextcloud
     try:
         if "@" in request.username:
             asyncio.create_task(
                 mailcow_service.sync_password_to_mailcow(request.username, request.password)
             )
+            asyncio.create_task(
+                nextcloud_service.sync_password(request.username, request.password)
+            )
     except Exception as e:
-        print(f"Mailcow password sync skipped: {e}")
+        print(f"Password sync skipped: {e}")
 
     return LoginResponse(
         access_token=access_token,

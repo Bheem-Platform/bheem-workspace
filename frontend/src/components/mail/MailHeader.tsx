@@ -213,9 +213,10 @@ export default function MailHeader({
                   </Link>
                   <div className="border-t border-gray-100 mt-1 pt-1">
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         setShowUserMenu(false);
-                        useAuthStore.getState().logout();
+                        await useAuthStore.getState().logout();
+                        window.location.href = '/login';
                       }}
                       className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50"
                     >
