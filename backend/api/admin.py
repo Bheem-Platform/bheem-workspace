@@ -18,6 +18,7 @@ from core.security import (
     get_current_user,
     require_admin,
     require_superadmin,
+    require_tenant_admin,
     has_permission,
     Permission
 )
@@ -524,9 +525,9 @@ async def update_tenant(
     tenant_id: str,
     update: TenantUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_admin())
+    current_user: dict = Depends(require_tenant_admin())
 ):
-    """Update tenant settings (Admin or SuperAdmin)"""
+    """Update tenant settings (Workspace Admin or SuperAdmin)"""
     resolved_id = await resolve_tenant_id(tenant_id, db)
     result = await db.execute(
         select(Tenant).where(Tenant.id == resolved_id)
@@ -671,10 +672,10 @@ async def add_tenant_user(
     tenant_id: str,
     user: UserCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_admin())
+    current_user: dict = Depends(require_tenant_admin())
 ):
     """
-    Add a user to tenant with unified provisioning (Admin or SuperAdmin)
+    Add a user to tenant with unified provisioning (Workspace Admin or SuperAdmin)
 
     This endpoint provisions the user across ALL services:
     - Creates user in Bheem Passport (SSO)
@@ -837,9 +838,9 @@ async def update_tenant_user(
     user_id: str,
     update: UserUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_admin())
+    current_user: dict = Depends(require_tenant_admin())
 ):
-    """Update user in tenant (Admin or SuperAdmin)"""
+    """Update user in tenant (Workspace Admin or SuperAdmin)"""
     resolved_id = await resolve_tenant_id(tenant_id, db)
     result = await db.execute(
         select(TenantUser).where(
@@ -883,7 +884,7 @@ async def remove_tenant_user(
     user_id: str,
     delete_mailbox: bool = Query(False, description="Also delete user's mailbox"),
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_admin())
+    current_user: dict = Depends(require_tenant_admin())
 ):
     """
     Remove/deprovision user from tenant (Admin or SuperAdmin)
@@ -987,9 +988,9 @@ async def add_domain(
     tenant_id: str,
     domain_data: DomainCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_admin())
+    current_user: dict = Depends(require_tenant_admin())
 ):
-    """Add a domain to tenant with Mailgun and Cloudflare setup (Admin or SuperAdmin)"""
+    """Add a domain to tenant with Mailgun and Cloudflare setup (Workspace Admin or SuperAdmin)"""
     resolved_id = await resolve_tenant_id(tenant_id, db)
 
     # Check tenant exists
@@ -1190,9 +1191,9 @@ async def verify_domain(
     domain_id: str,
     auto_setup: bool = True,  # Auto-add missing DNS records via Cloudflare
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_admin())
+    current_user: dict = Depends(require_tenant_admin())
 ):
-    """Verify domain DNS records (Admin or SuperAdmin)"""
+    """Verify domain DNS records (Workspace Admin or SuperAdmin)"""
     resolved_id = await resolve_tenant_id(tenant_id, db)
     result = await db.execute(
         select(Domain).where(
@@ -1392,9 +1393,9 @@ async def update_domain(
     is_primary: bool = None,
     is_active: bool = None,
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_admin())
+    current_user: dict = Depends(require_tenant_admin())
 ):
-    """Update domain settings (Admin or SuperAdmin)"""
+    """Update domain settings (Workspace Admin or SuperAdmin)"""
     resolved_id = await resolve_tenant_id(tenant_id, db)
     result = await db.execute(
         select(Domain).where(
@@ -1449,9 +1450,9 @@ async def remove_domain(
     tenant_id: str,
     domain_id: str,
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_admin())
+    current_user: dict = Depends(require_tenant_admin())
 ):
-    """Remove a domain from tenant (Admin or SuperAdmin)"""
+    """Remove a domain from tenant (Workspace Admin or SuperAdmin)"""
     resolved_id = await resolve_tenant_id(tenant_id, db)
     result = await db.execute(
         select(Domain).where(
@@ -1576,9 +1577,9 @@ async def create_mailbox(
     tenant_id: str,
     mailbox: MailboxCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_admin())
+    current_user: dict = Depends(require_tenant_admin())
 ):
-    """Create a mailbox via Mailcow (Admin or SuperAdmin)"""
+    """Create a mailbox via Mailcow (Workspace Admin or SuperAdmin)"""
     import logging
     logger = logging.getLogger(__name__)
 
@@ -1627,9 +1628,9 @@ async def delete_mailbox(
     tenant_id: str,
     email: str,
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_admin())
+    current_user: dict = Depends(require_tenant_admin())
 ):
-    """Delete a mailbox (Admin or SuperAdmin)"""
+    """Delete a mailbox (Workspace Admin or SuperAdmin)"""
     # Resolve tenant_id (supports UUID or slug)
     resolved_id = await resolve_tenant_id(tenant_id, db)
 
@@ -1691,9 +1692,9 @@ async def update_mailbox(
     quota_mb: int = None,
     active: bool = None,
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_admin())
+    current_user: dict = Depends(require_tenant_admin())
 ):
-    """Update mailbox settings (Admin or SuperAdmin)"""
+    """Update mailbox settings (Workspace Admin or SuperAdmin)"""
     resolved_id = await resolve_tenant_id(tenant_id, db)
 
     if name is None and quota_mb is None and active is None:
@@ -1823,9 +1824,9 @@ async def update_meeting_settings(
     tenant_id: str,
     settings: MeetingSettingsUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_admin())
+    current_user: dict = Depends(require_tenant_admin())
 ):
-    """Update tenant meeting settings (Admin or SuperAdmin)"""
+    """Update tenant meeting settings (Workspace Admin or SuperAdmin)"""
     resolved_id = await resolve_tenant_id(tenant_id, db)
     tenant_result = await db.execute(
         select(Tenant).where(Tenant.id == resolved_id)

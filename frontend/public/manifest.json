@@ -1,1 +1,111 @@
-{}
+{
+  "name": "Bheem Workspace",
+  "short_name": "Bheem",
+  "description": "Unified Collaboration Platform - Mail, Meet, Docs & Chat",
+  "start_url": "/dashboard",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "orientation": "any",
+  "scope": "/",
+  "lang": "en",
+  "categories": ["productivity", "business", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/icon-72.png",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-128.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-144.png",
+      "sizes": "144x144",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-152.png",
+      "sizes": "152x152",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-384.png",
+      "sizes": "384x384",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Mail",
+      "short_name": "Mail",
+      "description": "Check your emails",
+      "url": "/mail",
+      "icons": [{"src": "/icons/mail-96.png", "sizes": "96x96"}]
+    },
+    {
+      "name": "Meet",
+      "short_name": "Meet",
+      "description": "Start or join a meeting",
+      "url": "/meet",
+      "icons": [{"src": "/icons/meet-96.png", "sizes": "96x96"}]
+    },
+    {
+      "name": "Docs",
+      "short_name": "Docs",
+      "description": "View and edit documents",
+      "url": "/docs",
+      "icons": [{"src": "/icons/docs-96.png", "sizes": "96x96"}]
+    },
+    {
+      "name": "Calendar",
+      "short_name": "Calendar",
+      "description": "View your calendar",
+      "url": "/calendar",
+      "icons": [{"src": "/icons/calendar-96.png", "sizes": "96x96"}]
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/screenshots/dashboard.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Bheem Workspace Dashboard"
+    },
+    {
+      "src": "/screenshots/mail.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "Bheem Mail"
+    }
+  ],
+  "related_applications": [],
+  "prefer_related_applications": false
+}

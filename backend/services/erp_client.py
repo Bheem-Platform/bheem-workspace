@@ -14,6 +14,113 @@ from core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# ═══════════════════════════════════════════════════════════════════
+# FALLBACK PLANS (Used when ERP is unavailable)
+# ═══════════════════════════════════════════════════════════════════
+FALLBACK_PLANS = {
+    "WORKSPACE-STARTER": {
+        "plan_id": "00000000-0000-0000-0000-000000000001",
+        "sku_code": "WORKSPACE-STARTER",
+        "name": "Starter",
+        "description": "For small teams getting started",
+        "base_price": 0,
+        "currency": "INR",
+        "billing_cycle": "monthly",
+        "features": {
+            "max_users": 5,
+            "storage_gb": 5,
+            "meet_hours": 10,
+            "mail_enabled": True,
+            "docs_enabled": True,
+            "meet_enabled": True
+        },
+        "tiers": [{
+            "tier_id": "starter-tier-1",
+            "tier_name": "Starter",
+            "max_users": 5,
+            "max_storage_gb": 5,
+            "price": 0,
+            "features_included": {
+                "mail": True,
+                "docs": True,
+                "meet": True,
+                "calendar": True
+            }
+        }]
+    },
+    "WORKSPACE-PROFESSIONAL": {
+        "plan_id": "00000000-0000-0000-0000-000000000002",
+        "sku_code": "WORKSPACE-PROFESSIONAL",
+        "name": "Professional",
+        "description": "For growing teams",
+        "base_price": 2499,
+        "currency": "INR",
+        "billing_cycle": "monthly",
+        "features": {
+            "max_users": 25,
+            "storage_gb": 50,
+            "meet_hours": 100,
+            "mail_enabled": True,
+            "docs_enabled": True,
+            "meet_enabled": True,
+            "chat_enabled": True
+        },
+        "tiers": [{
+            "tier_id": "professional-tier-1",
+            "tier_name": "Professional",
+            "max_users": 25,
+            "max_storage_gb": 50,
+            "price": 2499,
+            "features_included": {
+                "mail": True,
+                "docs": True,
+                "meet": True,
+                "calendar": True,
+                "chat": True,
+                "custom_domain": True
+            }
+        }]
+    },
+    "WORKSPACE-ENTERPRISE": {
+        "plan_id": "00000000-0000-0000-0000-000000000003",
+        "sku_code": "WORKSPACE-ENTERPRISE",
+        "name": "Enterprise",
+        "description": "For large organizations",
+        "base_price": 9999,
+        "currency": "INR",
+        "billing_cycle": "monthly",
+        "features": {
+            "max_users": -1,  # Unlimited
+            "storage_gb": 500,
+            "meet_hours": -1,  # Unlimited
+            "mail_enabled": True,
+            "docs_enabled": True,
+            "meet_enabled": True,
+            "chat_enabled": True,
+            "sso_enabled": True,
+            "audit_logs": True
+        },
+        "tiers": [{
+            "tier_id": "enterprise-tier-1",
+            "tier_name": "Enterprise",
+            "max_users": -1,
+            "max_storage_gb": 500,
+            "price": 9999,
+            "features_included": {
+                "mail": True,
+                "docs": True,
+                "meet": True,
+                "calendar": True,
+                "chat": True,
+                "custom_domain": True,
+                "sso": True,
+                "audit_logs": True,
+                "priority_support": True
+            }
+        }]
+    }
+}
+
 
 class ERPClient:
     """Client for Bheem Core ERP API interactions"""
@@ -132,6 +239,7 @@ class ERPClient:
         """
         Get available workspace subscription plans from ERP.
         Uses the UserSubscriptionService.get_available_plans() method.
+        Falls back to local FALLBACK_PLANS if ERP is unavailable.
 
         Args:
             plan_prefix: SKU prefix to filter (default: WORKSPACE-)
@@ -139,16 +247,28 @@ class ERPClient:
         Returns:
             List of available plans with tiers
         """
-        result = await self._request(
-            "GET",
-            "/shared/sku-subscription",
-            params={"plan_prefix": plan_prefix}
-        )
-        return result.get("data", [])
+        try:
+            result = await self._request(
+                "GET",
+                "/shared/sku-subscription",
+                params={"plan_prefix": plan_prefix}
+            )
+            plans = result.get("data", [])
+            if plans:
+                return plans
+        except Exception as e:
+            logger.warning(f"ERP plans fetch failed, using fallback: {e}")
+
+        # Return fallback plans if ERP unavailable or no plans found
+        return [
+            plan for sku_code, plan in FALLBACK_PLANS.items()
+            if sku_code.startswith(plan_prefix)
+        ]
 
     async def get_plan_details(self, sku_id: str) -> dict:
         """
         Get plan details with tiers.
+        Falls back to local FALLBACK_PLANS if ERP is unavailable.
 
         Args:
             sku_id: SKU ID (UUID or SKU code like WORKSPACE-PROFESSIONAL)
@@ -156,11 +276,29 @@ class ERPClient:
         Returns:
             Plan details including tiers and features
         """
-        return await self._request("GET", f"/shared/sku-subscription/sku/{sku_id}")
+        try:
+            result = await self._request("GET", f"/shared/sku-subscription/sku/{sku_id}")
+            if result:
+                return result
+        except Exception as e:
+            logger.warning(f"ERP plan details fetch failed, using fallback: {e}")
+
+        # Try fallback by SKU code
+        if sku_id in FALLBACK_PLANS:
+            return FALLBACK_PLANS[sku_id]
+
+        # Try matching by plan_id in fallback plans
+        for plan in FALLBACK_PLANS.values():
+            if plan.get("plan_id") == sku_id:
+                return plan
+
+        # Return empty dict if nothing found
+        return {}
 
     async def get_plan_by_sku_code(self, sku_code: str) -> Optional[dict]:
         """
         Look up plan by SKU code (e.g., WORKSPACE-STARTER) and return the plan_id (UUID).
+        Falls back to local FALLBACK_PLANS if ERP is unavailable.
 
         Args:
             sku_code: SKU code string (e.g., WORKSPACE-STARTER)
@@ -174,9 +312,11 @@ class ERPClient:
             for plan in plans:
                 if plan.get("sku_code") == sku_code:
                     return plan
-            return None
-        except Exception:
-            return None
+        except Exception as e:
+            logger.warning(f"ERP plan lookup failed, using fallback: {e}")
+
+        # Return fallback plan if ERP unavailable or plan not found
+        return FALLBACK_PLANS.get(sku_code)
 
     async def get_user_subscription(self, user_id: str) -> Optional[dict]:
         """

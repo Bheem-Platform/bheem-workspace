@@ -66,6 +66,9 @@ class Tenant(Base):
     # Settings
     settings = Column(JSON, default={})
 
+    # Mattermost Integration
+    mattermost_team_id = Column(String(255))  # Mattermost team ID for workspace chat
+
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -116,6 +119,12 @@ class TenantUser(Base):
     invited_at = Column(DateTime)
     joined_at = Column(DateTime)
     invited_by = Column(UUID(as_uuid=True))
+
+    # Mail SSO - Encrypted mail credentials for automatic mail session
+    encrypted_mail_password = Column(Text)  # Fernet-encrypted password for mail SSO
+
+    # Mattermost Integration
+    mattermost_user_id = Column(String(255))  # Mattermost user ID for team chat
 
     # Permissions (JSON for granular permissions)
     permissions = Column(JSON, default={})
@@ -172,6 +181,121 @@ class Domain(Base):
 
     def __repr__(self):
         return f"<Domain(id={self.id}, domain={self.domain})>"
+
+
+class OnboardingProgress(Base):
+    """Tracks onboarding progress for a tenant/workspace."""
+    __tablename__ = "onboarding_progress"
+    __table_args__ = (
+        Index('idx_onboarding_tenant', 'tenant_id'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tenants.id", ondelete="CASCADE"), unique=True)
+
+    # Onboarding steps
+    profile_completed = Column(Boolean, default=False)
+    domain_setup_completed = Column(Boolean, default=False)
+    team_invited = Column(Boolean, default=False)
+    first_meeting_created = Column(Boolean, default=False)
+    first_document_uploaded = Column(Boolean, default=False)
+    chat_setup_completed = Column(Boolean, default=False)
+
+    # Current state
+    current_step = Column(String(50), default="welcome")
+    skipped_steps = Column(JSON, default=[])
+
+    # Timestamps
+    completed_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<OnboardingProgress(tenant_id={self.tenant_id}, step={self.current_step})>"
+
+
+class Resource(Base):
+    """Resources for booking (meeting rooms, equipment, etc.)"""
+    __tablename__ = "resources"
+    __table_args__ = (
+        Index('idx_resources_tenant', 'tenant_id'),
+        Index('idx_resources_type', 'resource_type'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tenants.id", ondelete="CASCADE"), nullable=False)
+
+    name = Column(String(255), nullable=False)
+    resource_type = Column(String(50), nullable=False)  # room, equipment, vehicle
+    capacity = Column(Integer)  # For rooms
+    location = Column(String(255))
+    description = Column(Text)
+
+    # Availability settings
+    available_from = Column(String(10))  # "09:00"
+    available_until = Column(String(10))  # "18:00"
+    available_days = Column(JSON, default=[1, 2, 3, 4, 5])  # Mon-Fri
+
+    # Settings
+    requires_approval = Column(Boolean, default=False)
+    auto_release_minutes = Column(Integer, default=15)
+    min_booking_minutes = Column(Integer, default=30)
+    max_booking_minutes = Column(Integer, default=480)
+
+    # Status
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = Column(UUID(as_uuid=True))
+
+    # Relationships
+    bookings = relationship("ResourceBooking", back_populates="resource", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<Resource(id={self.id}, name={self.name}, type={self.resource_type})>"
+
+
+class ResourceBooking(Base):
+    """Bookings for resources"""
+    __tablename__ = "resource_bookings"
+    __table_args__ = (
+        Index('idx_bookings_resource', 'resource_id'),
+        Index('idx_bookings_time', 'start_time', 'end_time'),
+        Index('idx_bookings_user', 'booked_by'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    resource_id = Column(UUID(as_uuid=True), ForeignKey("workspace.resources.id", ondelete="CASCADE"), nullable=False)
+
+    booked_by = Column(UUID(as_uuid=True), nullable=False)
+    booked_by_name = Column(String(255))
+    title = Column(String(255))
+    description = Column(Text)
+
+    # Time
+    start_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=False)
+
+    # Links
+    calendar_event_id = Column(String(255))
+    meeting_room_code = Column(String(50))  # If booked with a meeting
+
+    # Status
+    status = Column(String(20), default="confirmed")  # confirmed, pending, cancelled, no_show
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    cancelled_at = Column(DateTime)
+
+    # Relationships
+    resource = relationship("Resource", back_populates="bookings")
+
+    def __repr__(self):
+        return f"<ResourceBooking(resource={self.resource_id}, start={self.start_time})>"
 
 
 class DomainDNSRecord(Base):

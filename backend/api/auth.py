@@ -38,6 +38,7 @@ class LoginResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int
     user: dict
+    mail_session_active: bool = False  # True if auto mail session was created
 
 
 class UserResponse(BaseModel):
@@ -100,8 +101,11 @@ async def login(
             )
 
             # Sync password to Mailcow & Nextcloud (SSO - single password for all services)
+            mail_session_active = False
+            email = result.get("user", {}).get("email") or request.username
+            user_id = result.get("user", {}).get("id")
+
             try:
-                email = result.get("user", {}).get("email") or request.username
                 if "@" in email:
                     asyncio.create_task(
                         mailcow_service.sync_password_to_mailcow(email, request.password)
@@ -112,12 +116,27 @@ async def login(
             except Exception as e:
                 print(f"Password sync skipped: {e}")
 
+            # Auto-create mail session for SSO (1.3.2)
+            if user_id and "@" in email:
+                try:
+                    from services.mail_session_service import mail_session_service
+                    mail_session_service.create_session(
+                        user_id=user_id,
+                        email=email,
+                        password=request.password
+                    )
+                    mail_session_active = True
+                    print(f"[Auth] Auto mail session created for {email}")
+                except Exception as e:
+                    print(f"[Auth] Auto mail session failed: {e}")
+
             return LoginResponse(
                 access_token=result["access_token"],
                 refresh_token=result.get("refresh_token"),
                 token_type="bearer",
                 expires_in=result.get("expires_in", settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60),
-                user=result.get("user", {})
+                user=result.get("user", {}),
+                mail_session_active=mail_session_active
             )
 
         except HTTPException as e:
@@ -180,6 +199,7 @@ async def _local_login(request: LoginRequest, db: AsyncSession) -> LoginResponse
     )
 
     # Sync password to Mailcow & Nextcloud
+    mail_session_active = False
     try:
         if "@" in request.username:
             asyncio.create_task(
@@ -190,6 +210,20 @@ async def _local_login(request: LoginRequest, db: AsyncSession) -> LoginResponse
             )
     except Exception as e:
         print(f"Password sync skipped: {e}")
+
+    # Auto-create mail session for SSO (1.3.2)
+    if "@" in request.username:
+        try:
+            from services.mail_session_service import mail_session_service
+            mail_session_service.create_session(
+                user_id=str(user.id),
+                email=request.username,
+                password=request.password
+            )
+            mail_session_active = True
+            print(f"[Auth] Auto mail session created for {request.username}")
+        except Exception as e:
+            print(f"[Auth] Auto mail session failed: {e}")
 
     return LoginResponse(
         access_token=access_token,
@@ -203,7 +237,8 @@ async def _local_login(request: LoginRequest, db: AsyncSession) -> LoginResponse
             "company_id": str(user.company_id) if user.company_id else None,
             "company_code": user.company_code,
             "person_id": str(user.person_id) if user.person_id else None
-        }
+        },
+        mail_session_active=mail_session_active
     )
 
 

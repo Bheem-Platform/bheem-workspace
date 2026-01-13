@@ -114,12 +114,13 @@ async def ensure_nextcloud_user(username: str, email: str, password: str) -> tup
 
 async def get_nextcloud_credentials(current_user: dict, nc_user: str = None, nc_pass: str = None) -> tuple:
     """
-    Get Nextcloud credentials from mail session or explicit parameters.
+    Get Nextcloud credentials from mail session, workspace credentials, or explicit parameters.
     Returns (username, password) tuple.
 
     Priority:
     1. Explicit nc_user/nc_pass parameters (for backward compatibility)
     2. Mail session credentials (workspace email/password)
+    3. Workspace stored credentials (Mail SSO fallback)
 
     Automatically creates Nextcloud user if needed and handles password policies.
     """
@@ -128,8 +129,29 @@ async def get_nextcloud_credentials(current_user: dict, nc_user: str = None, nc_
         username = nc_user or current_user.get("username", "")
         return (username, nc_pass)
 
+    user_id = current_user.get("id") or current_user.get("user_id")
+
     # Try to get credentials from mail session
-    credentials = mail_session_service.get_credentials(current_user["id"])
+    credentials = mail_session_service.get_credentials(user_id)
+
+    # If no mail session, try workspace stored credentials (Mail SSO)
+    if not credentials:
+        try:
+            from services.workspace_credentials_service import workspace_credentials_service
+            from core.database import async_session_maker
+
+            async with async_session_maker() as db:
+                credentials = await workspace_credentials_service.get_user_mail_credentials(
+                    db=db,
+                    user_id=user_id
+                )
+
+            if credentials:
+                logger.info(f"Using workspace stored credentials for calendar (user {user_id})")
+        except Exception as e:
+            logger.warning(f"Failed to get workspace credentials: {e}")
+            credentials = None
+
     if credentials:
         # Extract username from email (local part before @)
         email = credentials["email"]

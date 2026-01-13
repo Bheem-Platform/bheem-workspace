@@ -24,6 +24,7 @@ from models.admin_models import Tenant, TenantUser, Domain
 from services.mailcow_service import mailcow_service
 from services.passport_client import get_passport_client
 from services.nextcloud_user_service import nextcloud_user_service
+from services.workspace_credentials_service import workspace_credentials_service
 from integrations.notify.notify_client import notify_client
 from core.config import settings
 
@@ -262,6 +263,20 @@ class UserProvisioningService:
                 return result
 
             logger.info(f"Created workspace user: {result.user_id}")
+
+            # ─────────────────────────────────────────────────────────
+            # Step 6b: Store encrypted mail credentials for Mail SSO
+            # ─────────────────────────────────────────────────────────
+            try:
+                await workspace_credentials_service.store_mail_credentials(
+                    db=self.db,
+                    user_id=str(user_id),
+                    tenant_id=str(tenant.id),
+                    password=temp_password
+                )
+                logger.info(f"Stored mail credentials for user {user_id}")
+            except Exception as e:
+                logger.warning(f"Failed to store mail credentials (non-critical): {e}")
 
             # ─────────────────────────────────────────────────────────
             # Step 7: Create Mailbox with workspace email (industry standard)

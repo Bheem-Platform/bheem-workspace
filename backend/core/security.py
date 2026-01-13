@@ -385,3 +385,134 @@ def require_permission(permission: str):
         return current_user
 
     return permission_checker
+
+
+async def get_user_tenant_role(user_id: str, db: AsyncSession) -> Optional[Dict[str, Any]]:
+    """
+    Get user's tenant role and tenant_id from tenant_users table.
+    This is separate from JWT role - it's the workspace-specific role.
+
+    Args:
+        user_id: User ID from JWT
+        db: Database session
+
+    Returns:
+        Dict with tenant_id and role, or None if not found
+    """
+    query = text("""
+        SELECT
+            tu.tenant_id,
+            tu.role,
+            tu.email,
+            t.name as tenant_name,
+            t.tenant_mode
+        FROM workspace.tenant_users tu
+        JOIN workspace.tenants t ON tu.tenant_id = t.id
+        WHERE tu.user_id = CAST(:user_id AS uuid)
+        AND t.is_suspended = false
+        LIMIT 1
+    """)
+    result = await db.execute(query, {"user_id": user_id})
+    row = result.fetchone()
+
+    if row:
+        return {
+            "tenant_id": str(row.tenant_id),
+            "tenant_role": row.role,
+            "email": row.email,
+            "tenant_name": row.tenant_name,
+            "tenant_mode": row.tenant_mode
+        }
+    return None
+
+
+def require_tenant_admin():
+    """
+    Dependency to require tenant admin role.
+    Checks the tenant_users table for 'admin' role instead of JWT role.
+
+    This is for external customers who have role='Customer' in JWT
+    but role='admin' in their workspace tenant.
+
+    Usage: current_user: dict = Depends(require_tenant_admin())
+    """
+    async def tenant_admin_checker(
+        current_user: Dict[str, Any] = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db)
+    ) -> Dict[str, Any]:
+        # SuperAdmin/Admin in JWT can always access
+        jwt_role = current_user.get("role")
+        if jwt_role in ["SuperAdmin", "Admin"]:
+            return current_user
+
+        # For other users (e.g., Customer), check tenant_users table
+        user_id = current_user.get("id") or current_user.get("user_id")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User ID not found in token"
+            )
+
+        # Get tenant role from database
+        tenant_info = await get_user_tenant_role(user_id, db)
+
+        if not tenant_info:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User is not associated with any workspace"
+            )
+
+        tenant_role = tenant_info.get("tenant_role", "").lower()
+        if tenant_role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Workspace admin role required for this action"
+            )
+
+        # Add tenant info to user context
+        current_user["tenant_id"] = tenant_info.get("tenant_id")
+        current_user["tenant_role"] = tenant_role
+        current_user["tenant_name"] = tenant_info.get("tenant_name")
+        current_user["tenant_mode"] = tenant_info.get("tenant_mode")
+
+        return current_user
+
+    return tenant_admin_checker
+
+
+def require_tenant_member():
+    """
+    Dependency to require user is a member of a tenant.
+    Any role in tenant_users table qualifies.
+
+    Usage: current_user: dict = Depends(require_tenant_member())
+    """
+    async def tenant_member_checker(
+        current_user: Dict[str, Any] = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db)
+    ) -> Dict[str, Any]:
+        user_id = current_user.get("id") or current_user.get("user_id")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User ID not found in token"
+            )
+
+        # Get tenant role from database
+        tenant_info = await get_user_tenant_role(user_id, db)
+
+        if not tenant_info:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User is not associated with any workspace"
+            )
+
+        # Add tenant info to user context
+        current_user["tenant_id"] = tenant_info.get("tenant_id")
+        current_user["tenant_role"] = tenant_info.get("tenant_role")
+        current_user["tenant_name"] = tenant_info.get("tenant_name")
+        current_user["tenant_mode"] = tenant_info.get("tenant_mode")
+
+        return current_user
+
+    return tenant_member_checker

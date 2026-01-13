@@ -16,6 +16,7 @@ import {
   Inbox,
   Users,
   FolderOpen,
+  MessageCircle,
 } from 'lucide-react';
 import { useAuthStore, useRequireAuth } from '@/stores/authStore';
 import { api } from '@/lib/api';
@@ -111,6 +112,15 @@ const APP_CARDS = [
     color: 'green' as const,
     href: '/meet',
     badgeKey: 'activeMeets',
+  },
+  {
+    id: 'chat',
+    name: 'Bheem Chat',
+    description: 'Team messaging',
+    icon: MessageCircle,
+    color: 'blue' as const,
+    href: '/chat',
+    badgeKey: undefined,
   },
 ];
 

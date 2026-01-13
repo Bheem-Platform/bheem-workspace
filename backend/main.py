@@ -445,6 +445,46 @@ try:
 except Exception as e:
     print(f"Could not load docs_ai router: {e}")
 
+# Team Chat API (Mattermost Integration)
+try:
+    from api.team_chat import router as team_chat_router
+    app.include_router(team_chat_router, prefix="/api/v1", tags=["Team Chat"])
+    logger.info("Team Chat API loaded", action="team_chat_loaded")
+except Exception as e:
+    print(f"Could not load team_chat router: {e}")
+
+# Onboarding API
+try:
+    from api.onboarding import router as onboarding_router
+    app.include_router(onboarding_router, prefix="/api/v1", tags=["Onboarding"])
+    logger.info("Onboarding API loaded", action="onboarding_loaded")
+except Exception as e:
+    print(f"Could not load onboarding router: {e}")
+
+# Resource Booking API
+try:
+    from api.resources import router as resources_router
+    app.include_router(resources_router, prefix="/api/v1", tags=["Resource Booking"])
+    logger.info("Resource Booking API loaded", action="resources_loaded")
+except Exception as e:
+    print(f"Could not load resources router: {e}")
+
+# Security API
+try:
+    from api.security import router as security_router
+    app.include_router(security_router, prefix="/api/v1", tags=["Security"])
+    logger.info("Security API loaded", action="security_loaded")
+except Exception as e:
+    print(f"Could not load security router: {e}")
+
+# Data Migration API
+try:
+    from api.migration import router as migration_router
+    app.include_router(migration_router, prefix="/api/v1", tags=["Data Migration"])
+    logger.info("Migration API loaded", action="migration_loaded")
+except Exception as e:
+    print(f"Could not load migration router: {e}")
+
 # Frontend routes
 @app.get("/", response_class=HTMLResponse)
 async def homepage():

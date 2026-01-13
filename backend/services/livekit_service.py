@@ -75,5 +75,109 @@ class LiveKitService:
         """Get WebSocket URL for LiveKit"""
         return self.ws_url
 
+    def generate_breakout_code(self, parent_room: str, index: int) -> str:
+        """Generate a breakout room code from parent room."""
+        suffix = ''.join(secrets.choice(string.ascii_lowercase) for _ in range(3))
+        return f"{parent_room}-br{index}-{suffix}"
+
+    async def create_breakout_room(
+        self,
+        parent_room: str,
+        breakout_name: str,
+        participants: list,
+        index: int = 1
+    ) -> Dict[str, Any]:
+        """
+        Create a breakout room from main meeting.
+
+        Args:
+            parent_room: Parent room code
+            breakout_name: Display name for breakout room
+            participants: List of participant identities to move
+            index: Breakout room index
+
+        Returns:
+            Dict with room code and participant tokens
+        """
+        breakout_code = self.generate_breakout_code(parent_room, index)
+
+        # Generate tokens for participants
+        tokens = []
+        for participant in participants:
+            identity = participant.get("identity") or participant
+            name = participant.get("name") or identity
+
+            token = self.create_token(
+                room_name=breakout_code,
+                participant_identity=identity,
+                participant_name=name,
+                is_host=False,  # No host in breakout by default
+                ttl_seconds=7200  # 2 hours for breakout
+            )
+            tokens.append({
+                "participant": identity,
+                "name": name,
+                "token": token,
+                "join_url": f"{settings.WORKSPACE_URL}/meet/room/{breakout_code}"
+            })
+
+        return {
+            "breakout_code": breakout_code,
+            "breakout_name": breakout_name,
+            "parent_room": parent_room,
+            "tokens": tokens,
+            "participant_count": len(tokens)
+        }
+
+    async def create_breakout_rooms(
+        self,
+        parent_room: str,
+        groups: list
+    ) -> Dict[str, Any]:
+        """
+        Create multiple breakout rooms.
+
+        Args:
+            parent_room: Parent room code
+            groups: List of groups, each with name and participants
+
+        Returns:
+            Dict with all breakout rooms
+        """
+        breakout_rooms = []
+
+        for idx, group in enumerate(groups, 1):
+            room = await self.create_breakout_room(
+                parent_room=parent_room,
+                breakout_name=group.get("name", f"Breakout Room {idx}"),
+                participants=group.get("participants", []),
+                index=idx
+            )
+            breakout_rooms.append(room)
+
+        return {
+            "parent_room": parent_room,
+            "breakout_count": len(breakout_rooms),
+            "breakout_rooms": breakout_rooms
+        }
+
+    def create_return_token(
+        self,
+        parent_room: str,
+        participant_identity: str,
+        participant_name: str
+    ) -> str:
+        """
+        Create a token for participant to return from breakout to main room.
+        """
+        return self.create_token(
+            room_name=parent_room,
+            participant_identity=participant_identity,
+            participant_name=participant_name,
+            is_host=False,
+            ttl_seconds=7200
+        )
+
+
 # Singleton instance
 livekit_service = LiveKitService()

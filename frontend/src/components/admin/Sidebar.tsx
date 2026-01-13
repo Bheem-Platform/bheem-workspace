@@ -17,6 +17,10 @@ import {
   HardDrive,
   BarChart3,
   RefreshCw,
+  Shield,
+  Calendar,
+  Upload,
+  MessageCircle,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -44,8 +48,11 @@ const getTenantAdminNavigation = (isInternalMode: boolean) => {
     { name: 'Mail', href: '/admin/mail', icon: Mail },
     { name: 'Meet', href: '/admin/meet', icon: Video },
     { name: 'Docs', href: '/admin/docs', icon: HardDrive },
+    { name: 'Resources', href: '/admin/resources', icon: Calendar },
     { name: 'Reports', href: '/admin/reports', icon: BarChart3 },
     { name: 'Activity', href: '/admin/activity', icon: Activity },
+    { name: 'Security', href: '/admin/security', icon: Shield },
+    { name: 'Migration', href: '/admin/migration', icon: Upload },
   ];
 
   // Add ERP Sync for internal mode, or Billing for external mode

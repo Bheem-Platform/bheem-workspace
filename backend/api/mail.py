@@ -260,6 +260,81 @@ async def destroy_mail_session(
 
 
 # ===========================================
+# Auto-Login (Mail SSO) Endpoint
+# ===========================================
+
+@router.post("/session/auto-create", response_model=MailSessionResponse)
+async def auto_create_mail_session(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Auto-create mail session using stored workspace credentials (Mail SSO).
+
+    This endpoint automatically creates a mail session if the user has
+    stored mail credentials from their workspace provisioning.
+
+    **Flow:**
+    1. User logs in to workspace (JWT auth)
+    2. Frontend calls this endpoint to auto-create mail session
+    3. If stored credentials exist, mail session is created automatically
+    4. User can access mail without manual login
+
+    **Returns 404** if no stored credentials are available (user needs to
+    login manually via POST /mail/session/create).
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession
+    from core.database import get_db
+    from services.workspace_credentials_service import workspace_credentials_service
+
+    user_id = current_user.get("id") or current_user.get("user_id")
+
+    # Check if session already exists
+    existing_session = mail_session_service.get_session_info(user_id)
+    if existing_session and existing_session.get("active"):
+        return MailSessionResponse(
+            success=True,
+            message="Mail session already active",
+            email=existing_session.get("email"),
+            session_id=existing_session.get("session_id"),
+            expires_in_seconds=existing_session.get("expires_in_seconds")
+        )
+
+    # Get database session for credential lookup
+    from core.database import async_session_maker
+    async with async_session_maker() as db:
+        # Try to auto-create session using stored credentials
+        session_info = await workspace_credentials_service.auto_create_mail_session(
+            db=db,
+            user_id=user_id
+        )
+
+    if not session_info:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No stored mail credentials. Please login manually via POST /mail/session/create"
+        )
+
+    # Get folders for the response
+    try:
+        credentials = mail_session_service.get_credentials(user_id)
+        if credentials:
+            folders = mailcow_service.get_folders(credentials["email"], credentials["password"])
+        else:
+            folders = None
+    except Exception:
+        folders = None
+
+    return MailSessionResponse(
+        success=True,
+        message="Mail session auto-created from stored credentials",
+        email=session_info.get("email"),
+        session_id=session_info.get("session_id"),
+        expires_in_seconds=session_info.get("expires_in_seconds"),
+        folders=folders
+    )
+
+
+# ===========================================
 # Legacy login endpoint (deprecated, redirects to session)
 # ===========================================
 

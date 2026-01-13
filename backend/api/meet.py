@@ -310,5 +310,514 @@ async def get_meet_config():
         "ws_url": livekit_service.get_ws_url(),
         "workspace_url": settings.WORKSPACE_URL,
         "max_participants": 100,
-        "recording_enabled": True
+        "recording_enabled": True,
+        "breakout_rooms_enabled": True
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# BREAKOUT ROOMS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class BreakoutGroup(BaseModel):
+    """A breakout room group with participants."""
+    name: str
+    participants: List[dict]  # List of {"identity": "...", "name": "..."}
+
+
+class CreateBreakoutRequest(BaseModel):
+    """Request to create breakout rooms."""
+    groups: List[BreakoutGroup]
+
+
+class BreakoutRoomResponse(BaseModel):
+    """Breakout room info."""
+    breakout_code: str
+    breakout_name: str
+    parent_room: str
+    tokens: List[dict]
+    participant_count: int
+
+
+@router.post("/rooms/{room_code}/breakout")
+async def create_breakout_rooms(
+    room_code: str,
+    request: CreateBreakoutRequest,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Create breakout rooms from main meeting.
+
+    Only the host can create breakout rooms.
+    Returns tokens for each participant to join their breakout room.
+    """
+    # Verify user is host
+    result = await db.execute(
+        text("""
+            SELECT host_id FROM workspace.meet_rooms
+            WHERE room_code = :room_code
+        """),
+        {"room_code": room_code}
+    )
+    room = result.fetchone()
+
+    if not room:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Room not found"
+        )
+
+    if str(room.host_id) != str(current_user.get("id")):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the host can create breakout rooms"
+        )
+
+    # Create breakout rooms
+    groups = [
+        {"name": g.name, "participants": g.participants}
+        for g in request.groups
+    ]
+
+    breakout_result = await livekit_service.create_breakout_rooms(
+        parent_room=room_code,
+        groups=groups
+    )
+
+    # Store breakout rooms in database
+    for br in breakout_result.get("breakout_rooms", []):
+        try:
+            await db.execute(
+                text("""
+                    INSERT INTO workspace.meet_rooms
+                    (id, room_name, room_code, host_id, host_name, status,
+                     parent_room_code, is_breakout, created_at, updated_at)
+                    VALUES (:id, :room_name, :room_code, :host_id, :host_name,
+                            'active', :parent_room, TRUE, NOW(), NOW())
+                """),
+                {
+                    "id": str(uuid.uuid4()),
+                    "room_name": br.get("breakout_name"),
+                    "room_code": br.get("breakout_code"),
+                    "host_id": current_user.get("id"),
+                    "host_name": current_user.get("username"),
+                    "parent_room": room_code
+                }
+            )
+        except Exception as e:
+            print(f"Error storing breakout room: {e}")
+
+    await db.commit()
+
+    return breakout_result
+
+
+@router.post("/rooms/{room_code}/breakout/close")
+async def close_breakout_rooms(
+    room_code: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Close all breakout rooms and send participants back to main room.
+
+    Returns tokens for all participants to rejoin the main room.
+    """
+    # Verify user is host
+    result = await db.execute(
+        text("""
+            SELECT host_id FROM workspace.meet_rooms
+            WHERE room_code = :room_code
+        """),
+        {"room_code": room_code}
+    )
+    room = result.fetchone()
+
+    if not room:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Room not found"
+        )
+
+    if str(room.host_id) != str(current_user.get("id")):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the host can close breakout rooms"
+        )
+
+    # Get all breakout rooms
+    breakout_result = await db.execute(
+        text("""
+            SELECT room_code, room_name FROM workspace.meet_rooms
+            WHERE parent_room_code = :parent_code AND is_breakout = TRUE
+        """),
+        {"parent_code": room_code}
+    )
+    breakout_rooms = breakout_result.fetchall()
+
+    # Close breakout rooms in database
+    await db.execute(
+        text("""
+            UPDATE workspace.meet_rooms
+            SET status = 'ended', ended_at = NOW()
+            WHERE parent_room_code = :parent_code AND is_breakout = TRUE
+        """),
+        {"parent_code": room_code}
+    )
+    await db.commit()
+
+    return {
+        "success": True,
+        "message": "Breakout rooms closed",
+        "parent_room": room_code,
+        "closed_rooms": [r.room_code for r in breakout_rooms],
+        "return_url": f"{settings.WORKSPACE_URL}/meet/room/{room_code}"
+    }
+
+
+@router.get("/rooms/{room_code}/breakout")
+async def list_breakout_rooms(
+    room_code: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    List active breakout rooms for a meeting.
+    """
+    result = await db.execute(
+        text("""
+            SELECT id, room_code, room_name, status, created_at
+            FROM workspace.meet_rooms
+            WHERE parent_room_code = :parent_code
+            AND is_breakout = TRUE
+            AND status != 'ended'
+        """),
+        {"parent_code": room_code}
+    )
+    breakout_rooms = result.fetchall()
+
+    return {
+        "parent_room": room_code,
+        "breakout_rooms": [
+            {
+                "id": str(r.id),
+                "room_code": r.room_code,
+                "name": r.room_name,
+                "status": r.status,
+                "join_url": f"{settings.WORKSPACE_URL}/meet/room/{r.room_code}",
+                "created_at": r.created_at.isoformat() if r.created_at else None
+            }
+            for r in breakout_rooms
+        ],
+        "count": len(breakout_rooms)
+    }
+
+
+@router.post("/rooms/{room_code}/return-token")
+async def get_return_token(
+    room_code: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get a token to return from breakout room to main room.
+    """
+    token = livekit_service.create_return_token(
+        parent_room=room_code,
+        participant_identity=str(current_user.get("id")),
+        participant_name=current_user.get("username", "Participant")
+    )
+
+    return {
+        "token": token,
+        "room_code": room_code,
+        "ws_url": livekit_service.get_ws_url(),
+        "join_url": f"{settings.WORKSPACE_URL}/meet/room/{room_code}"
+    }
+
+
+# =============================================================================
+# Meeting Attendance Tracking
+# =============================================================================
+
+class AttendanceRecord(BaseModel):
+    participant_id: str
+    participant_name: str
+    participant_email: Optional[str] = None
+    join_time: datetime
+    leave_time: Optional[datetime] = None
+    duration_minutes: Optional[float] = None
+    is_host: bool = False
+
+
+class AttendanceReport(BaseModel):
+    room_code: str
+    room_name: str
+    meeting_start: Optional[datetime] = None
+    meeting_end: Optional[datetime] = None
+    total_duration_minutes: Optional[float] = None
+    total_participants: int
+    max_concurrent: int
+    attendees: List[AttendanceRecord]
+
+
+@router.post("/rooms/{room_code}/attendance/join")
+async def record_participant_join(
+    room_code: str,
+    participant_name: Optional[str] = None,
+    current_user: dict = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Record when a participant joins a meeting.
+    Called automatically when someone enters the room.
+    """
+    user_id = current_user.get("id") if current_user else str(uuid.uuid4())
+    user_name = participant_name or (current_user.get("username") if current_user else "Guest")
+    user_email = current_user.get("email") if current_user else None
+
+    # Check if room exists
+    result = await db.execute(
+        text("SELECT id, host_id FROM workspace.meet_rooms WHERE room_code = :room_code"),
+        {"room_code": room_code}
+    )
+    room = result.fetchone()
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    is_host = str(room.host_id) == str(user_id) if room.host_id else False
+
+    # Record attendance
+    attendance_id = str(uuid.uuid4())
+    try:
+        await db.execute(
+            text("""
+                INSERT INTO workspace.meeting_attendance
+                (id, room_code, participant_id, participant_name, participant_email,
+                 join_time, is_host, created_at)
+                VALUES (:id, :room_code, :participant_id, :participant_name,
+                        :participant_email, NOW(), :is_host, NOW())
+            """),
+            {
+                "id": attendance_id,
+                "room_code": room_code,
+                "participant_id": user_id,
+                "participant_name": user_name,
+                "participant_email": user_email,
+                "is_host": is_host
+            }
+        )
+        await db.commit()
+    except Exception as e:
+        # Might fail if table doesn't exist yet
+        pass
+
+    return {
+        "status": "joined",
+        "attendance_id": attendance_id,
+        "room_code": room_code,
+        "participant_name": user_name,
+        "join_time": datetime.utcnow().isoformat()
+    }
+
+
+@router.post("/rooms/{room_code}/attendance/leave")
+async def record_participant_leave(
+    room_code: str,
+    attendance_id: Optional[str] = None,
+    current_user: dict = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Record when a participant leaves a meeting.
+    Called automatically when someone exits the room.
+    """
+    user_id = current_user.get("id") if current_user else None
+
+    try:
+        if attendance_id:
+            # Update specific attendance record
+            await db.execute(
+                text("""
+                    UPDATE workspace.meeting_attendance
+                    SET leave_time = NOW(),
+                        duration_minutes = EXTRACT(EPOCH FROM (NOW() - join_time)) / 60
+                    WHERE id = :attendance_id AND leave_time IS NULL
+                """),
+                {"attendance_id": attendance_id}
+            )
+        elif user_id:
+            # Update by user_id (most recent join without leave)
+            await db.execute(
+                text("""
+                    UPDATE workspace.meeting_attendance
+                    SET leave_time = NOW(),
+                        duration_minutes = EXTRACT(EPOCH FROM (NOW() - join_time)) / 60
+                    WHERE room_code = :room_code
+                    AND participant_id = :user_id
+                    AND leave_time IS NULL
+                    ORDER BY join_time DESC
+                    LIMIT 1
+                """),
+                {"room_code": room_code, "user_id": user_id}
+            )
+        await db.commit()
+    except Exception:
+        pass
+
+    return {
+        "status": "left",
+        "room_code": room_code,
+        "leave_time": datetime.utcnow().isoformat()
+    }
+
+
+@router.get("/rooms/{room_code}/attendance", response_model=AttendanceReport)
+async def get_attendance_report(
+    room_code: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get attendance report for a meeting.
+    Only the host or room creator can access this.
+    """
+    # Get room info
+    result = await db.execute(
+        text("""
+            SELECT id, room_name, host_id, created_at
+            FROM workspace.meet_rooms
+            WHERE room_code = :room_code
+        """),
+        {"room_code": room_code}
+    )
+    room = result.fetchone()
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    # Check if user is host
+    user_id = current_user.get("id")
+    if str(room.host_id) != str(user_id):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the host can view attendance report"
+        )
+
+    # Get attendance records
+    try:
+        attendance_result = await db.execute(
+            text("""
+                SELECT id, participant_id, participant_name, participant_email,
+                       join_time, leave_time, duration_minutes, is_host
+                FROM workspace.meeting_attendance
+                WHERE room_code = :room_code
+                ORDER BY join_time ASC
+            """),
+            {"room_code": room_code}
+        )
+        records = attendance_result.fetchall()
+    except Exception:
+        records = []
+
+    # Build attendance report
+    attendees = []
+    for record in records:
+        duration = record.duration_minutes
+        if duration is None and record.leave_time and record.join_time:
+            duration = (record.leave_time - record.join_time).total_seconds() / 60
+
+        attendees.append(AttendanceRecord(
+            participant_id=str(record.participant_id),
+            participant_name=record.participant_name or "Unknown",
+            participant_email=record.participant_email,
+            join_time=record.join_time,
+            leave_time=record.leave_time,
+            duration_minutes=round(duration, 2) if duration else None,
+            is_host=record.is_host
+        ))
+
+    # Calculate meeting stats
+    meeting_start = min((a.join_time for a in attendees), default=None)
+    meeting_end = max((a.leave_time for a in attendees if a.leave_time), default=None)
+    total_duration = None
+    if meeting_start and meeting_end:
+        total_duration = (meeting_end - meeting_start).total_seconds() / 60
+
+    # Calculate max concurrent participants
+    max_concurrent = 0
+    if attendees:
+        # Simple approximation: count all participants
+        max_concurrent = len(set(a.participant_id for a in attendees))
+
+    return AttendanceReport(
+        room_code=room_code,
+        room_name=room.room_name or room_code,
+        meeting_start=meeting_start,
+        meeting_end=meeting_end,
+        total_duration_minutes=round(total_duration, 2) if total_duration else None,
+        total_participants=len(set(a.participant_id for a in attendees)),
+        max_concurrent=max_concurrent,
+        attendees=attendees
+    )
+
+
+@router.get("/rooms/{room_code}/attendance/export")
+async def export_attendance(
+    room_code: str,
+    format: str = "csv",
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Export attendance report as CSV or JSON.
+    """
+    from fastapi.responses import StreamingResponse
+    import io
+
+    # Get attendance report (reuse the report function)
+    report = await get_attendance_report(room_code, current_user, db)
+
+    if format == "csv":
+        # Generate CSV
+        output = io.StringIO()
+        output.write("Participant Name,Email,Join Time,Leave Time,Duration (minutes),Is Host\n")
+
+        for attendee in report.attendees:
+            output.write(
+                f'"{attendee.participant_name}",'
+                f'"{attendee.participant_email or ""}",'
+                f'{attendee.join_time.isoformat() if attendee.join_time else ""},'
+                f'{attendee.leave_time.isoformat() if attendee.leave_time else ""},'
+                f'{attendee.duration_minutes or ""},'
+                f'{attendee.is_host}\n'
+            )
+
+        output.seek(0)
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition": f"attachment; filename=attendance_{room_code}.csv"
+            }
+        )
+    else:
+        # Return JSON
+        return {
+            "room_code": report.room_code,
+            "room_name": report.room_name,
+            "meeting_start": report.meeting_start.isoformat() if report.meeting_start else None,
+            "meeting_end": report.meeting_end.isoformat() if report.meeting_end else None,
+            "total_duration_minutes": report.total_duration_minutes,
+            "total_participants": report.total_participants,
+            "attendees": [
+                {
+                    "name": a.participant_name,
+                    "email": a.participant_email,
+                    "join_time": a.join_time.isoformat() if a.join_time else None,
+                    "leave_time": a.leave_time.isoformat() if a.leave_time else None,
+                    "duration_minutes": a.duration_minutes,
+                    "is_host": a.is_host
+                }
+                for a in report.attendees
+            ]
+        }

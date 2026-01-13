@@ -20,6 +20,7 @@ import {
   User,
   HelpCircle,
   Shield,
+  MessageCircle,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 
@@ -34,6 +35,7 @@ const navigation = [
   { name: 'Docs', href: '/docs', icon: FileText },
   { name: 'Calendar', href: '/calendar', icon: Calendar },
   { name: 'Meet', href: '/meet', icon: Video },
+  { name: 'Chat', href: '/chat', icon: MessageCircle },
 ];
 
 const secondaryNav = [
