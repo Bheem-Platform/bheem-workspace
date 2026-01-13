@@ -9,9 +9,18 @@ import {
   Users,
   Palette,
   Trash2,
+  Briefcase,
+  User,
 } from 'lucide-react';
 import { useCalendarStore } from '@/stores/calendarStore';
-import { CALENDAR_COLORS, type RecurrenceRule, type Reminder } from '@/types/calendar';
+import {
+  CALENDAR_COLORS,
+  EVENT_SOURCE_COLORS,
+  type RecurrenceRule,
+  type Reminder,
+  type EventSource,
+  type ERPEventType,
+} from '@/types/calendar';
 import RecurrenceSelector from './RecurrenceSelector';
 import ReminderSelector from './ReminderSelector';
 
@@ -30,6 +39,8 @@ export default function EventModal({ isOpen, onClose }: EventModalProps) {
     updateEvent,
     deleteEvent,
     calendars,
+    projects,
+    fetchProjects,
     loading,
   } = useCalendarStore();
 
@@ -50,6 +61,18 @@ export default function EventModal({ isOpen, onClose }: EventModalProps) {
   const [recurrence, setRecurrence] = useState<RecurrenceRule | null>(null);
   const [reminders, setReminders] = useState<Reminder[]>([{ type: 'popup', minutes: 10 }]);
 
+  // Unified calendar fields
+  const [eventSource, setEventSource] = useState<EventSource>('personal');
+  const [projectId, setProjectId] = useState<string>('');
+  const [eventType, setEventType] = useState<ERPEventType>('meeting');
+
+  // Fetch projects when modal opens
+  useEffect(() => {
+    if (isOpen && projects.length === 0) {
+      fetchProjects();
+    }
+  }, [isOpen, projects.length, fetchProjects]);
+
   // Initialize form with eventFormData
   useEffect(() => {
     if (eventFormData.title !== undefined) setTitle(eventFormData.title || '');
@@ -60,6 +83,11 @@ export default function EventModal({ isOpen, onClose }: EventModalProps) {
     if (eventFormData.calendarId !== undefined) setCalendarId(eventFormData.calendarId || '');
     if (eventFormData.recurrence !== undefined) setRecurrence(eventFormData.recurrence || null);
     if (eventFormData.reminders !== undefined) setReminders(eventFormData.reminders || [{ type: 'popup', minutes: 10 }]);
+
+    // Unified calendar fields
+    if (eventFormData.eventSource !== undefined) setEventSource(eventFormData.eventSource || 'personal');
+    if (eventFormData.projectId !== undefined) setProjectId(eventFormData.projectId || '');
+    if (eventFormData.eventType !== undefined) setEventType(eventFormData.eventType || 'meeting');
 
     if (eventFormData.start) {
       const start = dayjs(eventFormData.start);
@@ -72,6 +100,15 @@ export default function EventModal({ isOpen, onClose }: EventModalProps) {
       setEndTime(end.format('HH:mm'));
     }
   }, [eventFormData]);
+
+  // Set event source from selected event in edit mode
+  useEffect(() => {
+    if (isEditMode && selectedEvent) {
+      setEventSource(selectedEvent.eventSource || 'personal');
+      setProjectId(selectedEvent.projectId || '');
+      setEventType(selectedEvent.eventType || 'meeting');
+    }
+  }, [isEditMode, selectedEvent]);
 
   // Set default calendar
   useEffect(() => {
@@ -107,6 +144,10 @@ export default function EventModal({ isOpen, onClose }: EventModalProps) {
       calendarId: calendarId || undefined,
       recurrence: recurrence || undefined,
       reminders: reminders.length > 0 ? reminders : undefined,
+      // Unified calendar fields
+      eventSource,
+      projectId: eventSource === 'project' ? projectId : undefined,
+      eventType: eventSource === 'project' ? eventType : undefined,
     };
 
     let success = false;
@@ -168,6 +209,93 @@ export default function EventModal({ isOpen, onClose }: EventModalProps) {
               autoFocus
             />
           </div>
+
+          {/* Event Source Selector - Only show for new events */}
+          {!isEditMode && (
+            <div className="space-y-3">
+              <label className="block text-sm font-medium text-gray-700">Event Type</label>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setEventSource('personal')}
+                  className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg border-2 transition-all ${
+                    eventSource === 'personal'
+                      ? 'border-blue-500 bg-blue-50 text-blue-700'
+                      : 'border-gray-200 hover:border-gray-300 text-gray-600'
+                  }`}
+                >
+                  <User size={18} />
+                  <span className="font-medium">Personal</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEventSource('project')}
+                  className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg border-2 transition-all ${
+                    eventSource === 'project'
+                      ? 'border-green-500 bg-green-50 text-green-700'
+                      : 'border-gray-200 hover:border-gray-300 text-gray-600'
+                  }`}
+                >
+                  <Briefcase size={18} />
+                  <span className="font-medium">Project</span>
+                </button>
+              </div>
+
+              {/* Project Selection - Only show if project source selected */}
+              {eventSource === 'project' && (
+                <div className="space-y-3 pl-1 pt-2">
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Project</label>
+                    <select
+                      value={projectId}
+                      onChange={(e) => setProjectId(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    >
+                      <option value="">Select a project...</option>
+                      {projects.map((project) => (
+                        <option key={project.id} value={project.id}>
+                          {project.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs text-gray-500 mb-1">Type</label>
+                    <select
+                      value={eventType}
+                      onChange={(e) => setEventType(e.target.value as ERPEventType)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                    >
+                      <option value="meeting">Meeting</option>
+                      <option value="task">Task</option>
+                      <option value="milestone">Milestone</option>
+                      <option value="reminder">Reminder</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Show event source badge in edit mode */}
+          {isEditMode && selectedEvent?.eventSource && (
+            <div className="flex items-center gap-2">
+              <span
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium"
+                style={{
+                  backgroundColor: selectedEvent.eventSource === 'personal' ? '#dbeafe' : '#dcfce7',
+                  color: selectedEvent.eventSource === 'personal' ? '#1d4ed8' : '#166534',
+                }}
+              >
+                {selectedEvent.eventSource === 'personal' ? (
+                  <><User size={12} /> Personal</>
+                ) : (
+                  <><Briefcase size={12} /> Project{selectedEvent.projectName ? `: ${selectedEvent.projectName}` : ''}</>
+                )}
+              </span>
+            </div>
+          )}
 
           {/* Date & Time */}
           <div className="space-y-3">

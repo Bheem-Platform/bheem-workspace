@@ -112,7 +112,11 @@ class Settings(BaseSettings):
 
     # Bheem Core ERP API
     ERP_SERVICE_URL: str = "http://localhost:8000"
-    ERP_API_KEY: Optional[str] = None
+    # Service account for ERP authentication via Bheem Passport
+    ERP_SERVICE_USERNAME: Optional[str] = None  # e.g., workspace-service@bheem.internal
+    ERP_SERVICE_PASSWORD: Optional[str] = None
+    # Bheem Passport URL for token authentication
+    BHEEM_PASSPORT_URL: str = "https://platform.bheem.co.uk"
 
     # ERP Database Direct Connection (for workspace email migration)
     ERP_DB_HOST: str = "65.109.167.218"

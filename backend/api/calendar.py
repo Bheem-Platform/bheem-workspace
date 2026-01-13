@@ -1,11 +1,12 @@
 """
-Bheem Workspace - Calendar API (Nextcloud CalDAV Integration)
-Calendar and event management with recurring events support
+Bheem Workspace - Unified Calendar API
+Combines Nextcloud CalDAV (personal) + ERP Project Management (project) events
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, field_validator
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime, timedelta
+from enum import Enum
 
 from core.security import get_current_user
 from services.caldav_service import (
@@ -16,14 +17,30 @@ from services.caldav_service import (
 )
 from services.mail_session_service import mail_session_service
 from services.nextcloud_user_service import nextcloud_user_service
+from services.erp_client import erp_client
 from integrations.notify import notify_client
 import logging
 import secrets
 import string
 import hashlib
+import asyncio
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/calendar", tags=["Bheem Calendar"])
+
+
+# Event source types
+class EventSource(str, Enum):
+    PERSONAL = "personal"  # Nextcloud CalDAV
+    PROJECT = "project"    # ERP Project Management
+
+
+# Event type for ERP events
+class ERPEventType(str, Enum):
+    MEETING = "meeting"
+    TASK = "task"
+    MILESTONE = "milestone"
+    REMINDER = "reminder"
 
 # Track users whose Nextcloud accounts are ready
 _nextcloud_ready_users = {}  # username -> nextcloud_password
@@ -166,7 +183,7 @@ class RecurrenceRule(BaseModel):
 
 
 class EventCreate(BaseModel):
-    calendar_id: str
+    calendar_id: str = "personal"
     title: str
     start: datetime
     end: datetime
@@ -177,6 +194,12 @@ class EventCreate(BaseModel):
     send_invites: bool = True  # Whether to send email invites
     recurrence: Optional[RecurrenceRule] = None  # Recurrence rule for repeating events
 
+    # Unified calendar fields
+    event_source: EventSource = EventSource.PERSONAL  # personal (Nextcloud) or project (ERP)
+    project_id: Optional[str] = None  # ERP project ID (required if event_source=project)
+    task_id: Optional[str] = None  # ERP task ID (optional, links event to task)
+    event_type: Optional[ERPEventType] = ERPEventType.MEETING  # For ERP events
+
 
 class EventUpdate(BaseModel):
     title: Optional[str] = None
@@ -186,6 +209,7 @@ class EventUpdate(BaseModel):
     description: Optional[str] = None
     all_day: Optional[bool] = None
     recurrence: Optional[RecurrenceRule] = None  # Update recurrence rule
+    event_source: Optional[EventSource] = None  # Used for routing updates
 
 class CalendarInfo(BaseModel):
     id: str
@@ -242,51 +266,113 @@ async def get_events(
     calendar_id: str = "personal",
     start: datetime = None,
     end: datetime = None,
+    source: Optional[str] = None,  # Filter by source: "personal", "project", or None for both
     nc_user: str = None,
     nc_pass: str = None,
     current_user: dict = Depends(get_current_user)
 ):
     """Get calendar events within a time range.
 
-    Credentials are automatically retrieved from your mail session.
+    Returns UNIFIED view combining:
+    - Personal events from Nextcloud CalDAV
+    - Project events from ERP Project Management
+
+    Filter by source parameter: "personal", "project", or omit for all.
     """
-    username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
-
-    if not password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Calendar credentials required. Please login to Mail first."
-        )
-
     # Default to current month if not specified
     if not start:
         start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     if not end:
         end = start + timedelta(days=31)
 
-    try:
-        events = await caldav_service.get_events(username, password, calendar_id, start, end)
+    all_events = []
+    errors = []
 
-        # Expand recurring events into individual instances
-        expanded_events = caldav_service.expand_recurring_events(events, start, end)
+    # Fetch personal events from Nextcloud (if not filtered to project only)
+    if source != "project":
+        username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
+        if password:
+            try:
+                nc_events = await caldav_service.get_events(username, password, calendar_id, start, end)
+                expanded_events = caldav_service.expand_recurring_events(nc_events, start, end)
 
-        return {
-            "calendar_id": calendar_id,
-            "start": start.isoformat(),
-            "end": end.isoformat(),
-            "count": len(expanded_events),
-            "events": expanded_events
-        }
-    except CalDAVAuthError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid calendar credentials."
-        )
-    except CalDAVRateLimitError:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many requests. Please wait and try again."
-        )
+                # Add source metadata to each event
+                for event in expanded_events:
+                    event["event_source"] = "personal"
+                    event["source_color"] = "#3b82f6"  # Blue for personal
+                    event["source_label"] = "Personal"
+
+                all_events.extend(expanded_events)
+            except CalDAVAuthError:
+                errors.append("Nextcloud auth failed")
+            except CalDAVRateLimitError:
+                errors.append("Nextcloud rate limited")
+            except Exception as e:
+                errors.append(f"Nextcloud error: {str(e)}")
+        else:
+            errors.append("No mail session for personal calendar")
+
+    # Fetch project events from ERP (if not filtered to personal only)
+    if source != "personal":
+        try:
+            user_id = current_user.get("id") or current_user.get("sub")
+            erp_events = await erp_client.get_calendar_events(
+                user_id=user_id,
+                start=start.isoformat(),
+                end=end.isoformat()
+            )
+
+            # Transform ERP events to match our format
+            for event in erp_events:
+                transformed = {
+                    "uid": event.get("id") or event.get("uid"),
+                    "id": event.get("id") or event.get("uid"),
+                    "title": event.get("title") or event.get("name", "Untitled"),
+                    "start": event.get("start_time") or event.get("start"),
+                    "end": event.get("end_time") or event.get("end"),
+                    "location": event.get("location", ""),
+                    "description": event.get("description", ""),
+                    "all_day": event.get("is_all_day", False),
+                    "event_source": "project",
+                    "source_label": "Project",
+                    "project_id": event.get("project_id"),
+                    "project_name": event.get("project", {}).get("name") if isinstance(event.get("project"), dict) else event.get("project_name"),
+                    "task_id": event.get("task_id"),
+                    "event_type": event.get("event_type", "meeting"),
+                    "attendees": event.get("attendees", []),
+                    "created_by": event.get("created_by"),
+                }
+
+                # Color coding based on event type
+                event_type = event.get("event_type", "meeting")
+                if event_type == "milestone":
+                    transformed["source_color"] = "#ef4444"  # Red
+                elif event_type == "task":
+                    transformed["source_color"] = "#f97316"  # Orange
+                else:
+                    transformed["source_color"] = "#22c55e"  # Green for meetings
+
+                all_events.append(transformed)
+
+        except Exception as e:
+            logger.warning(f"ERP calendar fetch failed: {e}")
+            errors.append(f"ERP calendar unavailable")
+
+    # Sort all events by start time
+    all_events.sort(key=lambda e: e.get("start", ""))
+
+    return {
+        "calendar_id": calendar_id,
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "count": len(all_events),
+        "events": all_events,
+        "sources": {
+            "personal": source != "project",
+            "project": source != "personal"
+        },
+        "errors": errors if errors else None
+    }
 
 @router.post("/events")
 async def create_event(
@@ -297,66 +383,123 @@ async def create_event(
 ):
     """Create a new calendar event.
 
-    Credentials are automatically retrieved from your mail session.
+    Routes to appropriate backend based on event_source:
+    - personal: Creates in Nextcloud CalDAV
+    - project: Creates in ERP Project Management
     """
-    username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
+    user_id = current_user.get("id") or current_user.get("sub")
 
-    if not password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Calendar credentials required. Please login to Mail first."
-        )
+    # Route based on event source
+    if request.event_source == EventSource.PROJECT:
+        # Create in ERP Project Management
+        try:
+            result = await erp_client.create_calendar_event(
+                title=request.title,
+                start=request.start.isoformat(),
+                end=request.end.isoformat(),
+                description=request.description or "",
+                location=request.location or "",
+                project_id=request.project_id,
+                task_id=request.task_id,
+                attendees=request.attendees,
+                event_type=request.event_type.value if request.event_type else "meeting",
+                all_day=request.all_day,
+                created_by=user_id
+            )
 
-    # Convert recurrence rule to dict for service
-    recurrence_dict = None
-    if request.recurrence:
-        recurrence_dict = {
-            "freq": request.recurrence.freq,
-            "interval": request.recurrence.interval,
-            "by_day": request.recurrence.by_day,
-            "by_month_day": request.recurrence.by_month_day,
-            "by_month": request.recurrence.by_month,
-            "by_set_pos": request.recurrence.by_set_pos,
-            "count": request.recurrence.count,
-            "until": request.recurrence.until
+            event_uid = result.get("id") or result.get("uid")
+
+            # Send calendar invites
+            invites_sent = await _send_invites(request, current_user)
+
+            return {
+                "success": True,
+                "event_uid": event_uid,
+                "event_source": "project",
+                "project_id": request.project_id,
+                "invites_sent": invites_sent
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to create ERP event: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to create project event: {str(e)}"
+            )
+
+    else:
+        # Create in Nextcloud CalDAV (personal)
+        username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
+
+        if not password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Calendar credentials required. Please login to Mail first."
+            )
+
+        # Convert recurrence rule to dict for service
+        recurrence_dict = None
+        if request.recurrence:
+            recurrence_dict = {
+                "freq": request.recurrence.freq,
+                "interval": request.recurrence.interval,
+                "by_day": request.recurrence.by_day,
+                "by_month_day": request.recurrence.by_month_day,
+                "by_month": request.recurrence.by_month,
+                "by_set_pos": request.recurrence.by_set_pos,
+                "count": request.recurrence.count,
+                "until": request.recurrence.until
+            }
+
+        try:
+            event_uid = await caldav_service.create_event(
+                username=username,
+                password=password,
+                calendar_id=request.calendar_id,
+                title=request.title,
+                start=request.start,
+                end=request.end,
+                location=request.location or "",
+                description=request.description or "",
+                all_day=request.all_day,
+                recurrence=recurrence_dict
+            )
+        except CalDAVRateLimitError:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many requests to calendar server. Please wait a moment and try again."
+            )
+        except CalDAVAuthError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Nextcloud credentials. Please check your password."
+            )
+        except CalDAVNotFoundError:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Calendar not found or user doesn't exist in Nextcloud."
+            )
+
+        if not event_uid:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to create event. Please try again later."
+            )
+
+        # Send calendar invites
+        invites_sent = await _send_invites(request, current_user)
+
+        return {
+            "success": True,
+            "event_uid": event_uid,
+            "event_source": "personal",
+            "calendar_id": request.calendar_id,
+            "invites_sent": invites_sent
         }
 
-    try:
-        event_uid = await caldav_service.create_event(
-            username=username,
-            password=password,
-            calendar_id=request.calendar_id,
-            title=request.title,
-            start=request.start,
-            end=request.end,
-            location=request.location or "",
-            description=request.description or "",
-            all_day=request.all_day,
-            recurrence=recurrence_dict
-        )
-    except CalDAVRateLimitError:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many requests to calendar server. Please wait a moment and try again."
-        )
-    except CalDAVAuthError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid Nextcloud credentials. Please check your password."
-        )
-    except CalDAVNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Calendar not found or user doesn't exist in Nextcloud."
-        )
 
-    if not event_uid:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to create event. Please try again later."
-        )
-
-    # Send calendar invites to attendees
+async def _send_invites(request: EventCreate, current_user: dict) -> list:
+    """Send calendar invites to attendees."""
     invites_sent = []
     if request.send_invites and request.attendees:
         organizer_name = current_user.get("username", "Organizer")
@@ -377,50 +520,88 @@ async def create_event(
                 if not result.get("error"):
                     invites_sent.append(attendee_email)
             except Exception as e:
-                print(f"Failed to send calendar invite to {attendee_email}: {e}")
+                logger.warning(f"Failed to send calendar invite to {attendee_email}: {e}")
 
-    return {
-        "success": True,
-        "event_uid": event_uid,
-        "calendar_id": request.calendar_id,
-        "invites_sent": invites_sent
-    }
+    return invites_sent
 
 @router.delete("/events/{event_uid}")
 async def delete_event(
     event_uid: str,
     calendar_id: str = "personal",
+    event_source: Optional[str] = None,  # "personal" or "project" - auto-detected if not provided
     nc_user: str = None,
     nc_pass: str = None,
     current_user: dict = Depends(get_current_user)
 ):
     """Delete a calendar event.
 
-    Credentials are automatically retrieved from your mail session.
+    Routes to appropriate backend based on event_source:
+    - personal: Deletes from Nextcloud CalDAV
+    - project: Deletes from ERP Project Management
+
+    If event_source not provided, tries to detect from event_uid format.
     """
-    username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
+    # Auto-detect source from event_uid if not provided
+    # ERP events typically have UUID format, Nextcloud events have .ics suffix
+    if not event_source:
+        # Check if it looks like a UUID (ERP) or has .ics suffix (Nextcloud)
+        if ".ics" in event_uid or "@" in event_uid:
+            event_source = "personal"
+        else:
+            # Try ERP first, fall back to Nextcloud
+            try:
+                erp_event = await erp_client.get_calendar_event(event_uid)
+                if erp_event:
+                    event_source = "project"
+                else:
+                    event_source = "personal"
+            except:
+                event_source = "personal"
 
-    if not password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Calendar credentials required. Please login to Mail first."
-        )
-
-    try:
-        success = await caldav_service.delete_event(username, password, calendar_id, event_uid)
-
-        if not success:
+    if event_source == "project":
+        # Delete from ERP Project Management
+        try:
+            result = await erp_client.delete_calendar_event(event_uid)
+            return {
+                "success": True,
+                "deleted": event_uid,
+                "event_source": "project"
+            }
+        except Exception as e:
+            logger.error(f"Failed to delete ERP event: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to delete event"
+                detail=f"Failed to delete project event: {str(e)}"
+            )
+    else:
+        # Delete from Nextcloud CalDAV (personal)
+        username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
+
+        if not password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Calendar credentials required. Please login to Mail first."
             )
 
-        return {"success": True, "deleted": event_uid}
-    except CalDAVAuthError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid calendar credentials."
-        )
+        try:
+            success = await caldav_service.delete_event(username, password, calendar_id, event_uid)
+
+            if not success:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to delete event"
+                )
+
+            return {
+                "success": True,
+                "deleted": event_uid,
+                "event_source": "personal"
+            }
+        except CalDAVAuthError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid calendar credentials."
+            )
 
 
 @router.put("/events/{event_uid}")
@@ -434,96 +615,212 @@ async def update_event(
 ):
     """Update an existing calendar event.
 
-    Credentials are automatically retrieved from your mail session.
+    Routes to appropriate backend based on event_source:
+    - personal: Updates in Nextcloud CalDAV
+    - project: Updates in ERP Project Management
+
+    If event_source not provided in request, tries to detect from event_uid format.
     """
-    username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
+    # Determine event source
+    event_source = request.event_source.value if request.event_source else None
 
-    if not password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Calendar credentials required. Please login to Mail first."
+    # Auto-detect source if not provided
+    if not event_source:
+        if ".ics" in event_uid or "@" in event_uid:
+            event_source = "personal"
+        else:
+            try:
+                erp_event = await erp_client.get_calendar_event(event_uid)
+                if erp_event:
+                    event_source = "project"
+                else:
+                    event_source = "personal"
+            except:
+                event_source = "personal"
+
+    if event_source == "project":
+        # Update in ERP Project Management
+        try:
+            # Build update dict with only provided fields
+            updates = {}
+            if request.title is not None:
+                updates["title"] = request.title
+            if request.start is not None:
+                updates["start_time"] = request.start.isoformat()
+            if request.end is not None:
+                updates["end_time"] = request.end.isoformat()
+            if request.location is not None:
+                updates["location"] = request.location
+            if request.description is not None:
+                updates["description"] = request.description
+            if request.all_day is not None:
+                updates["is_all_day"] = request.all_day
+
+            result = await erp_client.update_calendar_event(event_uid, **updates)
+
+            return {
+                "success": True,
+                "event_uid": event_uid,
+                "event_source": "project"
+            }
+        except Exception as e:
+            logger.error(f"Failed to update ERP event: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to update project event: {str(e)}"
+            )
+    else:
+        # Update in Nextcloud CalDAV (personal)
+        username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
+
+        if not password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Calendar credentials required. Please login to Mail first."
+            )
+
+        # Convert recurrence rule to dict for service
+        recurrence_dict = None
+        if request.recurrence:
+            recurrence_dict = {
+                "freq": request.recurrence.freq,
+                "interval": request.recurrence.interval,
+                "by_day": request.recurrence.by_day,
+                "by_month_day": request.recurrence.by_month_day,
+                "by_month": request.recurrence.by_month,
+                "by_set_pos": request.recurrence.by_set_pos,
+                "count": request.recurrence.count,
+                "until": request.recurrence.until
+            }
+
+        success = await caldav_service.update_event(
+            username=username,
+            password=password,
+            calendar_id=calendar_id,
+            event_uid=event_uid,
+            title=request.title,
+            start=request.start,
+            end=request.end,
+            location=request.location,
+            description=request.description,
+            all_day=request.all_day,
+            recurrence=recurrence_dict
         )
 
-    # Convert recurrence rule to dict for service
-    recurrence_dict = None
-    if request.recurrence:
-        recurrence_dict = {
-            "freq": request.recurrence.freq,
-            "interval": request.recurrence.interval,
-            "by_day": request.recurrence.by_day,
-            "by_month_day": request.recurrence.by_month_day,
-            "by_month": request.recurrence.by_month,
-            "by_set_pos": request.recurrence.by_set_pos,
-            "count": request.recurrence.count,
-            "until": request.recurrence.until
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to update event"
+            )
+
+        return {
+            "success": True,
+            "event_uid": event_uid,
+            "event_source": "personal",
+            "calendar_id": calendar_id
         }
-
-    success = await caldav_service.update_event(
-        username=username,
-        password=password,
-        calendar_id=calendar_id,
-        event_uid=event_uid,
-        title=request.title,
-        start=request.start,
-        end=request.end,
-        location=request.location,
-        description=request.description,
-        all_day=request.all_day,
-        recurrence=recurrence_dict
-    )
-
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update event"
-        )
-
-    return {
-        "success": True,
-        "event_uid": event_uid,
-        "calendar_id": calendar_id
-    }
 
 
 @router.get("/events/{event_uid}")
 async def get_event(
     event_uid: str,
     calendar_id: str = "personal",
+    event_source: Optional[str] = None,  # "personal" or "project" - auto-detected if not provided
     nc_user: str = None,
     nc_pass: str = None,
     current_user: dict = Depends(get_current_user)
 ):
     """Get a single calendar event by UID.
 
-    Credentials are automatically retrieved from your mail session.
+    Routes to appropriate backend based on event_source:
+    - personal: Fetches from Nextcloud CalDAV
+    - project: Fetches from ERP Project Management
+
+    If event_source not provided, tries to detect from event_uid format.
     """
-    username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
+    # Auto-detect source from event_uid if not provided
+    if not event_source:
+        if ".ics" in event_uid or "@" in event_uid:
+            event_source = "personal"
+        else:
+            # Try ERP first
+            try:
+                erp_event = await erp_client.get_calendar_event(event_uid)
+                if erp_event:
+                    event_source = "project"
+                else:
+                    event_source = "personal"
+            except:
+                event_source = "personal"
 
-    if not password:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Calendar credentials required. Please login to Mail first."
-        )
+    if event_source == "project":
+        # Fetch from ERP Project Management
+        try:
+            event = await erp_client.get_calendar_event(event_uid)
+            if not event:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Event not found in ERP"
+                )
 
-    try:
-        event = await caldav_service.get_event(username, password, calendar_id, event_uid)
-
-        if not event:
+            # Transform to unified format
+            return {
+                "uid": event.get("id") or event.get("uid"),
+                "id": event.get("id") or event.get("uid"),
+                "title": event.get("title") or event.get("name", "Untitled"),
+                "start": event.get("start_time") or event.get("start"),
+                "end": event.get("end_time") or event.get("end"),
+                "location": event.get("location", ""),
+                "description": event.get("description", ""),
+                "all_day": event.get("is_all_day", False),
+                "event_source": "project",
+                "source_color": "#22c55e",
+                "project_id": event.get("project_id"),
+                "task_id": event.get("task_id"),
+                "event_type": event.get("event_type", "meeting"),
+                "attendees": event.get("attendees", []),
+            }
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to fetch ERP event: {e}")
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Event not found"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to fetch project event: {str(e)}"
+            )
+    else:
+        # Fetch from Nextcloud CalDAV (personal)
+        username, password = await get_nextcloud_credentials(current_user, nc_user, nc_pass)
+
+        if not password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Calendar credentials required. Please login to Mail first."
             )
 
-        # Remove internal raw iCal from response
-        if "_raw_ical" in event:
-            del event["_raw_ical"]
+        try:
+            event = await caldav_service.get_event(username, password, calendar_id, event_uid)
 
-        return event
-    except CalDAVAuthError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid calendar credentials."
-        )
+            if not event:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Event not found"
+                )
+
+            # Remove internal raw iCal from response
+            if "_raw_ical" in event:
+                del event["_raw_ical"]
+
+            # Add source metadata
+            event["event_source"] = "personal"
+            event["source_color"] = "#3b82f6"
+
+            return event
+        except CalDAVAuthError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid calendar credentials."
+            )
 
 
 @router.get("/today")
@@ -946,6 +1243,43 @@ async def get_user_reminders(
             for r in reminders
         ]
     }
+
+
+# ============================================================================
+# ERP Projects Endpoint (for unified calendar)
+# ============================================================================
+
+@router.get("/projects")
+async def get_user_projects(
+    current_user: dict = Depends(get_current_user)
+):
+    """Get user's ERP projects for event creation dropdown.
+
+    Returns list of projects the user can create events for.
+    """
+    try:
+        user_id = current_user.get("id") or current_user.get("sub")
+        projects = await erp_client.get_user_projects(user_id)
+
+        return {
+            "count": len(projects),
+            "projects": [
+                {
+                    "id": p.get("id"),
+                    "name": p.get("name") or p.get("title"),
+                    "status": p.get("status"),
+                    "color": p.get("color", "#22c55e"),
+                }
+                for p in projects
+            ]
+        }
+    except Exception as e:
+        logger.warning(f"Failed to fetch ERP projects: {e}")
+        return {
+            "count": 0,
+            "projects": [],
+            "error": "ERP unavailable"
+        }
 
 
 # ============================================================================

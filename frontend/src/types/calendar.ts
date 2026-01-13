@@ -1,4 +1,18 @@
-// Calendar Types for Bheem Calendar
+// Calendar Types for Bheem Unified Calendar
+// Combines Personal (Nextcloud) + Project (ERP) events
+
+// Event source types for unified calendar
+export type EventSource = 'personal' | 'project';
+export type ERPEventType = 'meeting' | 'task' | 'milestone' | 'reminder';
+
+// Source color coding
+export const EVENT_SOURCE_COLORS = {
+  personal: '#3b82f6',      // Blue - Personal events (Nextcloud)
+  meeting: '#22c55e',       // Green - Project meetings (ERP)
+  task: '#f97316',          // Orange - Project tasks (ERP)
+  milestone: '#ef4444',     // Red - Project milestones (ERP)
+  reminder: '#8b5cf6',      // Purple - Reminders
+} as const;
 
 export interface Attendee {
   email: string;
@@ -47,6 +61,15 @@ export interface CalendarEvent {
   };
   created: string;
   updated: string;
+
+  // Unified calendar fields
+  eventSource?: EventSource;      // 'personal' (Nextcloud) or 'project' (ERP)
+  sourceColor?: string;           // Color based on event source/type
+  sourceLabel?: string;           // 'Personal' or 'Project'
+  projectId?: string;             // ERP project ID (for project events)
+  projectName?: string;           // ERP project name (for display)
+  taskId?: string;                // ERP task ID (if linked to task)
+  eventType?: ERPEventType;       // meeting, task, milestone, reminder
 }
 
 export interface Calendar {
@@ -75,6 +98,12 @@ export interface CreateEventData {
   recurrence?: RecurrenceRule;
   meetingLink?: string;
   sendInvites?: boolean;
+
+  // Unified calendar fields
+  eventSource?: EventSource;      // 'personal' (default) or 'project'
+  projectId?: string;             // Required if eventSource='project'
+  taskId?: string;                // Optional: link to ERP task
+  eventType?: ERPEventType;       // For project events: meeting, task, milestone
 }
 
 export interface UpdateEventData {

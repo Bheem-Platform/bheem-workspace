@@ -3,6 +3,8 @@ Bheem Workspace - External Workspace Service
 Handles external commercial customers with subscription billing via BheemPay
 All external customer revenue is tracked under BHM001 (Bheemverse Innovation)
 """
+import logging
+from datetime import datetime, date
 from typing import Optional, Dict, Any, List
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +13,8 @@ from sqlalchemy import text
 from core.config import settings
 from services.bheempay_client import bheempay_client
 from services.erp_client import erp_client
+
+logger = logging.getLogger(__name__)
 
 
 class ExternalWorkspaceService:
@@ -161,6 +165,7 @@ class ExternalWorkspaceService:
         - Updating tenant subscription status
         - Applying plan quotas
         - Enabling/disabling features
+        - Creating ERP sales orders and invoices
 
         Args:
             event_type: Webhook event type
@@ -179,25 +184,64 @@ class ExternalWorkspaceService:
             # Payment successful - activate tenant subscription
             subscription_id = payload.get("subscription_id")
             plan_id = payload.get("plan_id")
+            payment_id = payload.get("payment_id")
+            amount = payload.get("amount", 0)
+            currency = payload.get("currency", "INR")
 
+            # 1. Activate tenant subscription in workspace DB
             await self._activate_tenant_subscription(
                 tenant_id=tenant_id,
                 subscription_id=subscription_id,
                 plan_id=plan_id
             )
 
-            return {"status": "success", "action": "subscription_activated"}
+            # 2. Create ERP Sales Order and Invoice
+            erp_result = await self._create_erp_sales_records(
+                tenant_id=tenant_id,
+                plan_id=plan_id,
+                amount=amount,
+                currency=currency,
+                payment_id=payment_id,
+                subscription_id=subscription_id,
+                billing_cycle=metadata.get("billing_cycle", "monthly")
+            )
+
+            return {
+                "status": "success",
+                "action": "subscription_activated",
+                "erp_sales_order": erp_result.get("sales_order_id"),
+                "erp_invoice": erp_result.get("invoice_id")
+            }
 
         elif event_type == "subscription.charged":
             # Recurring payment successful
             subscription_id = payload.get("subscription_id")
+            plan_id = payload.get("plan_id")
+            payment_id = payload.get("payment_id")
+            amount = payload.get("amount", 0)
+            currency = payload.get("currency", "INR")
 
             await self._renew_tenant_subscription(
                 tenant_id=tenant_id,
                 subscription_id=subscription_id
             )
 
-            return {"status": "success", "action": "subscription_renewed"}
+            # Create invoice for the recurring payment
+            erp_result = await self._create_erp_recurring_invoice(
+                tenant_id=tenant_id,
+                plan_id=plan_id,
+                amount=amount,
+                currency=currency,
+                payment_id=payment_id,
+                subscription_id=subscription_id,
+                billing_cycle=metadata.get("billing_cycle", "monthly")
+            )
+
+            return {
+                "status": "success",
+                "action": "subscription_renewed",
+                "erp_invoice": erp_result.get("invoice_id")
+            }
 
         elif event_type == "subscription.cancelled":
             await self._deactivate_tenant_subscription(tenant_id)
@@ -507,3 +551,358 @@ class ExternalWorkspaceService:
         """)
         await self.db.execute(query, {"tenant_id": tenant_id})
         await self.db.commit()
+
+    # ═══════════════════════════════════════════════════════════════════
+    # ERP SALES INTEGRATION
+    # ═══════════════════════════════════════════════════════════════════
+
+    async def _create_erp_sales_records(
+        self,
+        tenant_id: str,
+        plan_id: str,
+        amount: float,
+        currency: str,
+        payment_id: str,
+        subscription_id: str,
+        billing_cycle: str = "monthly"
+    ) -> dict:
+        """
+        Create accounting journal entry in ERP after successful payment.
+
+        Simplified flow using direct journal entries:
+        1. Get plan details for description
+        2. Create and post journal entry:
+           - Debit: Cash in Bank (payment received)
+           - Credit: Subscription Revenue
+
+        Args:
+            tenant_id: Workspace tenant ID
+            plan_id: Subscription plan ID
+            amount: Payment amount (in smallest currency unit, e.g., paise)
+            currency: Currency code (e.g., INR)
+            payment_id: BheemPay payment ID
+            subscription_id: Subscription ID
+            billing_cycle: 'monthly' or 'annual'
+
+        Returns:
+            Dict with journal_entry_id
+        """
+        result = {
+            "journal_entry_id": None,
+            "entry_number": None,
+            "status": None,
+            "errors": []
+        }
+
+        try:
+            # Convert amount from paise to rupees if needed
+            amount_decimal = amount / 100 if amount > 1000 else amount
+
+            # Get plan details for description
+            plan_details = {}
+            try:
+                plan_details = await self.erp.get_plan_details(plan_id)
+            except Exception as e:
+                logger.warning(f"Could not fetch plan details: {e}")
+
+            plan_name = plan_details.get("name", "Workspace Subscription")
+            cycle_display = "Monthly" if billing_cycle == "monthly" else "Annual"
+
+            # Create reference
+            ref_id = subscription_id[:8] if subscription_id else tenant_id[:8]
+            reference = f"WS-{ref_id}-{payment_id[:8] if payment_id else 'PAY'}"
+
+            # Create accounting journal entry
+            logger.info(f"Creating journal entry for tenant {tenant_id}, amount: ₹{amount_decimal}")
+            accounting_result = await self._create_accounting_entries(
+                customer_id=tenant_id,  # For reference only
+                company_id=settings.BHEEMVERSE_PARENT_COMPANY_CODE,
+                amount=amount_decimal,
+                currency=currency,
+                payment_id=payment_id or "DIRECT",
+                description=f"Bheem Workspace {plan_name} Subscription ({cycle_display})",
+                reference=reference
+            )
+
+            result["journal_entry_id"] = accounting_result.get("journal_entry_id")
+            result["entry_number"] = accounting_result.get("entry_number")
+            result["status"] = accounting_result.get("status")
+
+            if accounting_result.get("errors"):
+                result["errors"].extend(accounting_result["errors"])
+
+            # Log success
+            if result["journal_entry_id"]:
+                logger.info(
+                    f"✓ ERP accounting entry created for tenant {tenant_id}: "
+                    f"Entry #{result['entry_number']}, Status: {result['status']}"
+                )
+
+        except Exception as e:
+            logger.error(f"ERP accounting integration error for tenant {tenant_id}: {e}")
+            result["errors"].append(str(e))
+
+        return result
+
+    async def _ensure_erp_sales_customer(self, tenant) -> Optional[str]:
+        """
+        Ensure ERP Sales Customer exists for the tenant.
+        Creates one if it doesn't exist.
+
+        Args:
+            tenant: Tenant record from database
+
+        Returns:
+            ERP customer ID or None
+        """
+        # Check if tenant already has an ERP sales customer ID
+        if hasattr(tenant, 'erp_sales_customer_id') and tenant.erp_sales_customer_id:
+            return str(tenant.erp_sales_customer_id)
+
+        # Fall back to CRM customer ID (they may be the same in some ERP setups)
+        if tenant.erp_customer_id:
+            return str(tenant.erp_customer_id)
+
+        # Create a new Sales Customer in ERP
+        try:
+            billing_email = tenant.billing_email or tenant.owner_email
+            customer = await self.erp.create_sales_customer(
+                name=tenant.name,
+                email=billing_email,
+                company_id=settings.BHEEMVERSE_PARENT_COMPANY_CODE,
+                phone=getattr(tenant, 'phone', None),
+                address={
+                    "country": getattr(tenant, 'country', 'IN')
+                },
+                tax_id=getattr(tenant, 'tax_id', None),
+                payment_terms=30,
+                metadata={
+                    "workspace_tenant_id": str(tenant.id),
+                    "source": "bheem_workspace"
+                }
+            )
+
+            customer_id = customer.get("id")
+            if customer_id:
+                # Update tenant with the new customer ID
+                await self._update_tenant_erp_customer(tenant.id, customer_id)
+                return customer_id
+
+        except Exception as e:
+            logger.error(f"Failed to create ERP sales customer for tenant {tenant.id}: {e}")
+
+        return None
+
+    async def _update_tenant_erp_sales_refs(
+        self,
+        tenant_id: str,
+        sales_order_id: Optional[str],
+        invoice_id: Optional[str]
+    ):
+        """
+        Update tenant with ERP sales references.
+        Stores the latest sales order and invoice IDs.
+
+        Args:
+            tenant_id: Tenant ID
+            sales_order_id: ERP Sales Order ID
+            invoice_id: ERP Invoice ID
+        """
+        try:
+            # Note: These columns need to exist in the tenants table
+            # If they don't exist, this will fail gracefully
+            query = text("""
+                UPDATE workspace.tenants SET
+                    last_erp_sales_order_id = :sales_order_id,
+                    last_erp_invoice_id = :invoice_id,
+                    updated_at = NOW()
+                WHERE id = CAST(:tenant_id AS uuid)
+            """)
+            await self.db.execute(query, {
+                "tenant_id": tenant_id,
+                "sales_order_id": sales_order_id,
+                "invoice_id": invoice_id
+            })
+            await self.db.commit()
+        except Exception as e:
+            # Columns may not exist - log and continue
+            logger.warning(f"Could not update ERP sales refs for tenant {tenant_id}: {e}")
+            # Don't fail the whole operation for this
+
+    async def _create_accounting_entries(
+        self,
+        customer_id: str,
+        company_id: str,
+        amount: float,
+        currency: str,
+        payment_id: str,
+        description: str,
+        reference: str
+    ) -> dict:
+        """
+        Create accounting entries in the ERP Accounting module.
+
+        Creates a simple journal entry for subscription revenue:
+        - Debit: Cash in Bank (payment received via BheemPay)
+        - Credit: Subscription Revenue
+
+        Args:
+            customer_id: ERP Customer ID (for reference)
+            company_id: Company UUID (Bheemverse: 1b505aaf-981e-4155-bb97-7650827b0e12)
+            amount: Payment amount
+            currency: Currency code
+            payment_id: BheemPay payment reference
+            description: Entry description
+            reference: Entry reference
+
+        Returns:
+            Dict with journal_entry_id and any errors
+        """
+        result = {
+            "journal_entry_id": None,
+            "entry_number": None,
+            "status": None,
+            "accounts_used": {},
+            "errors": []
+        }
+
+        # BHM001 - Bheemverse Innovation (Parent company - all external revenue goes here)
+        # Using settings for company ID - fully dynamic, no hardcoding
+        company_uuid = settings.BHEEMVERSE_PARENT_COMPANY_ID
+
+        try:
+            logger.info(f"Creating journal entry for subscription payment: {reference}")
+            logger.info(f"Target company: {settings.BHEEMVERSE_PARENT_COMPANY_CODE} ({company_uuid})")
+
+            # Dynamically fetch the appropriate accounts from ERP
+            accounts = await self.erp.get_subscription_accounts(company_uuid)
+
+            cash_account_id = accounts.get("cash_account_id")
+            revenue_account_id = accounts.get("revenue_account_id")
+
+            if not cash_account_id:
+                raise ValueError(f"No Cash/Bank account found for company {company_uuid}")
+            if not revenue_account_id:
+                raise ValueError(f"No Revenue account found for company {company_uuid}")
+
+            logger.info(
+                f"Using accounts - Cash: {accounts.get('cash_account_name')} ({cash_account_id}), "
+                f"Revenue: {accounts.get('revenue_account_name')} ({revenue_account_id})"
+            )
+
+            # Store accounts used for audit trail
+            result["accounts_used"] = {
+                "cash_account": accounts.get("cash_account_name"),
+                "revenue_account": accounts.get("revenue_account_name")
+            }
+
+            # Create journal entry with dynamically fetched accounts
+            journal_entry = await self.erp.create_subscription_revenue_entry(
+                company_id=company_uuid,
+                amount=amount,
+                description=description,
+                reference=reference,
+                entry_date=date.today().isoformat(),
+                cash_account_id=cash_account_id,
+                revenue_account_id=revenue_account_id,
+                auto_post=True  # Automatically post the entry
+            )
+
+            result["journal_entry_id"] = journal_entry.get("id")
+            result["entry_number"] = journal_entry.get("entry_number")
+            result["status"] = journal_entry.get("status", "DRAFT")
+
+            logger.info(
+                f"Created journal entry: {result['entry_number']} "
+                f"(ID: {result['journal_entry_id']}, Status: {result['status']})"
+            )
+
+        except Exception as e:
+            logger.error(f"Accounting entries creation error: {e}")
+            result["errors"].append(str(e))
+
+        return result
+
+    async def _create_erp_recurring_invoice(
+        self,
+        tenant_id: str,
+        plan_id: str,
+        amount: float,
+        currency: str,
+        payment_id: str,
+        subscription_id: str,
+        billing_cycle: str = "monthly"
+    ) -> dict:
+        """
+        Create Invoice in ERP for recurring subscription payment.
+        No Sales Order needed - just invoice and payment recording.
+
+        Args:
+            tenant_id: Workspace tenant ID
+            plan_id: Subscription plan ID
+            amount: Payment amount
+            currency: Currency code
+            payment_id: BheemPay payment ID
+            subscription_id: Subscription ID
+            billing_cycle: 'monthly' or 'annual'
+
+        Returns:
+            Dict with journal_entry_id
+        """
+        result = {
+            "journal_entry_id": None,
+            "entry_number": None,
+            "status": None,
+            "errors": []
+        }
+
+        try:
+            # Convert amount from paise to rupees if needed
+            amount_decimal = amount / 100 if amount > 1000 else amount
+
+            # Get plan details
+            plan_details = {}
+            try:
+                plan_details = await self.erp.get_plan_details(plan_id)
+            except Exception as e:
+                logger.warning(f"Could not fetch plan details: {e}")
+
+            plan_name = plan_details.get("name", "Workspace Subscription")
+            cycle_display = "Monthly" if billing_cycle == "monthly" else "Annual"
+            period = datetime.now().strftime("%B %Y")
+
+            # Create reference
+            ref_id = subscription_id[:8] if subscription_id else tenant_id[:8]
+            reference = f"REC-{ref_id}-{datetime.now().strftime('%Y%m')}"
+
+            # Create accounting journal entry directly
+            logger.info(f"Creating recurring journal entry for tenant {tenant_id}, amount: ₹{amount_decimal}")
+            accounting_result = await self._create_accounting_entries(
+                customer_id=tenant_id,
+                company_id=settings.BHEEMVERSE_PARENT_COMPANY_CODE,
+                amount=amount_decimal,
+                currency=currency,
+                payment_id=payment_id or "RECURRING",
+                description=f"Bheem Workspace {plan_name} - {period} ({cycle_display})",
+                reference=reference
+            )
+
+            result["journal_entry_id"] = accounting_result.get("journal_entry_id")
+            result["entry_number"] = accounting_result.get("entry_number")
+            result["status"] = accounting_result.get("status")
+
+            if accounting_result.get("errors"):
+                result["errors"].extend(accounting_result["errors"])
+
+            # Log success
+            if result["journal_entry_id"]:
+                logger.info(
+                    f"✓ Recurring ERP entry created for tenant {tenant_id}: "
+                    f"Entry #{result['entry_number']}, Status: {result['status']}"
+                )
+
+        except Exception as e:
+            logger.error(f"ERP recurring entry error for tenant {tenant_id}: {e}")
+            result["errors"].append(str(e))
+
+        return result

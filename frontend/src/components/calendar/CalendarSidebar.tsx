@@ -1,6 +1,7 @@
-import { Plus, Check } from 'lucide-react';
+import { Plus, Check, User, Briefcase, Globe } from 'lucide-react';
 import { useCalendarStore } from '@/stores/calendarStore';
 import MiniCalendar from './MiniCalendar';
+import type { EventSource } from '@/types/calendar';
 
 interface CalendarSidebarProps {
   onCreateEvent: () => void;
@@ -12,9 +13,11 @@ export default function CalendarSidebar({ onCreateEvent }: CalendarSidebarProps)
     currentDate,
     selectedDate,
     visibleCalendarIds,
+    sourceFilter,
     selectDate,
     goToDate,
     toggleCalendarVisibility,
+    setSourceFilter,
   } = useCalendarStore();
 
   const handleDateSelect = (date: Date) => {
@@ -43,6 +46,62 @@ export default function CalendarSidebar({ onCreateEvent }: CalendarSidebarProps)
           onDateSelect={handleDateSelect}
           onMonthChange={goToDate}
         />
+      </div>
+
+      {/* Event Sources Filter */}
+      <div className="p-4 border-b border-gray-200">
+        <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+          Show Events
+        </h3>
+        <div className="space-y-1">
+          {/* All Sources */}
+          <button
+            onClick={() => setSourceFilter(null)}
+            className={`w-full flex items-center gap-3 px-2 py-2 rounded-lg transition-colors ${
+              sourceFilter === null ? 'bg-gray-100' : 'hover:bg-gray-50'
+            }`}
+          >
+            <div className={`w-5 h-5 rounded flex items-center justify-center ${
+              sourceFilter === null ? 'bg-gray-700' : 'border-2 border-gray-300'
+            }`}>
+              {sourceFilter === null && <Check size={12} className="text-white" />}
+            </div>
+            <Globe size={16} className="text-gray-500" />
+            <span className="text-sm text-gray-700">All Events</span>
+          </button>
+
+          {/* Personal Events */}
+          <button
+            onClick={() => setSourceFilter('personal')}
+            className={`w-full flex items-center gap-3 px-2 py-2 rounded-lg transition-colors ${
+              sourceFilter === 'personal' ? 'bg-blue-50' : 'hover:bg-gray-50'
+            }`}
+          >
+            <div className={`w-5 h-5 rounded flex items-center justify-center ${
+              sourceFilter === 'personal' ? 'bg-blue-500' : 'border-2 border-gray-300'
+            }`}>
+              {sourceFilter === 'personal' && <Check size={12} className="text-white" />}
+            </div>
+            <User size={16} className="text-blue-500" />
+            <span className="text-sm text-gray-700">Personal</span>
+          </button>
+
+          {/* Project Events */}
+          <button
+            onClick={() => setSourceFilter('project')}
+            className={`w-full flex items-center gap-3 px-2 py-2 rounded-lg transition-colors ${
+              sourceFilter === 'project' ? 'bg-green-50' : 'hover:bg-gray-50'
+            }`}
+          >
+            <div className={`w-5 h-5 rounded flex items-center justify-center ${
+              sourceFilter === 'project' ? 'bg-green-500' : 'border-2 border-gray-300'
+            }`}>
+              {sourceFilter === 'project' && <Check size={12} className="text-white" />}
+            </div>
+            <Briefcase size={16} className="text-green-500" />
+            <span className="text-sm text-gray-700">Project</span>
+          </button>
+        </div>
       </div>
 
       {/* My Calendars */}

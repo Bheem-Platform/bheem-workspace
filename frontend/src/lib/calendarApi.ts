@@ -2,11 +2,27 @@ import { api } from './api';
 import type { Calendar, CalendarEvent, CreateEventData, UpdateEventData } from '@/types/calendar';
 
 /**
- * Calendar API - Uses workspace credentials automatically
+ * Unified Calendar API - Combines Personal (Nextcloud) + Project (ERP) events
  *
  * The backend automatically retrieves credentials from your mail session.
  * Just login to Mail with your workspace email/password, and Calendar works!
+ *
+ * Event Sources:
+ * - personal: Personal events stored in Nextcloud CalDAV (blue)
+ * - project: Project events from ERP Project Management (green/orange/red)
  */
+
+// Event source types
+export type EventSource = 'personal' | 'project';
+export type ERPEventType = 'meeting' | 'task' | 'milestone' | 'reminder';
+
+// Project for dropdown
+export interface Project {
+  id: string;
+  name: string;
+  status?: string;
+  color?: string;
+}
 
 // Calendars
 export const getCalendars = async (): Promise<Calendar[]> => {
@@ -15,20 +31,32 @@ export const getCalendars = async (): Promise<Calendar[]> => {
   return response.data?.calendars || response.data || [];
 };
 
-// Events
+// Get user's ERP projects for event creation
+export const getProjects = async (): Promise<Project[]> => {
+  try {
+    const response = await api.get('/calendar/projects');
+    return response.data?.projects || [];
+  } catch {
+    return [];
+  }
+};
+
+// Events - Unified view combining personal + project events
 export const getEvents = async (
   start?: string,
   end?: string,
-  calendarId?: string
+  calendarId?: string,
+  source?: EventSource | null  // Filter: 'personal', 'project', or null for both
 ): Promise<CalendarEvent[]> => {
   const response = await api.get('/calendar/events', {
     params: {
       start,
       end,
       calendar_id: calendarId,
+      source,  // New: filter by source
     },
   });
-  // API returns {count, events} - extract events array
+  // API returns {count, events, sources, errors} - extract events array
   return response.data?.events || response.data || [];
 };
 
@@ -71,13 +99,19 @@ export const createEvent = async (
     attendees: data.attendees || [],
     send_invites: data.sendInvites ?? true,
     recurrence: convertRecurrenceToBackend(data.recurrence),
+    // Unified calendar fields
+    event_source: data.eventSource || 'personal',
+    project_id: data.projectId,
+    task_id: data.taskId,
+    event_type: data.eventType || 'meeting',
   });
   return response.data;
 };
 
 export const updateEvent = async (
   eventUid: string,
-  data: UpdateEventData
+  data: UpdateEventData,
+  eventSource?: EventSource
 ): Promise<CalendarEvent> => {
   const response = await api.put(`/calendar/events/${eventUid}`, {
     title: data.title,
@@ -87,14 +121,18 @@ export const updateEvent = async (
     description: data.description,
     all_day: data.allDay,
     recurrence: data.recurrence ? convertRecurrenceToBackend(data.recurrence) : undefined,
+    event_source: eventSource,  // Helps route to correct backend
   });
   return response.data;
 };
 
 export const deleteEvent = async (
-  eventUid: string
+  eventUid: string,
+  eventSource?: EventSource
 ): Promise<void> => {
-  await api.delete(`/calendar/events/${eventUid}`);
+  await api.delete(`/calendar/events/${eventUid}`, {
+    params: { event_source: eventSource },
+  });
 };
 
 // Recurring event instance management

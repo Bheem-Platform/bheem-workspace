@@ -1,5 +1,5 @@
 import dayjs from 'dayjs';
-import { MapPin, Users } from 'lucide-react';
+import { MapPin, Users, User, Briefcase, Target, Flag } from 'lucide-react';
 import type { CalendarEvent } from '@/types/calendar';
 
 interface EventCardProps {
@@ -8,20 +8,52 @@ interface EventCardProps {
   compact?: boolean;
 }
 
+// Get color based on event source and type
+function getEventColor(event: CalendarEvent): string {
+  // Use sourceColor if available (from backend)
+  if (event.sourceColor) return event.sourceColor;
+
+  // Fallback to event.color or source-based color
+  if (event.eventSource === 'project') {
+    switch (event.eventType) {
+      case 'milestone': return '#ef4444'; // Red
+      case 'task': return '#f97316'; // Orange
+      default: return '#22c55e'; // Green for meetings
+    }
+  }
+
+  return event.color || '#3b82f6'; // Blue for personal
+}
+
+// Get icon based on event source and type
+function getEventIcon(event: CalendarEvent) {
+  if (event.eventSource === 'project') {
+    switch (event.eventType) {
+      case 'milestone': return Flag;
+      case 'task': return Target;
+      default: return Briefcase;
+    }
+  }
+  return User;
+}
+
 export default function EventCard({ event, onClick, compact = false }: EventCardProps) {
   const startTime = dayjs(event.start).format('h:mm A');
   const endTime = dayjs(event.end).format('h:mm A');
+  const eventColor = getEventColor(event);
+  const EventIcon = getEventIcon(event);
 
   if (compact) {
     return (
       <button
         onClick={onClick}
-        className="w-full text-left px-2 py-1 rounded text-xs font-medium truncate transition-opacity hover:opacity-80"
+        className="w-full text-left px-2 py-1 rounded text-xs font-medium truncate transition-opacity hover:opacity-80 flex items-center gap-1"
         style={{
-          backgroundColor: event.color || '#3b82f6',
+          backgroundColor: eventColor,
           color: '#ffffff',
         }}
       >
+        <EventIcon size={10} />
         {event.title}
       </button>
     );
@@ -32,21 +64,30 @@ export default function EventCard({ event, onClick, compact = false }: EventCard
       onClick={onClick}
       className="w-full text-left p-2 rounded-lg transition-all hover:shadow-md group"
       style={{
-        backgroundColor: `${event.color || '#3b82f6'}15`,
-        borderLeft: `3px solid ${event.color || '#3b82f6'}`,
+        backgroundColor: `${eventColor}15`,
+        borderLeft: `3px solid ${eventColor}`,
       }}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <p
-            className="text-sm font-medium truncate"
-            style={{ color: event.color || '#3b82f6' }}
-          >
-            {event.title}
-          </p>
+          <div className="flex items-center gap-1">
+            <EventIcon size={12} style={{ color: eventColor }} />
+            <p
+              className="text-sm font-medium truncate"
+              style={{ color: eventColor }}
+            >
+              {event.title}
+            </p>
+          </div>
           <p className="text-xs text-gray-500 mt-0.5">
             {event.allDay ? 'All day' : `${startTime} - ${endTime}`}
           </p>
+          {/* Show project name for project events */}
+          {event.eventSource === 'project' && event.projectName && (
+            <p className="text-xs text-gray-400 mt-0.5 truncate">
+              {event.projectName}
+            </p>
+          )}
         </div>
       </div>
 
@@ -79,21 +120,29 @@ interface TimeSlotEventProps {
 
 export function TimeSlotEvent({ event, onClick, style }: TimeSlotEventProps) {
   const startTime = dayjs(event.start).format('h:mm A');
+  const eventColor = getEventColor(event);
+  const EventIcon = getEventIcon(event);
 
   return (
     <button
       onClick={onClick}
       className="absolute rounded-lg p-2 text-left overflow-hidden transition-all hover:shadow-lg hover:z-20 z-10"
       style={{
-        backgroundColor: event.color || '#3b82f6',
+        backgroundColor: eventColor,
         // Default width/left if not provided in style
         width: 'calc(100% - 4px)',
         left: '2px',
         ...style,
       }}
     >
-      <p className="text-xs font-medium text-white truncate">{event.title}</p>
+      <div className="flex items-center gap-1">
+        <EventIcon size={10} className="text-white/80 flex-shrink-0" />
+        <p className="text-xs font-medium text-white truncate">{event.title}</p>
+      </div>
       <p className="text-xs text-white/80">{startTime}</p>
+      {event.eventSource === 'project' && event.projectName && (
+        <p className="text-xs text-white/60 truncate">{event.projectName}</p>
+      )}
     </button>
   );
 }
@@ -105,14 +154,18 @@ interface AllDayEventProps {
 }
 
 export function AllDayEvent({ event, onClick }: AllDayEventProps) {
+  const eventColor = getEventColor(event);
+  const EventIcon = getEventIcon(event);
+
   return (
     <button
       onClick={onClick}
-      className="w-full px-2 py-1 rounded text-xs font-medium text-white truncate transition-opacity hover:opacity-80"
+      className="w-full px-2 py-1 rounded text-xs font-medium text-white truncate transition-opacity hover:opacity-80 flex items-center gap-1"
       style={{
-        backgroundColor: event.color || '#3b82f6',
+        backgroundColor: eventColor,
       }}
     >
+      <EventIcon size={10} className="flex-shrink-0" />
       {event.title}
     </button>
   );

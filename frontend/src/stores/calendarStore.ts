@@ -7,18 +7,22 @@ import type {
   CalendarViewType,
   CreateEventData,
   UpdateEventData,
+  EventSource,
 } from '@/types/calendar';
+import type { Project } from '@/lib/calendarApi';
 
 interface CalendarState {
   // Data
   calendars: Calendar[];
   events: CalendarEvent[];
   selectedEvent: CalendarEvent | null;
+  projects: Project[];  // ERP projects for unified calendar
 
   // View state
   currentDate: Date;
   viewType: CalendarViewType;
   visibleCalendarIds: string[];
+  sourceFilter: EventSource | null;  // Filter: 'personal', 'project', or null for all
 
   // UI State
   isEventModalOpen: boolean;
@@ -31,6 +35,7 @@ interface CalendarState {
     calendars: boolean;
     events: boolean;
     action: boolean;
+    projects: boolean;
   };
 
   // Error
@@ -39,9 +44,11 @@ interface CalendarState {
   // Actions
   fetchCalendars: () => Promise<void>;
   fetchEvents: (start?: Date, end?: Date) => Promise<void>;
+  fetchProjects: () => Promise<void>;  // Fetch ERP projects
   createEvent: (data: CreateEventData) => Promise<boolean>;
   updateEvent: (uid: string, data: UpdateEventData) => Promise<boolean>;
   deleteEvent: (uid: string) => Promise<void>;
+  setSourceFilter: (source: EventSource | null) => void;  // Filter by source
 
   // Navigation
   navigateDate: (direction: 'prev' | 'next' | 'today') => void;
@@ -74,9 +81,11 @@ const initialState = {
   calendars: [],
   events: [],
   selectedEvent: null,
+  projects: [],  // ERP projects
   currentDate: new Date(),
   viewType: 'week' as CalendarViewType,
   visibleCalendarIds: [],
+  sourceFilter: null as EventSource | null,  // Show all sources by default
   isEventModalOpen: false,
   eventFormData: {},
   isEditMode: false,
@@ -85,6 +94,7 @@ const initialState = {
     calendars: false,
     events: false,
     action: false,
+    projects: false,
   },
   error: null,
 };
@@ -127,7 +137,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   },
 
   fetchEvents: async (start?: Date, end?: Date) => {
-    const { currentDate, viewType } = get();
+    const { currentDate, viewType, sourceFilter } = get();
 
     // Calculate date range based on view
     let rangeStart = start;
@@ -153,10 +163,12 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     set((state) => ({ loading: { ...state.loading, events: true }, error: null }));
 
     try {
-      // Uses mail session credentials automatically - no need to pass them
+      // Unified calendar - fetches from both Nextcloud and ERP
       const events = await calendarApi.getEvents(
         rangeStart.toISOString(),
-        rangeEnd.toISOString()
+        rangeEnd.toISOString(),
+        undefined,
+        sourceFilter  // Filter by source if set
       );
 
       const mappedEvents: CalendarEvent[] = (events || []).map((e: any) => ({
@@ -169,7 +181,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         end: e.end || e.start,
         allDay: e.all_day || false,
         calendarId: e.calendar_id || 'personal',
-        color: e.color || '#3b82f6',
+        color: e.source_color || e.color || '#3b82f6',  // Use source color if available
         status: e.status || 'confirmed',
         visibility: e.visibility || 'public',
         attendees: e.attendees || [],
@@ -188,6 +200,14 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
           until: e.recurrence_parsed.until,
         } : undefined,
         recurringEventId: e.master_event_id,
+        // Unified calendar fields
+        eventSource: e.event_source,
+        sourceColor: e.source_color,
+        sourceLabel: e.source_label,
+        projectId: e.project_id,
+        projectName: e.project_name,
+        taskId: e.task_id,
+        eventType: e.event_type,
       }));
 
       set({ events: mappedEvents });
@@ -201,6 +221,25 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     } finally {
       set((state) => ({ loading: { ...state.loading, events: false } }));
     }
+  },
+
+  fetchProjects: async () => {
+    set((state) => ({ loading: { ...state.loading, projects: true } }));
+
+    try {
+      const projects = await calendarApi.getProjects();
+      set({ projects });
+    } catch (error: any) {
+      console.warn('Failed to fetch ERP projects:', error);
+      set({ projects: [] });
+    } finally {
+      set((state) => ({ loading: { ...state.loading, projects: false } }));
+    }
+  },
+
+  setSourceFilter: (source: EventSource | null) => {
+    set({ sourceFilter: source });
+    get().fetchEvents();
   },
 
   createEvent: async (data: CreateEventData) => {
@@ -226,8 +265,13 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     set((state) => ({ loading: { ...state.loading, action: true }, error: null }));
 
     try {
-      // Uses mail session credentials automatically
-      await calendarApi.updateEvent(uid, data);
+      // Find the event to get its source
+      const { events } = get();
+      const event = events.find((e) => e.uid === uid);
+      const eventSource = event?.eventSource as calendarApi.EventSource | undefined;
+
+      // Update in appropriate backend based on source
+      await calendarApi.updateEvent(uid, data, eventSource);
 
       await get().fetchEvents();
       set({ isEventModalOpen: false, eventFormData: {}, isEditMode: false });
@@ -244,8 +288,13 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     set((state) => ({ loading: { ...state.loading, action: true } }));
 
     try {
-      // Uses mail session credentials automatically
-      await calendarApi.deleteEvent(uid);
+      // Find the event to get its source
+      const { events } = get();
+      const event = events.find((e) => e.uid === uid);
+      const eventSource = event?.eventSource as calendarApi.EventSource | undefined;
+
+      // Delete from appropriate backend based on source
+      await calendarApi.deleteEvent(uid, eventSource);
 
       set((state) => ({
         events: state.events.filter((e) => e.uid !== uid),

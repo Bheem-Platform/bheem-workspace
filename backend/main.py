@@ -162,7 +162,8 @@ async def api_info():
             "admin": "/api/v1/admin",
             "billing": "/api/v1/billing",
             "erp_sync": "/api/v1/erp-sync",
-            "workspace_email": "/api/v1/workspace-email"
+            "workspace_email": "/api/v1/workspace-email",
+            "pm": "/api/v1/pm"
         }
     }
 
@@ -371,6 +372,14 @@ try:
     app.include_router(workspace_email_router, prefix="/api/v1", tags=["Workspace Email"])
 except Exception as e:
     print(f"Could not load workspace_email router: {e}")
+
+# Project Management (ERP PM Module Integration)
+try:
+    from api.pm import router as pm_router
+    app.include_router(pm_router, prefix="/api/v1", tags=["Project Management"])
+    logger.info("Project Management API loaded", action="pm_loaded")
+except Exception as e:
+    print(f"Could not load pm router: {e}")
 
 # Bheem Docs v2 API (ERP DMS Integration)
 try:
