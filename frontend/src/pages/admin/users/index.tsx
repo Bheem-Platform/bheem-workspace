@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
-import { Plus, Search, UserPlus, MoreVertical, Shield, User, UserX } from 'lucide-react';
+import { Plus, Search, UserPlus, MoreVertical, Shield, User, UserX, Upload, Download } from 'lucide-react';
 import AdminLayout from '@/components/admin/AdminLayout';
 import DataTable from '@/components/admin/DataTable';
 import StatusBadge from '@/components/admin/StatusBadge';
@@ -28,7 +28,10 @@ export default function UsersPage() {
 
   useEffect(() => {
     if (!isAuthenticated || authLoading) return;
-    fetchTenantUsers(tenantId);
+    // Only fetch if we have a valid tenant ID
+    if (tenantId) {
+      fetchTenantUsers(tenantId);
+    }
   }, [fetchTenantUsers, tenantId, isAuthenticated, authLoading]);
 
   const handleInviteUser = async (data: TenantUserCreate) => {
@@ -159,16 +162,25 @@ export default function UsersPage() {
             <h1 className="text-2xl font-bold text-gray-900">Users</h1>
             <p className="text-gray-500">Manage workspace members and their permissions</p>
           </div>
-          <button
-            onClick={() => {
-              clearError();
-              setShowInviteModal(true);
-            }}
-            className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <UserPlus size={20} className="mr-2" />
-            Invite User
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => router.push('/admin/users/import')}
+              className="inline-flex items-center px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+            >
+              <Upload size={20} className="mr-2" />
+              Bulk Import
+            </button>
+            <button
+              onClick={() => {
+                clearError();
+                setShowInviteModal(true);
+              }}
+              className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <UserPlus size={20} className="mr-2" />
+              Invite User
+            </button>
+          </div>
         </div>
 
         {/* Filters */}

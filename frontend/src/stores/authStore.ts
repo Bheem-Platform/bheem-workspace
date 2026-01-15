@@ -11,6 +11,9 @@ interface User {
   company_code?: string;
   companies?: string[];
   person_id?: string;
+  // Workspace tenant info (for external customers)
+  workspace_tenant_id?: string;
+  workspace_role?: string;
 }
 
 interface AuthState {
@@ -71,6 +74,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           person_id: payload.person_id,
         };
         set({ user, token, isAuthenticated: true, isLoading: false });
+
+        // Fetch workspace info for external customers
+        try {
+          const workspaceRes = await api.get('/user-workspace/me');
+          const workspace = workspaceRes.data;
+          if (workspace?.id) {
+            set((state) => ({
+              user: state.user ? {
+                ...state.user,
+                workspace_tenant_id: workspace.id,
+                workspace_role: workspace.role
+              } : null
+            }));
+          }
+        } catch (error) {
+          // User might not have a workspace yet, which is fine
+          console.log('[Auth] No workspace found for user');
+        }
       } else {
         // Token expired
         localStorage.removeItem('auth_token');
@@ -86,6 +107,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       localStorage.setItem('auth_token', token);
     }
     set({ token, user, isAuthenticated: true, isLoading: false });
+
+    // Fetch workspace info for external customers
+    try {
+      const workspaceRes = await api.get('/user-workspace/me');
+      const workspace = workspaceRes.data;
+      if (workspace?.id) {
+        set((state) => ({
+          user: state.user ? {
+            ...state.user,
+            workspace_tenant_id: workspace.id,
+            workspace_role: workspace.role
+          } : null
+        }));
+        console.log('[Auth] Workspace tenant ID set:', workspace.id);
+      }
+    } catch (error) {
+      console.warn('[Auth] Could not fetch workspace info:', error);
+    }
 
     // Create SSO session for seamless cross-service authentication (mail, docs, meet)
     try {
@@ -131,9 +170,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 // Helper hook to get tenant ID from current user
 export const useCurrentTenantId = (): string => {
   const user = useAuthStore((state) => state.user);
-  // Use company_code (slug) as tenant ID - this maps to workspace tenant slug
-  // company_id is from Bheem Passport which is a different system
-  return user?.company_code?.toLowerCase() || 'default';
+  // First try workspace_tenant_id (for external customers who created their own workspace)
+  // Then fall back to company_code (for internal/ERP users)
+  // Never return 'default' - this causes multi-tenancy issues
+  if (user?.workspace_tenant_id) {
+    return user.workspace_tenant_id;
+  }
+  if (user?.company_code) {
+    return user.company_code.toLowerCase();
+  }
+  // Return empty string instead of 'default' to prevent accessing wrong tenant
+  return '';
 };
 
 // Helper hook to check if user is super admin

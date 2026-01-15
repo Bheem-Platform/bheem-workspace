@@ -30,6 +30,86 @@ from .mail_models import (
     Mail2FALog
 )
 
+from .productivity_models import (
+    # Sheets
+    Spreadsheet,
+    Worksheet,
+    SpreadsheetShare,
+    # Slides
+    Presentation,
+    Slide,
+    PresentationShare,
+    # Forms
+    Form,
+    FormQuestion,
+    FormResponse,
+    FormShare,
+    # Shared
+    ContentFolder,
+    ProductivityTemplate
+)
+
+from .org_models import (
+    # Organizational Units
+    OrgUnit,
+    # User Groups
+    UserGroup,
+    UserGroupMember,
+    # Admin Roles
+    AdminRole,
+    UserAdminRole,
+    # SSO
+    SSOConfiguration,
+    # Domain Aliases
+    DomainAlias,
+    # Security
+    SecurityPolicy,
+    # Import Jobs
+    UserImportJob
+)
+
+from .drive_models import (
+    DriveFile,
+    DriveShare,
+    DriveActivity
+)
+
+from .meet_enhancements import (
+    BreakoutRoom,
+    BreakoutParticipant,
+    MeetingPoll,
+    MeetingPollVote,
+    MeetingQA,
+    MeetingQAUpvote,
+    MeetingWhiteboard
+)
+
+from .workflow_models import (
+    Workflow,
+    WorkflowRun,
+    WorkflowTemplate
+)
+
+from .calendar_models import (
+    CalendarReminder,
+    UserCalendarSettings,
+    AppointmentType,
+    ScheduledAppointment,
+    SnoozedEmail,
+    EmailTemplate,
+    SearchIndexLog
+)
+
+from .enterprise_models import (
+    DLPRule,
+    DLPIncident,
+    Device,
+    DevicePolicy,
+    AIConversation,
+    AIUsageLog,
+    DLP_PREDEFINED_PATTERNS
+)
+
 __all__ = [
     # Admin models
     "Tenant",
@@ -53,5 +133,63 @@ __all__ = [
     "MailFilter",
     "MailContact",
     "ScheduledEmail",
-    "Mail2FALog"
+    "Mail2FALog",
+    # Productivity models - Sheets
+    "Spreadsheet",
+    "Worksheet",
+    "SpreadsheetShare",
+    # Productivity models - Slides
+    "Presentation",
+    "Slide",
+    "PresentationShare",
+    # Productivity models - Forms
+    "Form",
+    "FormQuestion",
+    "FormResponse",
+    "FormShare",
+    # Productivity models - Shared
+    "ContentFolder",
+    "ProductivityTemplate",
+    # Organization models
+    "OrgUnit",
+    "UserGroup",
+    "UserGroupMember",
+    "AdminRole",
+    "UserAdminRole",
+    "SSOConfiguration",
+    "DomainAlias",
+    "SecurityPolicy",
+    "UserImportJob",
+    # Drive models
+    "DriveFile",
+    "DriveShare",
+    "DriveActivity",
+    # Meet enhancements
+    "BreakoutRoom",
+    "BreakoutParticipant",
+    "MeetingPoll",
+    "MeetingPollVote",
+    "MeetingQA",
+    "MeetingQAUpvote",
+    "MeetingWhiteboard",
+    # Workflow models
+    "Workflow",
+    "WorkflowRun",
+    "WorkflowTemplate",
+    # Calendar enhancements
+    "CalendarReminder",
+    "UserCalendarSettings",
+    "AppointmentType",
+    "ScheduledAppointment",
+    "SnoozedEmail",
+    "EmailTemplate",
+    "SearchIndexLog",
+    # Enterprise models (Phase 4)
+    "DLPRule",
+    "DLPIncident",
+    "Device",
+    "DevicePolicy",
+    "AIConversation",
+    "AIUsageLog",
+    "DLP_PREDEFINED_PATTERNS"
 ]

@@ -305,7 +305,7 @@ export default function LandingPage() {
                 <Link href="/login" className="text-gray-600 hover:text-gray-900 font-medium px-4 py-2">
                   Sign in
                 </Link>
-                <Link href="/login" className="bg-blue-600 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-blue-700 transition-colors">
+                <Link href="/login?mode=signup" className="bg-blue-600 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-blue-700 transition-colors">
                   Start free trial
                 </Link>
               </div>
@@ -335,7 +335,7 @@ export default function LandingPage() {
 
                 <div className="flex flex-col sm:flex-row gap-4 mb-10">
                   <Link
-                    href="/login"
+                    href="/login?mode=signup"
                     className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:bg-blue-700 transition-all hover:-translate-y-0.5 shadow-lg shadow-blue-500/25"
                   >
                     Start free trial
@@ -625,7 +625,7 @@ export default function LandingPage() {
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
               <Link
-                href="/login"
+                href="/login?mode=signup"
                 className="inline-flex items-center justify-center bg-white text-gray-900 px-8 py-4 rounded-xl font-semibold text-lg hover:bg-gray-100 transition-colors"
               >
                 Start free trial

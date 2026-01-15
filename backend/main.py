@@ -163,7 +163,17 @@ async def api_info():
             "billing": "/api/v1/billing",
             "erp_sync": "/api/v1/erp-sync",
             "workspace_email": "/api/v1/workspace-email",
-            "pm": "/api/v1/pm"
+            "pm": "/api/v1/pm",
+            "drive": "/api/v1/drive",
+            "sheets": "/api/v1/sheets",
+            "slides": "/api/v1/slides",
+            "forms": "/api/v1/forms",
+            "workflows": "/api/v1/workflows",
+            "appointments": "/api/v1/appointments",
+            "dlp": "/api/v1/dlp",
+            "devices": "/api/v1/devices",
+            "ai": "/api/v1/ai",
+            "search": "/api/v1/search"
         }
     }
 
@@ -461,6 +471,14 @@ try:
 except Exception as e:
     print(f"Could not load onboarding router: {e}")
 
+# User Workspace API
+try:
+    from api.user_workspace import router as user_workspace_router
+    app.include_router(user_workspace_router, prefix="/api/v1", tags=["User Workspace"])
+    logger.info("User Workspace API loaded", action="user_workspace_loaded")
+except Exception as e:
+    print(f"Could not load user_workspace router: {e}")
+
 # Resource Booking API
 try:
     from api.resources import router as resources_router
@@ -484,6 +502,154 @@ try:
     logger.info("Migration API loaded", action="migration_loaded")
 except Exception as e:
     print(f"Could not load migration router: {e}")
+
+# Bulk Import API
+try:
+    from api.bulk_import import router as bulk_import_router
+    app.include_router(bulk_import_router, prefix="/api/v1", tags=["Bulk Import"])
+    logger.info("Bulk Import API loaded", action="bulk_import_loaded")
+except Exception as e:
+    print(f"Could not load bulk_import router: {e}")
+
+# Organizational Units API
+try:
+    from api.org_units import router as org_units_router
+    app.include_router(org_units_router, prefix="/api/v1", tags=["Organizational Units"])
+    logger.info("Org Units API loaded", action="org_units_loaded")
+except Exception as e:
+    print(f"Could not load org_units router: {e}")
+
+# User Groups API
+try:
+    from api.user_groups import router as user_groups_router
+    app.include_router(user_groups_router, prefix="/api/v1", tags=["User Groups"])
+    logger.info("User Groups API loaded", action="user_groups_loaded")
+except Exception as e:
+    print(f"Could not load user_groups router: {e}")
+
+# Admin Roles API
+try:
+    from api.admin_roles import router as admin_roles_router
+    app.include_router(admin_roles_router, prefix="/api/v1", tags=["Admin Roles"])
+    logger.info("Admin Roles API loaded", action="admin_roles_loaded")
+except Exception as e:
+    print(f"Could not load admin_roles router: {e}")
+
+# Domain Aliases API
+try:
+    from api.domain_aliases import router as domain_aliases_router
+    app.include_router(domain_aliases_router, prefix="/api/v1", tags=["Domain Aliases"])
+    logger.info("Domain Aliases API loaded", action="domain_aliases_loaded")
+except Exception as e:
+    print(f"Could not load domain_aliases router: {e}")
+
+# SSO Configuration API
+try:
+    from api.sso_config import router as sso_config_router
+    app.include_router(sso_config_router, prefix="/api/v1", tags=["SSO Configuration"])
+    logger.info("SSO Config API loaded", action="sso_config_loaded")
+except Exception as e:
+    print(f"Could not load sso_config router: {e}")
+
+# =============================================
+# Phase 2: Productivity Suite APIs
+# =============================================
+
+# Bheem Sheets API (Spreadsheets)
+try:
+    from api.sheets import router as sheets_router
+    app.include_router(sheets_router, prefix="/api/v1", tags=["Bheem Sheets"])
+    logger.info("Bheem Sheets API loaded", action="sheets_loaded")
+except Exception as e:
+    print(f"Could not load sheets router: {e}")
+
+# Bheem Slides API (Presentations)
+try:
+    from api.slides import router as slides_router
+    app.include_router(slides_router, prefix="/api/v1", tags=["Bheem Slides"])
+    logger.info("Bheem Slides API loaded", action="slides_loaded")
+except Exception as e:
+    print(f"Could not load slides router: {e}")
+
+# Bheem Forms API (Forms & Surveys)
+try:
+    from api.forms import router as forms_router
+    app.include_router(forms_router, prefix="/api/v1", tags=["Bheem Forms"])
+    logger.info("Bheem Forms API loaded", action="forms_loaded")
+except Exception as e:
+    print(f"Could not load forms router: {e}")
+
+# =============================================
+# Phase 3: Drive, Workflows, Meet Enhancements, Appointments
+# =============================================
+
+# Bheem Drive API (File Storage & Management)
+try:
+    from api.drive import router as drive_router
+    app.include_router(drive_router, prefix="/api/v1", tags=["Bheem Drive"])
+    logger.info("Bheem Drive API loaded", action="drive_loaded")
+except Exception as e:
+    print(f"Could not load drive router: {e}")
+
+# Bheem Flows API (Workflow Automation)
+try:
+    from api.workflows import router as workflows_router
+    app.include_router(workflows_router, prefix="/api/v1", tags=["Bheem Flows"])
+    logger.info("Bheem Flows API loaded", action="workflows_loaded")
+except Exception as e:
+    print(f"Could not load workflows router: {e}")
+
+# Bheem Meet Enhancements API (Breakout Rooms, Polls, Q&A, Whiteboard)
+try:
+    from api.meet_enhancements import router as meet_enhancements_router
+    app.include_router(meet_enhancements_router, prefix="/api/v1", tags=["Bheem Meet Enhancements"])
+    logger.info("Bheem Meet Enhancements API loaded", action="meet_enhancements_loaded")
+except Exception as e:
+    print(f"Could not load meet_enhancements router: {e}")
+
+# Bheem Appointments API (Calendly-like Scheduling)
+try:
+    from api.appointments import router as appointments_router
+    app.include_router(appointments_router, prefix="/api/v1", tags=["Bheem Appointments"])
+    logger.info("Bheem Appointments API loaded", action="appointments_loaded")
+except Exception as e:
+    print(f"Could not load appointments router: {e}")
+
+# =============================================
+# Phase 4: Enterprise Features (DLP, Devices, AI, Search)
+# =============================================
+
+# DLP (Data Loss Prevention) API
+try:
+    from api.dlp import router as dlp_router
+    app.include_router(dlp_router, prefix="/api/v1", tags=["DLP"])
+    logger.info("DLP API loaded", action="dlp_loaded")
+except Exception as e:
+    print(f"Could not load dlp router: {e}")
+
+# Device Management API
+try:
+    from api.devices import router as devices_router
+    app.include_router(devices_router, prefix="/api/v1", tags=["Devices"])
+    logger.info("Devices API loaded", action="devices_loaded")
+except Exception as e:
+    print(f"Could not load devices router: {e}")
+
+# AI Assistant API
+try:
+    from api.ai import router as ai_router
+    app.include_router(ai_router, prefix="/api/v1", tags=["AI"])
+    logger.info("AI API loaded", action="ai_loaded")
+except Exception as e:
+    print(f"Could not load ai router: {e}")
+
+# Enterprise Search API
+try:
+    from api.search import router as search_router
+    app.include_router(search_router, prefix="/api/v1", tags=["Search"])
+    logger.info("Search API loaded", action="search_loaded")
+except Exception as e:
+    print(f"Could not load search router: {e}")
 
 # Frontend routes
 @app.get("/", response_class=HTMLResponse)

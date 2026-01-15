@@ -7,6 +7,7 @@ import {
   Calendar,
   Video,
   FileText,
+  HardDrive,
   Settings,
   LogOut,
   ChevronRight,
@@ -14,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 
-export type AppId = 'dashboard' | 'mail' | 'calendar' | 'meet' | 'docs';
+export type AppId = 'dashboard' | 'mail' | 'calendar' | 'meet' | 'docs' | 'drive';
 
 interface AppItem {
   id: AppId;
@@ -64,7 +65,15 @@ const apps: AppItem[] = [
     icon: FileText,
     href: '/docs',
     gradient: 'from-purple-500 to-pink-500',
-    description: 'Files & documents',
+    description: 'Documents & editing',
+  },
+  {
+    id: 'drive',
+    name: 'Drive',
+    icon: HardDrive,
+    href: '/drive',
+    gradient: 'from-amber-500 to-orange-500',
+    description: 'Files & storage',
   },
 ];
 
@@ -226,6 +235,7 @@ function detectActiveApp(pathname: string): AppId {
   if (pathname.startsWith('/calendar')) return 'calendar';
   if (pathname.startsWith('/meet')) return 'meet';
   if (pathname.startsWith('/docs')) return 'docs';
+  if (pathname.startsWith('/drive')) return 'drive';
   return 'dashboard';
 }
 

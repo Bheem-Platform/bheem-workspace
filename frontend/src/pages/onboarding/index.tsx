@@ -147,11 +147,11 @@ export default function OnboardingPage() {
 
   const skipOnboarding = async () => {
     try {
-      await api.post('/onboarding/skip');
-      router.push('/dashboard');
+      await api.post('/onboarding/skip-all');
+      router.push('/admin');
     } catch (err) {
       console.error('Failed to skip onboarding:', err);
-      router.push('/dashboard');
+      router.push('/admin');
     }
   };
 
@@ -215,7 +215,7 @@ export default function OnboardingPage() {
 
   const finishOnboarding = async () => {
     await completeStep('tour');
-    router.push('/dashboard');
+    router.push('/admin');
   };
 
   if (isLoading || loading) {

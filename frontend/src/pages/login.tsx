@@ -32,16 +32,17 @@ export default function LoginPage() {
     workspaceName: '',
   });
 
-  // Get redirect URL and plan from query params
+  // Get redirect URL, plan, and mode from query params
   const redirectTo = router.query.redirect as string;
   const selectedPlan = router.query.plan as string;
+  const urlMode = router.query.mode as string;
 
-  // Set mode based on URL or plan selection
+  // Set mode based on URL params (plan or mode=signup)
   useEffect(() => {
-    if (selectedPlan) {
+    if (selectedPlan || urlMode === 'signup') {
       setMode('signup');
     }
-  }, [selectedPlan]);
+  }, [selectedPlan, urlMode]);
 
   // If already authenticated (and not currently logging in), redirect
   useEffect(() => {
@@ -177,12 +178,13 @@ export default function LoginPage() {
         console.log('Tenant note:', tenantErr.response?.data?.detail || 'proceeding');
       }
 
-      // Step 4: Set auth (creates SSO session) and redirect
+      // Step 4: Set auth (creates SSO session) and redirect to onboarding
       await setAuth(access_token, user);
-      setSuccess('Account created successfully! Redirecting...');
+      setSuccess('Account created successfully! Redirecting to setup...');
 
       setTimeout(() => {
-        router.push(redirectTo || '/admin');
+        // New signups should always go through onboarding first
+        router.push('/onboarding');
       }, 1000);
 
     } catch (err: any) {

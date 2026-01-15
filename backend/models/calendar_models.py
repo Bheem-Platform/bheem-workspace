@@ -1,11 +1,12 @@
 """
 Bheem Workspace - Calendar Models
-Database models for calendar reminders
+Database models for calendar reminders, appointments, and scheduling
 """
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, DateTime, Text, Index, Boolean
-from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy import Column, String, Integer, DateTime, Text, Index, Boolean, ForeignKey, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID, JSONB, ARRAY
+from sqlalchemy.orm import relationship
 from core.database import Base
 
 
@@ -80,3 +81,208 @@ class UserCalendarSettings(Base):
 
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# =============================================
+# Appointment Scheduling (Calendly-like)
+# =============================================
+
+class AppointmentType(Base):
+    """Types of appointments users can offer for booking"""
+    __tablename__ = "appointment_types"
+    __table_args__ = (
+        Index('idx_appointment_types_user', 'user_id'),
+        Index('idx_appointment_types_slug', 'slug'),
+        UniqueConstraint('user_id', 'slug', name='uq_appointment_type_slug'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tenants.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tenant_users.id", ondelete="CASCADE"), nullable=False)
+
+    # Basic info
+    name = Column(String(255), nullable=False)
+    slug = Column(String(100), nullable=False)
+    description = Column(Text)
+
+    # Duration and timing
+    duration_minutes = Column(Integer, default=30)
+    color = Column(String(20))
+    buffer_before_minutes = Column(Integer, default=0)
+    buffer_after_minutes = Column(Integer, default=0)
+
+    # Location
+    location_type = Column(String(50), default='meet')
+    custom_location = Column(Text)
+
+    # Availability
+    availability = Column(JSONB, default={})
+
+    # Booking questions
+    questions = Column(JSONB, default=[])
+
+    # Settings
+    min_notice_hours = Column(Integer, default=24)
+    max_days_ahead = Column(Integer, default=60)
+    confirmation_email_template = Column(Text)
+    reminder_email_template = Column(Text)
+
+    # Status
+    is_active = Column(Boolean, default=True)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    appointments = relationship("ScheduledAppointment", back_populates="appointment_type", cascade="all, delete-orphan")
+
+
+class ScheduledAppointment(Base):
+    """Booked appointments"""
+    __tablename__ = "scheduled_appointments"
+    __table_args__ = (
+        
+        Index('idx_appointments_type', 'appointment_type_id'),
+        Index('idx_appointments_host', 'host_id'),
+        Index('idx_appointments_time', 'start_time'),
+        Index('idx_appointments_status', 'status'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    appointment_type_id = Column(UUID(as_uuid=True), ForeignKey("workspace.appointment_types.id", ondelete="CASCADE"), nullable=False)
+    host_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tenant_users.id"), nullable=False)
+
+    # Guest info
+    guest_email = Column(String(255), nullable=False)
+    guest_name = Column(String(255))
+    guest_timezone = Column(String(50))
+
+    # Timing
+    start_time = Column(DateTime, nullable=False)
+    end_time = Column(DateTime, nullable=False)
+
+    # Status
+    status = Column(String(20), default='confirmed')
+
+    # Related items
+    calendar_event_id = Column(UUID(as_uuid=True))
+    meeting_room_id = Column(UUID(as_uuid=True))
+
+    # Booking data
+    answers = Column(JSONB, default={})
+    notes = Column(Text)
+
+    # Cancellation
+    cancelled_at = Column(DateTime)
+    cancellation_reason = Column(Text)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    appointment_type = relationship("AppointmentType", back_populates="appointments")
+
+
+# =============================================
+# Email Snooze
+# =============================================
+
+class SnoozedEmail(Base):
+    """Snoozed emails to resurface later"""
+    __tablename__ = "snoozed_emails"
+    __table_args__ = (
+        Index('idx_snoozed_emails_user', 'user_id'),
+        Index('idx_snoozed_emails_until', 'snooze_until'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tenant_users.id", ondelete="CASCADE"), nullable=False)
+
+    # Email reference
+    mail_uid = Column(String(255), nullable=False)
+    mailbox = Column(String(255), nullable=False)
+    message_id = Column(String(500))
+
+    # Snooze settings
+    snooze_until = Column(DateTime, nullable=False)
+    original_folder = Column(String(255))
+
+    # Status
+    is_unsnoozed = Column(Boolean, default=False)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    unsnoozed_at = Column(DateTime)
+
+
+# =============================================
+# Email Templates
+# =============================================
+
+class EmailTemplate(Base):
+    """Reusable email templates"""
+    __tablename__ = "email_templates"
+    __table_args__ = (
+        Index('idx_email_templates_tenant', 'tenant_id'),
+        Index('idx_email_templates_user', 'user_id'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tenants.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tenant_users.id", ondelete="CASCADE"))
+
+    # Template content
+    name = Column(String(255), nullable=False)
+    subject = Column(String(500))
+    body = Column(Text, nullable=False)
+
+    # Variables
+    variables = Column(JSONB, default=[])
+
+    # Organization
+    category = Column(String(100))
+    is_shared = Column(Boolean, default=False)
+
+    # Usage
+    use_count = Column(Integer, default=0)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# =============================================
+# Search Index
+# =============================================
+
+class SearchIndexLog(Base):
+    """Log of search index operations"""
+    __tablename__ = "search_index_log"
+    __table_args__ = (
+        Index('idx_search_index_log_tenant', 'tenant_id'),
+        Index('idx_search_index_log_status', 'status'),
+        Index('idx_search_index_log_entity', 'entity_type', 'entity_id'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), nullable=False)
+
+    # Entity reference
+    entity_type = Column(String(50), nullable=False)
+    entity_id = Column(UUID(as_uuid=True), nullable=False)
+
+    # Operation
+    action = Column(String(20), nullable=False)
+    status = Column(String(20), default='pending')
+    error_message = Column(Text)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    processed_at = Column(DateTime)

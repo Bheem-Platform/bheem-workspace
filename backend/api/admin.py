@@ -267,6 +267,7 @@ async def resolve_tenant_id(tenant_id: str, db: AsyncSession) -> uuid.UUID:
     """
     Resolve tenant_id which can be either a UUID or a slug/company_code.
     Returns the actual UUID of the tenant.
+    Raises HTTPException if tenant not found.
     """
     # First check if it's a valid UUID
     if is_valid_uuid(tenant_id):
@@ -286,24 +287,11 @@ async def resolve_tenant_id(tenant_id: str, db: AsyncSession) -> uuid.UUID:
     if tenant:
         return tenant.id
 
-    # Auto-create tenant for the company_code if it doesn't exist
-    quotas = get_plan_quotas("starter")
-    new_tenant = Tenant(
-        name=f"Organization {tenant_id}",
-        slug=tenant_id.lower(),
-        owner_email=f"admin@{tenant_id.lower()}.workspace",
-        plan="starter",
-        max_users=quotas["max_users"],
-        meet_quota_hours=quotas["meet"],
-        docs_quota_mb=quotas["docs"],
-        mail_quota_mb=quotas["mail"],
-        recordings_quota_mb=quotas["recordings"]
+    # Don't auto-create tenants - raise 404 instead
+    raise HTTPException(
+        status_code=404,
+        detail=f"Tenant not found: {tenant_id}"
     )
-    db.add(new_tenant)
-    await db.commit()
-    await db.refresh(new_tenant)
-
-    return new_tenant.id
 
 def get_plan_quotas(plan: str) -> dict:
     """Get quotas based on plan type"""
@@ -1484,10 +1472,26 @@ async def list_mail_domains(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """List mail domains from Mailcow with fallback to database domains"""
+    """List mail domains - filtered by tenant's domains for multi-tenancy security"""
     resolved_id = await resolve_tenant_id(tenant_id, db)
 
-    # Try to get domains from Mailcow first
+    # Get tenant's domains from database first (for filtering)
+    db_result = await db.execute(
+        select(Domain).where(
+            and_(
+                Domain.tenant_id == resolved_id,
+                Domain.is_active == True
+            )
+        )
+    )
+    db_domains = db_result.scalars().all()
+    tenant_domain_names = {d.domain.lower() for d in db_domains}
+
+    # If tenant has no domains, return empty list
+    if not tenant_domain_names:
+        return []
+
+    # Try to get domain details from Mailcow
     raw_domains = await mailcow_service.get_domains()
 
     def safe_int(val, default=0):
@@ -1497,11 +1501,12 @@ async def list_mail_domains(
         except (ValueError, TypeError):
             return default
 
-    # Transform Mailcow response to frontend expected format
+    # Transform Mailcow response - only include tenant's domains
     domains = []
     for d in raw_domains:
         domain_name = d.get("domain_name", "")
-        if domain_name:
+        # Filter by tenant's domains (critical for multi-tenancy security)
+        if domain_name and domain_name.lower() in tenant_domain_names:
             max_quota = safe_int(d.get("max_quota_for_domain", 0))
             bytes_total = safe_int(d.get("bytes_total", 0))
             domains.append({
@@ -1514,30 +1519,20 @@ async def list_mail_domains(
                 "used_quota_mb": bytes_total / (1024 * 1024) if bytes_total else 0,
             })
 
-    # If Mailcow returned empty, fallback to database domains (verified email domains)
-    if not domains:
-        db_result = await db.execute(
-            select(Domain).where(
-                and_(
-                    Domain.tenant_id == resolved_id,
-                    Domain.domain_type == "email",
-                    Domain.is_active == True
-                )
-            )
-        )
-        db_domains = db_result.scalars().all()
-
-        for d in db_domains:
+    # If Mailcow didn't return data for tenant's domains, use database info
+    mailcow_domain_names = {d["domain"].lower() for d in domains}
+    for d in db_domains:
+        if d.domain.lower() not in mailcow_domain_names:
             domains.append({
                 "id": str(d.id),
                 "domain": d.domain,
                 "is_active": d.is_active,
-                "mailboxes": 0,  # Unknown without Mailcow
-                "max_mailboxes": 100,  # Default
-                "quota_mb": 10240,  # Default 10GB
+                "mailboxes": 0,
+                "max_mailboxes": 100,
+                "quota_mb": 10240,
                 "used_quota_mb": 0,
-                "source": "database",  # Indicate fallback source
-                "note": "Mailcow API unavailable - using database record"
+                "source": "database",
+                "note": "Domain not yet configured in mail server"
             })
 
     return domains
@@ -1549,9 +1544,31 @@ async def list_mailboxes(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """List mailboxes via Mailcow (requires authentication)"""
+    """List mailboxes via Mailcow - filtered by tenant's domains"""
+    # Resolve tenant ID
+    resolved_id = await resolve_tenant_id(tenant_id, db)
+
+    # Get tenant's email domains from database
+    domains_result = await db.execute(
+        select(Domain.domain).where(
+            and_(
+                Domain.tenant_id == resolved_id,
+                Domain.is_active == True
+            )
+        )
+    )
+    tenant_domains = {row[0].lower() for row in domains_result.fetchall()}
+
+    # If no domains configured for this tenant, return empty list
+    if not tenant_domains:
+        return []
+
     raw_mailboxes = await mailcow_service.get_mailboxes()
 
+    # Filter by tenant's domains (critical for multi-tenancy security)
+    raw_mailboxes = [m for m in raw_mailboxes if m.get("domain", "").lower() in tenant_domains]
+
+    # Additional filter by specific domain if provided
     if domain:
         raw_mailboxes = [m for m in raw_mailboxes if m.get("domain") == domain]
 
@@ -1725,7 +1742,7 @@ async def get_mail_stats(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get mail usage statistics (requires authentication)"""
+    """Get mail usage statistics - filtered by tenant's domains for multi-tenancy"""
     resolved_id = await resolve_tenant_id(tenant_id, db)
     tenant_result = await db.execute(
         select(Tenant).where(Tenant.id == resolved_id)
@@ -1735,21 +1752,26 @@ async def get_mail_stats(
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
 
+    # Get tenant's domains
     domains_result = await db.execute(
-        select(func.count(Domain.id)).where(
+        select(Domain).where(
             and_(
                 Domain.tenant_id == resolved_id,
-                Domain.domain_type == "email"
+                Domain.is_active == True
             )
         )
     )
-    domain_count = domains_result.scalar() or 0
+    tenant_domains = domains_result.scalars().all()
+    tenant_domain_names = {d.domain.lower() for d in tenant_domains}
+    domain_count = len(tenant_domains)
 
-    # Get mailbox stats from Mailcow
+    # Get mailbox stats from Mailcow - filtered by tenant's domains
     try:
         raw_mailboxes = await mailcow_service.get_mailboxes()
-        total_mailboxes = len(raw_mailboxes)
-        total_storage_used_mb = sum((m.get("quota_used", 0) or 0) / (1024 * 1024) for m in raw_mailboxes)
+        # Filter to only tenant's mailboxes
+        tenant_mailboxes = [m for m in raw_mailboxes if m.get("domain", "").lower() in tenant_domain_names]
+        total_mailboxes = len(tenant_mailboxes)
+        total_storage_used_mb = sum((m.get("quota_used", 0) or 0) / (1024 * 1024) for m in tenant_mailboxes)
     except Exception:
         total_mailboxes = 0
         total_storage_used_mb = 0

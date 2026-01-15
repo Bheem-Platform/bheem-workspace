@@ -137,62 +137,77 @@ async def complete_step(
     Mark an onboarding step as complete.
     Optionally saves step-specific data.
     """
-    tenant_id = current_user.get("tenant_id")
-    if not tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="User not associated with a workspace"
+    try:
+        tenant_id = current_user.get("tenant_id")
+        logger.info(f"Completing step {step_id} for tenant {tenant_id}")
+
+        if not tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User not associated with a workspace"
+            )
+
+        # Valid steps
+        valid_steps = [s["id"] for s in ONBOARDING_STEPS]
+        if step_id not in valid_steps:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid step: {step_id}"
+            )
+
+        # Get progress
+        result = await db.execute(
+            select(OnboardingProgress).where(OnboardingProgress.tenant_id == tenant_id)
         )
+        progress = result.scalar_one_or_none()
 
-    # Valid steps
-    valid_steps = [s["id"] for s in ONBOARDING_STEPS]
-    if step_id not in valid_steps:
+        if not progress:
+            logger.info(f"Creating new OnboardingProgress for tenant {tenant_id}")
+            progress = OnboardingProgress(tenant_id=tenant_id)
+            db.add(progress)
+
+        # Update based on step
+        if step_id == "welcome":
+            progress.current_step = "profile"
+        elif step_id == "profile":
+            progress.profile_completed = True
+            progress.current_step = "domain"
+        elif step_id == "domain":
+            progress.domain_setup_completed = True
+            progress.current_step = "invite"
+        elif step_id == "invite":
+            progress.team_invited = True
+            progress.current_step = "tour"
+        elif step_id == "tour":
+            progress.current_step = "complete"
+            progress.completed_at = datetime.utcnow()
+
+        progress.updated_at = datetime.utcnow()
+        await db.commit()
+
+        # Determine next step
+        next_step = None
+        current_order = next((s["order"] for s in ONBOARDING_STEPS if s["id"] == step_id), 0)
+        for step in ONBOARDING_STEPS:
+            if step["order"] > current_order:
+                next_step = step["id"]
+                break
+
+        logger.info(f"Step {step_id} completed, next step: {next_step}")
+        return {
+            "success": True,
+            "step_completed": step_id,
+            "next_step": next_step,
+            "is_complete": progress.completed_at is not None
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error completing step {step_id}: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid step: {step_id}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to complete step: {str(e)}"
         )
-
-    # Get progress
-    result = await db.execute(
-        select(OnboardingProgress).where(OnboardingProgress.tenant_id == tenant_id)
-    )
-    progress = result.scalar_one_or_none()
-
-    if not progress:
-        progress = OnboardingProgress(tenant_id=tenant_id)
-        db.add(progress)
-
-    # Update based on step
-    if step_id == "profile":
-        progress.profile_completed = True
-        progress.current_step = "domain"
-    elif step_id == "domain":
-        progress.domain_setup_completed = True
-        progress.current_step = "invite"
-    elif step_id == "invite":
-        progress.team_invited = True
-        progress.current_step = "tour"
-    elif step_id == "tour":
-        progress.current_step = "complete"
-        progress.completed_at = datetime.utcnow()
-
-    progress.updated_at = datetime.utcnow()
-    await db.commit()
-
-    # Determine next step
-    next_step = None
-    current_order = next((s["order"] for s in ONBOARDING_STEPS if s["id"] == step_id), 0)
-    for step in ONBOARDING_STEPS:
-        if step["order"] > current_order:
-            next_step = step["id"]
-            break
-
-    return {
-        "success": True,
-        "step_completed": step_id,
-        "next_step": next_step,
-        "is_complete": progress.completed_at is not None
-    }
 
 
 @router.post("/skip/{step_id}")
