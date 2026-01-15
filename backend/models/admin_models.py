@@ -34,6 +34,12 @@ class Tenant(Base):
     erp_company_id = Column(UUID(as_uuid=True))  # Reference to ERP public.companies.id
     erp_customer_id = Column(UUID(as_uuid=True))  # Reference to ERP crm.contacts.id (for external customers)
 
+    # ERP Integration - Sales Tracking
+    erp_lead_id = Column(UUID(as_uuid=True))  # Reference to ERP crm.leads.id - Lead created at signup
+    erp_sales_customer_id = Column(UUID(as_uuid=True))  # Reference to ERP sales.customers.id
+    erp_sales_order_id = Column(UUID(as_uuid=True))  # Reference to ERP sales.orders.id - Most recent order
+    erp_invoice_id = Column(UUID(as_uuid=True))  # Reference to ERP sales.invoices.id - Most recent invoice
+
     # ERP Integration - Subscription
     erp_subscription_id = Column(UUID(as_uuid=True))  # Reference to ERP public.subscriptions.id
     subscription_status = Column(String(20))  # active, cancelled, suspended, pending
@@ -113,6 +119,10 @@ class TenantUser(Base):
     department = Column(String(100))  # Synced from ERP HR
     job_title = Column(String(100))  # Synced from ERP HR
     provisioned_by = Column(String(20), default='self')  # 'self' = self-registered, 'erp_hr' = synced from HR, 'admin' = manually added
+
+    # Passport SSO Linkage
+    passport_user_id = Column(String(100))  # Bheem Passport user ID for SSO linkage
+    erp_synced_at = Column(DateTime)  # Last sync timestamp with ERP
 
     # Status
     is_active = Column(Boolean, default=True)

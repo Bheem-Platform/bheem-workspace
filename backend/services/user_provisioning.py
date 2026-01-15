@@ -25,6 +25,7 @@ from services.mailcow_service import mailcow_service
 from services.passport_client import get_passport_client
 from services.nextcloud_user_service import nextcloud_user_service
 from services.workspace_credentials_service import workspace_credentials_service
+from services.erp_client import erp_client
 from integrations.notify.notify_client import notify_client
 from core.config import settings
 
@@ -319,6 +320,28 @@ class UserProvisioningService:
                         result.status = ProvisioningStatus.PARTIAL
                 elif nextcloud_result.get("status") in ["created", "exists"]:
                     logger.info(f"Nextcloud user ready: {workspace_email}")
+
+            # ─────────────────────────────────────────────────────────
+            # Step 8b: Sync User to ERP (if external tenant)
+            # ─────────────────────────────────────────────────────────
+            if getattr(settings, 'PROVISIONING_SYNC_ERP', True) and tenant.tenant_mode == "external":
+                erp_result = await self._provision_erp_user(
+                    user_id=str(user_id),
+                    passport_user_id=passport_user_id,
+                    email=workspace_email,
+                    name=name,
+                    personal_email=personal_email,
+                    company_id=tenant.erp_company_code,
+                    role=role
+                )
+                result.services["erp"] = erp_result
+
+                if erp_result.get("error"):
+                    result.errors.append(f"ERP: {erp_result.get('error')}")
+                    # ERP sync failure is non-critical - don't change overall status
+                    logger.warning(f"ERP sync failed (non-critical): {erp_result.get('error')}")
+                else:
+                    logger.info(f"ERP user synced: {erp_result.get('erp_user_id')}")
 
             # ─────────────────────────────────────────────────────────
             # Step 9: Send Welcome/Invite Email (to personal email)
@@ -634,6 +657,123 @@ class UserProvisioningService:
         except Exception as e:
             logger.error(f"Nextcloud provisioning failed: {e}")
             return {"error": str(e)}
+
+    async def _provision_erp_user(
+        self,
+        user_id: str,
+        passport_user_id: Optional[str],
+        email: str,
+        name: str,
+        personal_email: Optional[str] = None,
+        company_id: Optional[str] = None,
+        role: str = "member"
+    ) -> Dict[str, Any]:
+        """
+        Sync user to ERP system with Passport credentials.
+        Creates user in ERP auth system linked to Bheem Passport.
+
+        Args:
+            user_id: Workspace user ID
+            passport_user_id: Bheem Passport user ID
+            email: User's workspace email
+            name: User's display name
+            personal_email: Personal email for notifications
+            company_id: ERP company ID
+            role: User role
+
+        Returns:
+            Dict with erp_user_id, erp_employee_id or error
+        """
+        result = {
+            "status": None,
+            "erp_user_id": None,
+            "erp_employee_id": None,
+            "error": None
+        }
+
+        try:
+            # Parse name for first/last
+            name_parts = name.split() if name else [""]
+            first_name = name_parts[0]
+            last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
+
+            # Map workspace role to ERP role
+            erp_role = "Customer"
+            if role == "admin":
+                erp_role = "Customer"  # External customers are still customers in ERP
+            elif role == "manager":
+                erp_role = "Customer"
+            else:
+                erp_role = "Customer"
+
+            # Step 1: Create/Sync user in ERP
+            if passport_user_id:
+                # Sync from Passport - link existing Passport user to ERP
+                erp_user = await erp_client.sync_user_from_passport(
+                    passport_user_id=passport_user_id,
+                    email=email,
+                    name=name,
+                    role=erp_role,
+                    company_id=company_id
+                )
+            else:
+                # Create new user in ERP (no Passport link)
+                erp_user = await erp_client.create_erp_user(
+                    email=email,
+                    name=name,
+                    role=erp_role,
+                    company_id=company_id,
+                    metadata={
+                        "workspace_user_id": user_id,
+                        "source": "workspace_provisioning"
+                    }
+                )
+
+            if erp_user.get("error"):
+                result["error"] = erp_user.get("error")
+                result["status"] = "failed"
+                return result
+
+            erp_user_id = erp_user.get("id")
+            result["erp_user_id"] = erp_user_id
+            result["status"] = "created"
+
+            # Step 2: Create employee record (optional - for CRM tracking)
+            if erp_user_id:
+                try:
+                    erp_employee = await erp_client.create_employee(
+                        user_id=erp_user_id,
+                        company_id=company_id or settings.BHEEMVERSE_PARENT_COMPANY_ID,
+                        first_name=first_name,
+                        last_name=last_name,
+                        email=email,
+                        job_title="Workspace Customer",
+                        personal_email=personal_email,
+                        employment_type="EXTERNAL",
+                        metadata={
+                            "workspace_user_id": user_id,
+                            "source": "workspace_provisioning"
+                        }
+                    )
+
+                    if not erp_employee.get("error"):
+                        result["erp_employee_id"] = erp_employee.get("id")
+                        logger.info(f"Created ERP employee: {erp_employee.get('id')}")
+                    else:
+                        # Employee creation failed - log but don't fail overall
+                        logger.warning(f"ERP employee creation failed: {erp_employee.get('error')}")
+
+                except Exception as emp_error:
+                    logger.warning(f"ERP employee creation error: {emp_error}")
+
+            logger.info(f"ERP user provisioned: user_id={erp_user_id}")
+            return result
+
+        except Exception as e:
+            logger.error(f"ERP provisioning failed: {e}")
+            result["error"] = str(e)
+            result["status"] = "failed"
+            return result
 
     async def _send_welcome_notification(
         self,

@@ -534,6 +534,246 @@ class ERPClient:
             json=updates
         )
 
+    async def create_crm_lead(
+        self,
+        name: str,
+        email: str,
+        company_name: Optional[str] = None,
+        phone: Optional[str] = None,
+        source: str = "WORKSPACE",
+        company_id: str = None,
+        notes: Optional[str] = None,
+        **kwargs
+    ) -> dict:
+        """
+        Create a CRM lead for external customer tracking.
+        Used when external customers sign up for workspace.
+
+        Args:
+            name: Lead/contact full name
+            email: Lead email
+            company_name: Company/organization name
+            phone: Phone number
+            source: Lead source (WORKSPACE, WEBSITE, REFERRAL, etc.)
+            company_id: Company ID (default: BHM001 - Bheemverse)
+            notes: Additional notes
+
+        Returns:
+            Created lead details with id
+        """
+        # Parse name into first/last
+        name_parts = name.split() if name else [""]
+        first_name = name_parts[0]
+        last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
+
+        payload = {
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": email,
+            "company_name": company_name,
+            "phone": phone,
+            "source": source,
+            "status": "NEW",
+            "company_id": company_id or settings.BHEEMVERSE_PARENT_COMPANY_ID,
+            "lead_type": "WORKSPACE_CUSTOMER"
+        }
+
+        if notes:
+            payload["notes"] = notes
+
+        payload.update(kwargs)
+
+        try:
+            return await self._request(
+                "POST",
+                "/crm/leads/",
+                source="external",
+                json=payload
+            )
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to create CRM lead: {e}")
+            # Return a minimal response so signup can continue
+            return {"id": None, "error": str(e)}
+
+    async def get_crm_lead(self, lead_id: str) -> Optional[dict]:
+        """Get CRM lead by ID."""
+        try:
+            return await self._request(
+                "GET",
+                f"/crm/leads/{lead_id}",
+                source="external"
+            )
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            raise
+
+    async def update_crm_lead(
+        self,
+        lead_id: str,
+        status: Optional[str] = None,
+        **updates
+    ) -> dict:
+        """
+        Update CRM lead status or details.
+
+        Args:
+            lead_id: Lead ID
+            status: New status (NEW, CONTACTED, QUALIFIED, CONVERTED, LOST)
+            **updates: Other fields to update
+
+        Returns:
+            Updated lead
+        """
+        payload = {}
+        if status:
+            payload["status"] = status
+        payload.update(updates)
+
+        return await self._request(
+            "PATCH",
+            f"/crm/leads/{lead_id}",
+            source="external",
+            json=payload
+        )
+
+    async def convert_lead_to_customer(self, lead_id: str) -> dict:
+        """
+        Convert a CRM lead to a customer (when they purchase).
+
+        Args:
+            lead_id: Lead ID to convert
+
+        Returns:
+            Conversion result with customer_id
+        """
+        return await self._request(
+            "POST",
+            f"/crm/leads/{lead_id}/convert",
+            source="external"
+        )
+
+    # ═══════════════════════════════════════════════════════════════════
+    # AUTH / USER ENDPOINTS (for syncing users to ERP)
+    # ═══════════════════════════════════════════════════════════════════
+
+    async def create_erp_user(
+        self,
+        email: str,
+        name: str,
+        password: Optional[str] = None,
+        role: str = "Customer",
+        company_id: str = None,
+        company_code: str = None,
+        passport_user_id: Optional[str] = None,
+        metadata: Optional[dict] = None
+    ) -> dict:
+        """
+        Create a user in ERP auth system.
+        Syncs user credentials from Bheem Passport to ERP.
+
+        Args:
+            email: User email (used as username)
+            name: User full name
+            password: User password (if creating new, otherwise synced from Passport)
+            role: User role (Customer, Employee, Admin)
+            company_id: Company UUID
+            company_code: Company code (e.g., BHM001)
+            passport_user_id: Bheem Passport user ID for linking
+            metadata: Additional metadata
+
+        Returns:
+            Created user details with id
+        """
+        # Parse name
+        name_parts = name.split() if name else [""]
+        first_name = name_parts[0]
+        last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
+
+        payload = {
+            "username": email,
+            "email": email,
+            "first_name": first_name,
+            "last_name": last_name,
+            "role": role,
+            "company_id": company_id or settings.BHEEMVERSE_PARENT_COMPANY_ID,
+            "company_code": company_code or settings.BHEEMVERSE_PARENT_COMPANY_CODE,
+            "is_active": True,
+            "source": "WORKSPACE"
+        }
+
+        if password:
+            payload["password"] = password
+        if passport_user_id:
+            payload["passport_user_id"] = passport_user_id
+            payload["auth_provider"] = "bheem_passport"
+        if metadata:
+            payload["metadata"] = metadata
+
+        try:
+            return await self._request(
+                "POST",
+                "/auth/users/",
+                source="external",
+                json=payload
+            )
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to create ERP user: {e}")
+            # Check if user already exists
+            if e.response.status_code == 409:
+                # Try to get existing user
+                existing = await self.get_user_by_email(email)
+                if existing:
+                    return existing
+            return {"id": None, "error": str(e)}
+
+    async def sync_user_from_passport(
+        self,
+        passport_user_id: str,
+        email: str,
+        name: str,
+        role: str = "Customer",
+        company_id: str = None
+    ) -> dict:
+        """
+        Sync/link a Bheem Passport user to ERP.
+        Creates ERP user record linked to Passport for SSO.
+
+        Args:
+            passport_user_id: Bheem Passport user ID
+            email: User email
+            name: User full name
+            role: User role
+            company_id: Company UUID
+
+        Returns:
+            Synced user details
+        """
+        # Check if user already exists in ERP
+        existing_user = await self.get_user_by_email(email)
+        if existing_user:
+            # Update with Passport link if not already linked
+            if not existing_user.get("passport_user_id"):
+                return await self._request(
+                    "PATCH",
+                    f"/auth/users/{existing_user['id']}",
+                    source="external",
+                    json={
+                        "passport_user_id": passport_user_id,
+                        "auth_provider": "bheem_passport"
+                    }
+                )
+            return existing_user
+
+        # Create new user linked to Passport
+        return await self.create_erp_user(
+            email=email,
+            name=name,
+            role=role,
+            company_id=company_id,
+            passport_user_id=passport_user_id
+        )
+
     # ═══════════════════════════════════════════════════════════════════
     # HR ENDPOINTS (for internal mode - employee sync)
     # ═══════════════════════════════════════════════════════════════════
@@ -605,6 +845,105 @@ class ERPClient:
             params={"company_id": company_id}
         )
         return result.get("items", [])
+
+    async def create_employee(
+        self,
+        user_id: str,
+        company_id: str,
+        first_name: str,
+        last_name: str,
+        email: str,
+        employee_code: Optional[str] = None,
+        job_title: str = "Customer",
+        department_id: Optional[str] = None,
+        phone: Optional[str] = None,
+        personal_email: Optional[str] = None,
+        employment_type: str = "EXTERNAL",
+        metadata: Optional[dict] = None
+    ) -> dict:
+        """
+        Create an employee record in ERP HR module.
+        Used for external customers who need to be tracked as employees.
+
+        Args:
+            user_id: ERP user ID (from create_erp_user)
+            company_id: Company UUID
+            first_name: Employee first name
+            last_name: Employee last name
+            email: Work email
+            employee_code: Optional employee code (auto-generated if not provided)
+            job_title: Job title (default: Customer)
+            department_id: Department ID
+            phone: Phone number
+            personal_email: Personal email for notifications
+            employment_type: INTERNAL, EXTERNAL, CONTRACTOR
+            metadata: Additional metadata
+
+        Returns:
+            Created employee record with id
+        """
+        payload = {
+            "user_id": user_id,
+            "company_id": company_id or settings.BHEEMVERSE_PARENT_COMPANY_ID,
+            "first_name": first_name,
+            "last_name": last_name,
+            "work_email": email,
+            "job_title": job_title,
+            "employment_type": employment_type,
+            "status": "ACTIVE",
+            "source": "WORKSPACE"
+        }
+
+        if employee_code:
+            payload["employee_code"] = employee_code
+        if department_id:
+            payload["department_id"] = department_id
+        if phone:
+            payload["phone"] = phone
+        if personal_email:
+            payload["personal_email"] = personal_email
+        if metadata:
+            payload["metadata"] = metadata
+
+        try:
+            return await self._request(
+                "POST",
+                "/hr/employees/",
+                source="external",
+                json=payload
+            )
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to create employee: {e}")
+            # Check if employee already exists
+            if e.response.status_code == 409:
+                # Try to find by email
+                employees = await self.get_employees(company_id, status="ACTIVE")
+                for emp in employees:
+                    if emp.get("work_email") == email:
+                        return emp
+            return {"id": None, "error": str(e)}
+
+    async def update_employee(
+        self,
+        employee_id: str,
+        **updates
+    ) -> dict:
+        """
+        Update employee record.
+
+        Args:
+            employee_id: Employee ID
+            **updates: Fields to update
+
+        Returns:
+            Updated employee
+        """
+        return await self._request(
+            "PATCH",
+            f"/hr/employees/{employee_id}",
+            source="external",
+            json=updates
+        )
 
     # ═══════════════════════════════════════════════════════════════════
     # PROJECT MANAGEMENT ENDPOINTS (for internal mode - project sync)

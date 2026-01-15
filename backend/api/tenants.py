@@ -2,6 +2,7 @@
 Bheem Workspace Tenants API
 Public endpoints for self-service workspace creation
 """
+import logging
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
@@ -11,9 +12,12 @@ from sqlalchemy import select
 
 from core.database import get_db
 from core.security import get_current_user
+from core.config import settings
 from models.admin_models import Tenant, TenantUser
+from services.erp_client import erp_client
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 # Plan configurations
 PLANS = {
@@ -120,6 +124,90 @@ async def create_workspace(
     db.add(tenant_user)
     await db.commit()
     await db.refresh(new_tenant)
+
+    # ═══════════════════════════════════════════════════════════════════
+    # ERP INTEGRATION: Create Lead + Sales Customer for external customers
+    # ═══════════════════════════════════════════════════════════════════
+    erp_sync_errors = []
+
+    if getattr(settings, 'ERP_SYNC_ON_SIGNUP', True):
+        try:
+            # Step 1: Create CRM Lead for sales tracking
+            logger.info(f"Creating CRM lead for tenant: {new_tenant.name}")
+            lead_result = await erp_client.create_crm_lead(
+                name=request.owner_name,
+                email=request.owner_email,
+                company_name=request.name,
+                source="WORKSPACE_SIGNUP",
+                notes=f"Self-service signup for workspace: {request.slug}"
+            )
+
+            if lead_result.get("id"):
+                new_tenant.erp_lead_id = lead_result.get("id")
+                logger.info(f"Created CRM lead: {lead_result.get('id')}")
+            elif lead_result.get("error"):
+                erp_sync_errors.append(f"Lead: {lead_result.get('error')}")
+                logger.warning(f"CRM lead creation failed: {lead_result.get('error')}")
+        except Exception as e:
+            erp_sync_errors.append(f"Lead: {str(e)}")
+            logger.warning(f"CRM lead creation error: {e}")
+
+        try:
+            # Step 2: Create Sales Customer for billing/invoicing
+            logger.info(f"Creating Sales customer for tenant: {new_tenant.name}")
+            customer_result = await erp_client.create_sales_customer(
+                name=request.name,
+                email=request.owner_email,
+                company_id=settings.BHEEMVERSE_PARENT_COMPANY_ID,
+                metadata={
+                    "workspace_tenant_id": str(new_tenant.id),
+                    "workspace_slug": request.slug,
+                    "source": "workspace_signup"
+                }
+            )
+
+            if customer_result.get("id"):
+                new_tenant.erp_customer_id = customer_result.get("id")
+                logger.info(f"Created Sales customer: {customer_result.get('id')}")
+            elif customer_result.get("error"):
+                erp_sync_errors.append(f"Customer: {customer_result.get('error')}")
+                logger.warning(f"Sales customer creation failed: {customer_result.get('error')}")
+        except Exception as e:
+            erp_sync_errors.append(f"Customer: {str(e)}")
+            logger.warning(f"Sales customer creation error: {e}")
+
+        try:
+            # Step 3: Sync user to ERP with Passport credentials
+            passport_user_id = current_user.get("user_id") or current_user.get("sub")
+            logger.info(f"Syncing user to ERP: {request.owner_email}")
+
+            user_result = await erp_client.sync_user_from_passport(
+                passport_user_id=str(passport_user_id),
+                email=request.owner_email,
+                name=request.owner_name,
+                role="Customer",
+                company_id=settings.BHEEMVERSE_PARENT_COMPANY_ID
+            )
+
+            if user_result.get("id"):
+                tenant_user.erp_user_id = user_result.get("id")
+                logger.info(f"Synced ERP user: {user_result.get('id')}")
+            elif user_result.get("error"):
+                erp_sync_errors.append(f"User: {user_result.get('error')}")
+                logger.warning(f"ERP user sync failed: {user_result.get('error')}")
+        except Exception as e:
+            erp_sync_errors.append(f"User: {str(e)}")
+            logger.warning(f"ERP user sync error: {e}")
+
+        # Save ERP references to database
+        if new_tenant.erp_lead_id or new_tenant.erp_customer_id:
+            await db.commit()
+            await db.refresh(new_tenant)
+
+        if erp_sync_errors:
+            logger.warning(f"ERP sync completed with errors: {erp_sync_errors}")
+        else:
+            logger.info(f"ERP sync completed successfully for tenant: {new_tenant.slug}")
 
     return WorkspaceResponse(
         id=str(new_tenant.id),

@@ -4,7 +4,7 @@ Handles external commercial customers with subscription billing via BheemPay
 All external customer revenue is tracked under BHM001 (Bheemverse Innovation)
 """
 import logging
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from typing import Optional, Dict, Any, List
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -567,13 +567,15 @@ class ExternalWorkspaceService:
         billing_cycle: str = "monthly"
     ) -> dict:
         """
-        Create accounting journal entry in ERP after successful payment.
+        Create complete ERP sales records after successful payment.
 
-        Simplified flow using direct journal entries:
-        1. Get plan details for description
-        2. Create and post journal entry:
-           - Debit: Cash in Bank (payment received)
-           - Credit: Subscription Revenue
+        Full Sales Flow:
+        1. Ensure Sales Customer exists
+        2. Convert Lead to Customer (if lead exists)
+        3. Create Sales Order
+        4. Create Sales Invoice
+        5. Record Payment
+        6. Create accounting journal entry
 
         Args:
             tenant_id: Workspace tenant ID
@@ -585,9 +587,12 @@ class ExternalWorkspaceService:
             billing_cycle: 'monthly' or 'annual'
 
         Returns:
-            Dict with journal_entry_id
+            Dict with sales_order_id, invoice_id, payment_id, journal_entry_id
         """
         result = {
+            "sales_order_id": None,
+            "invoice_id": None,
+            "payment_record_id": None,
             "journal_entry_id": None,
             "entry_number": None,
             "status": None,
@@ -598,6 +603,12 @@ class ExternalWorkspaceService:
             # Convert amount from paise to rupees if needed
             amount_decimal = amount / 100 if amount > 1000 else amount
 
+            # Get tenant details
+            tenant = await self._get_tenant(tenant_id)
+            if not tenant:
+                result["errors"].append(f"Tenant not found: {tenant_id}")
+                return result
+
             # Get plan details for description
             plan_details = {}
             try:
@@ -606,16 +617,152 @@ class ExternalWorkspaceService:
                 logger.warning(f"Could not fetch plan details: {e}")
 
             plan_name = plan_details.get("name", "Workspace Subscription")
+            plan_sku = plan_details.get("sku_code", plan_id)
             cycle_display = "Monthly" if billing_cycle == "monthly" else "Annual"
 
             # Create reference
             ref_id = subscription_id[:8] if subscription_id else tenant_id[:8]
             reference = f"WS-{ref_id}-{payment_id[:8] if payment_id else 'PAY'}"
 
-            # Create accounting journal entry
+            # ─────────────────────────────────────────────────────────────
+            # Step 1: Ensure Sales Customer exists
+            # ─────────────────────────────────────────────────────────────
+            customer_id = await self._ensure_erp_sales_customer(tenant)
+            if not customer_id:
+                logger.warning(f"Could not create/find sales customer for tenant {tenant_id}")
+                # Continue with journal entry only
+            else:
+                logger.info(f"Using Sales Customer: {customer_id}")
+
+            # ─────────────────────────────────────────────────────────────
+            # Step 2: Convert Lead to Customer (if lead exists)
+            # ─────────────────────────────────────────────────────────────
+            if hasattr(tenant, 'erp_lead_id') and tenant.erp_lead_id:
+                try:
+                    await self.erp.update_crm_lead(
+                        lead_id=str(tenant.erp_lead_id),
+                        status="CONVERTED"
+                    )
+                    logger.info(f"Lead {tenant.erp_lead_id} marked as converted")
+                except Exception as e:
+                    logger.warning(f"Could not update lead status: {e}")
+
+            # ─────────────────────────────────────────────────────────────
+            # Step 3: Create Sales Order
+            # ─────────────────────────────────────────────────────────────
+            if customer_id:
+                try:
+                    order_date = date.today().isoformat()
+                    sales_order = await self.erp.create_sales_order(
+                        customer_id=customer_id,
+                        company_id=settings.BHEEMVERSE_PARENT_COMPANY_ID,
+                        items=[{
+                            "sku_id": plan_sku,
+                            "description": f"Bheem Workspace {plan_name} ({cycle_display})",
+                            "quantity": 1,
+                            "unit_price": amount_decimal
+                        }],
+                        order_date=order_date,
+                        reference=reference,
+                        notes=f"Subscription: {subscription_id}"
+                    )
+
+                    if sales_order.get("id"):
+                        result["sales_order_id"] = sales_order.get("id")
+                        logger.info(f"Created Sales Order: {sales_order.get('id')}")
+
+                        # Confirm the order
+                        try:
+                            await self.erp.confirm_sales_order(sales_order.get("id"))
+                        except Exception as e:
+                            logger.warning(f"Could not confirm sales order: {e}")
+                    else:
+                        result["errors"].append(f"Sales Order: {sales_order.get('error', 'Unknown error')}")
+
+                except Exception as e:
+                    logger.warning(f"Sales Order creation error: {e}")
+                    result["errors"].append(f"Sales Order: {str(e)}")
+
+            # ─────────────────────────────────────────────────────────────
+            # Step 4: Create Sales Invoice
+            # ─────────────────────────────────────────────────────────────
+            if customer_id:
+                try:
+                    invoice_date = date.today().isoformat()
+                    due_date = (date.today() + timedelta(days=0)).isoformat()  # Already paid
+
+                    sales_invoice = await self.erp.create_sales_invoice(
+                        customer_id=customer_id,
+                        company_id=settings.BHEEMVERSE_PARENT_COMPANY_ID,
+                        items=[{
+                            "sku_id": plan_sku,
+                            "description": f"Bheem Workspace {plan_name} ({cycle_display})",
+                            "quantity": 1,
+                            "unit_price": amount_decimal
+                        }],
+                        sales_order_id=result.get("sales_order_id"),
+                        invoice_date=invoice_date,
+                        due_date=due_date,
+                        payment_terms=0,  # Already paid
+                        reference=reference,
+                        notes=f"Payment ID: {payment_id}"
+                    )
+
+                    if sales_invoice.get("id"):
+                        result["invoice_id"] = sales_invoice.get("id")
+                        logger.info(f"Created Sales Invoice: {sales_invoice.get('id')}")
+
+                        # Issue the invoice
+                        try:
+                            await self.erp.issue_sales_invoice(sales_invoice.get("id"))
+                        except Exception as e:
+                            logger.warning(f"Could not issue invoice: {e}")
+
+                        # ─────────────────────────────────────────────────────
+                        # Step 5: Record Payment against Invoice
+                        # ─────────────────────────────────────────────────────
+                        try:
+                            payment_record = await self.erp.create_sales_payment(
+                                invoice_id=sales_invoice.get("id"),
+                                amount=amount_decimal,
+                                payment_method="razorpay",
+                                payment_date=date.today().isoformat(),
+                                reference=payment_id,
+                                notes=f"BheemPay Payment - Subscription: {subscription_id}"
+                            )
+
+                            if payment_record.get("id"):
+                                result["payment_record_id"] = payment_record.get("id")
+                                logger.info(f"Recorded Payment: {payment_record.get('id')}")
+
+                                # Mark invoice as paid
+                                try:
+                                    await self.erp.mark_invoice_paid(
+                                        invoice_id=sales_invoice.get("id"),
+                                        payment_date=date.today().isoformat(),
+                                        payment_reference=payment_id,
+                                        payment_method="razorpay"
+                                    )
+                                except Exception as e:
+                                    logger.warning(f"Could not mark invoice as paid: {e}")
+
+                        except Exception as e:
+                            logger.warning(f"Payment recording error: {e}")
+                            result["errors"].append(f"Payment: {str(e)}")
+
+                    else:
+                        result["errors"].append(f"Invoice: {sales_invoice.get('error', 'Unknown error')}")
+
+                except Exception as e:
+                    logger.warning(f"Sales Invoice creation error: {e}")
+                    result["errors"].append(f"Invoice: {str(e)}")
+
+            # ─────────────────────────────────────────────────────────────
+            # Step 6: Create accounting journal entry (always)
+            # ─────────────────────────────────────────────────────────────
             logger.info(f"Creating journal entry for tenant {tenant_id}, amount: ₹{amount_decimal}")
             accounting_result = await self._create_accounting_entries(
-                customer_id=tenant_id,  # For reference only
+                customer_id=tenant_id,
                 company_id=settings.BHEEMVERSE_PARENT_COMPANY_CODE,
                 amount=amount_decimal,
                 currency=currency,
@@ -631,15 +778,25 @@ class ExternalWorkspaceService:
             if accounting_result.get("errors"):
                 result["errors"].extend(accounting_result["errors"])
 
-            # Log success
-            if result["journal_entry_id"]:
-                logger.info(
-                    f"✓ ERP accounting entry created for tenant {tenant_id}: "
-                    f"Entry #{result['entry_number']}, Status: {result['status']}"
+            # ─────────────────────────────────────────────────────────────
+            # Step 7: Update tenant with ERP references
+            # ─────────────────────────────────────────────────────────────
+            if result["sales_order_id"] or result["invoice_id"]:
+                await self._update_tenant_erp_sales_refs(
+                    tenant_id=tenant_id,
+                    sales_order_id=result["sales_order_id"],
+                    invoice_id=result["invoice_id"]
                 )
 
+            # Log success summary
+            logger.info(
+                f"✓ ERP sales records created for tenant {tenant_id}: "
+                f"Order={result['sales_order_id']}, Invoice={result['invoice_id']}, "
+                f"Payment={result['payment_record_id']}, Journal={result['entry_number']}"
+            )
+
         except Exception as e:
-            logger.error(f"ERP accounting integration error for tenant {tenant_id}: {e}")
+            logger.error(f"ERP sales integration error for tenant {tenant_id}: {e}")
             result["errors"].append(str(e))
 
         return result
