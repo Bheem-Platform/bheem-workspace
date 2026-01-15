@@ -44,6 +44,7 @@ class DriveFile(Base):
     # Status
     is_starred = Column(Boolean, default=False)
     is_trashed = Column(Boolean, default=False)
+    is_spam = Column(Boolean, default=False)
     trashed_at = Column(DateTime)
 
     # Versioning
@@ -76,6 +77,7 @@ class DriveShare(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     file_id = Column(UUID(as_uuid=True), ForeignKey("workspace.drive_files.id", ondelete="CASCADE"), nullable=False)
     shared_with_email = Column(String(255))  # Email of person shared with
+    shared_with_user_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tenant_users.id", ondelete="SET NULL"))  # User ID of recipient
 
     # Permission
     permission = Column(String(20), default='view')  # view, comment, edit

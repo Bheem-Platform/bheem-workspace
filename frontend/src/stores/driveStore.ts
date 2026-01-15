@@ -20,6 +20,14 @@ interface BreadcrumbItem {
   name: string;
 }
 
+// Advanced filter state
+interface FilterState {
+  type: string | null;
+  people: string | null;
+  modified: string | null;
+  location: string | null;
+}
+
 interface DriveState {
   // Files
   files: DriveFile[];
@@ -34,7 +42,8 @@ interface DriveState {
   searchQuery: string;
 
   // Filter
-  activeFilter: 'all' | 'recent' | 'starred' | 'trash';
+  activeFilter: 'all' | 'home' | 'activity' | 'workspace' | 'recent' | 'starred' | 'shared-with-me' | 'spam' | 'trash';
+  advancedFilters: FilterState;
 
   // Loading states
   loading: boolean;
@@ -61,6 +70,12 @@ interface DriveState {
   fetchRecentFiles: () => Promise<void>;
   fetchStarredFiles: () => Promise<void>;
   fetchTrashFiles: () => Promise<void>;
+  fetchHomeFiles: () => Promise<void>;
+  fetchActivityFiles: () => Promise<void>;
+  fetchWorkspaceFiles: () => Promise<void>;
+  fetchSharedWithMe: () => Promise<void>;
+  fetchSpamFiles: () => Promise<void>;
+  applyAdvancedFilters: (filters: FilterState) => Promise<void>;
   navigateToFolder: (folderId: string | null, folderName?: string) => Promise<void>;
   navigateUp: () => Promise<void>;
 
@@ -87,7 +102,8 @@ interface DriveState {
   setSortBy: (sortBy: 'name' | 'created_at' | 'updated_at' | 'size') => void;
   setSortOrder: (order: 'asc' | 'desc') => void;
   setSearchQuery: (query: string) => void;
-  setActiveFilter: (filter: 'all' | 'recent' | 'starred' | 'trash') => void;
+  setActiveFilter: (filter: 'all' | 'home' | 'activity' | 'workspace' | 'recent' | 'starred' | 'shared-with-me' | 'spam' | 'trash') => void;
+  setAdvancedFilters: (filters: FilterState) => void;
 
   // Modals
   openCreateFolderModal: () => void;
@@ -121,6 +137,12 @@ export const useDriveStore = create<DriveState>((set, get) => ({
   searchQuery: '',
 
   activeFilter: 'all',
+  advancedFilters: {
+    type: null,
+    people: null,
+    modified: null,
+    location: null,
+  },
 
   loading: false,
   error: null,
@@ -178,6 +200,74 @@ export const useDriveStore = create<DriveState>((set, get) => ({
     try {
       const files = await driveApi.getTrashFiles();
       set({ files, loading: false, currentFolderId: null, breadcrumb: [{ id: null, name: 'Trash' }] });
+    } catch (err: any) {
+      set({ error: err.message, loading: false });
+    }
+  },
+
+  fetchHomeFiles: async () => {
+    set({ loading: true, error: null, activeFilter: 'home' });
+    try {
+      const files = await driveApi.getHomeFiles();
+      set({ files, loading: false, currentFolderId: null, breadcrumb: [{ id: null, name: 'Home' }] });
+    } catch (err: any) {
+      set({ error: err.message, loading: false });
+    }
+  },
+
+  fetchActivityFiles: async () => {
+    set({ loading: true, error: null, activeFilter: 'activity' });
+    try {
+      // Activity returns activity items, not files - we'll store empty files
+      // Activity is displayed separately in the UI
+      set({ files: [], loading: false, currentFolderId: null, breadcrumb: [{ id: null, name: 'Activity' }] });
+    } catch (err: any) {
+      set({ error: err.message, loading: false });
+    }
+  },
+
+  fetchWorkspaceFiles: async () => {
+    set({ loading: true, error: null, activeFilter: 'workspace' });
+    try {
+      const files = await driveApi.getWorkspaceFiles();
+      set({ files, loading: false, currentFolderId: null, breadcrumb: [{ id: null, name: 'Workspace' }] });
+    } catch (err: any) {
+      set({ error: err.message, loading: false });
+    }
+  },
+
+  fetchSharedWithMe: async () => {
+    set({ loading: true, error: null, activeFilter: 'shared-with-me' });
+    try {
+      const files = await driveApi.getSharedWithMe();
+      set({ files, loading: false, currentFolderId: null, breadcrumb: [{ id: null, name: 'Shared with me' }] });
+    } catch (err: any) {
+      set({ error: err.message, loading: false });
+    }
+  },
+
+  fetchSpamFiles: async () => {
+    set({ loading: true, error: null, activeFilter: 'spam' });
+    try {
+      const files = await driveApi.getSpamFiles();
+      set({ files, loading: false, currentFolderId: null, breadcrumb: [{ id: null, name: 'Spam' }] });
+    } catch (err: any) {
+      set({ error: err.message, loading: false });
+    }
+  },
+
+  applyAdvancedFilters: async (filters) => {
+    set({ loading: true, error: null, advancedFilters: filters });
+    try {
+      const files = await driveApi.listFilesAdvanced({
+        type: filters.type || undefined,
+        people: filters.people || undefined,
+        modified: filters.modified || undefined,
+        location: filters.location || undefined,
+        sort_by: get().sortBy,
+        sort_order: get().sortOrder,
+      });
+      set({ files, loading: false });
     } catch (err: any) {
       set({ error: err.message, loading: false });
     }
@@ -435,6 +525,11 @@ export const useDriveStore = create<DriveState>((set, get) => ({
   setSearchQuery: (query) => set({ searchQuery: query }),
 
   setActiveFilter: (filter) => set({ activeFilter: filter }),
+
+  setAdvancedFilters: (filters) => {
+    set({ advancedFilters: filters });
+    get().applyAdvancedFilters(filters);
+  },
 
   // Modals
   openCreateFolderModal: () => set({ isCreateFolderModalOpen: true }),

@@ -456,3 +456,134 @@ class Mail2FALog(Base):
 
     def __repr__(self):
         return f"<Mail2FALog(user_id={self.user_id}, action={self.action})>"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Gmail-like Categories, Snooze & System Labels
+# ═══════════════════════════════════════════════════════════════════
+
+class EmailCategory(Base):
+    """Gmail-like email categorization (Primary, Social, Updates, Promotions)"""
+    __tablename__ = "email_categories"
+    __table_args__ = (
+        Index('idx_email_categories_user', 'user_id'),
+        Index('idx_email_categories_message', 'message_id'),
+        Index('idx_email_categories_category', 'category'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+    message_id = Column(String(500), nullable=False)  # IMAP message ID
+
+    # Category: primary, social, updates, promotions, forums
+    category = Column(String(20), nullable=False, default='primary')
+
+    # Auto-categorization info
+    auto_categorized = Column(Boolean, default=True)
+    categorized_by = Column(String(50), default='rule')  # rule, ai, user
+    confidence = Column(Integer, default=100)  # 0-100 confidence score
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<EmailCategory(message_id={self.message_id}, category={self.category})>"
+
+
+class EmailCategoryRule(Base):
+    """Rules for auto-categorizing emails"""
+    __tablename__ = "email_category_rules"
+    __table_args__ = (
+        Index('idx_email_category_rules_user', 'user_id'),
+        Index('idx_email_category_rules_category', 'category'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+
+    # Rule info
+    name = Column(String(255), nullable=False)
+    is_enabled = Column(Boolean, default=True)
+    is_system = Column(Boolean, default=False)  # Built-in rules
+    priority = Column(Integer, default=0)
+
+    # Target category
+    category = Column(String(20), nullable=False)  # primary, social, updates, promotions
+
+    # Conditions (JSONB - similar to mail filters)
+    # Example: {"from_domain": ["facebook.com", "twitter.com"], "list_unsubscribe": true}
+    conditions = Column(JSONB, nullable=False, default={})
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<EmailCategoryRule(name={self.name}, category={self.category})>"
+
+
+# SnoozedEmail model is defined in calendar_models.py to avoid duplication
+# Import it from there: from models.calendar_models import SnoozedEmail
+
+
+class EmailImportance(Base):
+    """Important/starred emails tracking"""
+    __tablename__ = "email_importance"
+    __table_args__ = (
+        Index('idx_email_importance_user', 'user_id'),
+        Index('idx_email_importance_message', 'message_id'),
+        Index('idx_email_importance_starred', 'is_starred'),
+        Index('idx_email_importance_important', 'is_important'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+    message_id = Column(String(500), nullable=False)  # IMAP message ID
+
+    # Flags
+    is_starred = Column(Boolean, default=False)
+    is_important = Column(Boolean, default=False)
+
+    # Auto-importance tracking
+    auto_important = Column(Boolean, default=False)  # Set by AI/rules
+    importance_reason = Column(String(100))  # vip_sender, keyword, etc.
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<EmailImportance(message_id={self.message_id}, starred={self.is_starred}, important={self.is_important})>"
+
+
+class MailReadReceipt(Base):
+    """Track read receipts and email opens"""
+    __tablename__ = "mail_read_receipts"
+    __table_args__ = (
+        Index('idx_mail_read_receipts_user', 'user_id'),
+        Index('idx_mail_read_receipts_message', 'message_id'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+    message_id = Column(String(500), nullable=False)
+
+    # Tracking
+    is_read = Column(Boolean, default=False)
+    read_at = Column(DateTime)
+    read_count = Column(Integer, default=0)
+
+    # Receipt request/response
+    receipt_requested = Column(Boolean, default=False)
+    receipt_sent = Column(Boolean, default=False)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<MailReadReceipt(message_id={self.message_id}, is_read={self.is_read})>"

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import {
   Search,
   ChevronDown,
@@ -10,19 +10,60 @@ import {
   MoreHorizontal,
   CheckSquare,
   Square,
+  Inbox,
+  Users,
+  Bell,
+  Tag,
+  Star,
+  Clock,
+  AlertCircle,
 } from 'lucide-react';
 import { useMailStore } from '@/stores/mailStore';
 import MailListItem from './MailListItem';
 import { SkeletonList } from '@/components/shared/LoadingOverlay';
 import EmptyState from '@/components/shared/EmptyState';
 import type { Email } from '@/types/mail';
+import { api } from '@/lib/api';
 
 interface MailListProps {
   onSelectEmail: (email: Email) => void;
   selectedEmailId?: string;
+  activeCategory?: string;
+  activeLabel?: string | null;
 }
 
-export default function MailList({ onSelectEmail, selectedEmailId }: MailListProps) {
+// Category display config
+const CATEGORY_CONFIG: Record<string, { title: string; icon: any; color: string }> = {
+  all: { title: 'All Inboxes', icon: Inbox, color: 'text-blue-600' },
+  primary: { title: 'Primary', icon: Inbox, color: 'text-gray-700' },
+  social: { title: 'Social', icon: Users, color: 'text-pink-600' },
+  updates: { title: 'Updates', icon: Bell, color: 'text-purple-600' },
+  promotions: { title: 'Promotions', icon: Tag, color: 'text-green-600' },
+  forums: { title: 'Forums', icon: Mail, color: 'text-cyan-600' },
+};
+
+// Label display config
+const LABEL_CONFIG: Record<string, { title: string; icon: any; color: string; isFolder?: boolean }> = {
+  starred: { title: 'Starred', icon: Star, color: 'text-amber-500' },
+  snoozed: { title: 'Snoozed', icon: Clock, color: 'text-orange-500' },
+  important: { title: 'Important', icon: AlertCircle, color: 'text-yellow-600' },
+  purchase: { title: 'Purchase', icon: Tag, color: 'text-emerald-600', isFolder: true },
+  sent: { title: 'Sent', icon: Mail, color: 'text-blue-500', isFolder: true },
+  scheduled: { title: 'Scheduled', icon: Clock, color: 'text-indigo-500', isFolder: true },
+  outbox: { title: 'Outbox', icon: Mail, color: 'text-cyan-500', isFolder: true },
+  drafts: { title: 'Drafts', icon: Mail, color: 'text-gray-500', isFolder: true },
+  'all-mail': { title: 'All Mail', icon: Inbox, color: 'text-gray-600', isFolder: true },
+  spam: { title: 'Spam', icon: AlertCircle, color: 'text-yellow-500', isFolder: true },
+  bin: { title: 'Bin', icon: Trash2, color: 'text-red-500', isFolder: true },
+  subscriptions: { title: 'Manage Subscriptions', icon: Bell, color: 'text-gray-500' },
+};
+
+export default function MailList({
+  onSelectEmail,
+  selectedEmailId,
+  activeCategory = 'all',
+  activeLabel = null
+}: MailListProps) {
   const {
     emails,
     currentFolder,
@@ -42,17 +83,109 @@ export default function MailList({ onSelectEmail, selectedEmailId }: MailListPro
   } = useMailStore();
 
   const [showBulkActions, setShowBulkActions] = useState(false);
+  const [categoryMessageIds, setCategoryMessageIds] = useState<string[]>([]);
+  const [labelMessageIds, setLabelMessageIds] = useState<string[]>([]);
+  const [loadingCategory, setLoadingCategory] = useState(false);
 
-  // Filter emails by search query
-  const filteredEmails = searchQuery
-    ? emails.filter(
+  // Fetch category/label message IDs when they change
+  useEffect(() => {
+    const fetchCategoryEmails = async () => {
+      if (activeCategory && activeCategory !== 'all') {
+        setLoadingCategory(true);
+        try {
+          const response = await api.get(`/mail/categories/${activeCategory}`);
+          setCategoryMessageIds(response.data.message_ids || []);
+        } catch (error) {
+          console.error('Failed to fetch category emails:', error);
+          setCategoryMessageIds([]);
+        } finally {
+          setLoadingCategory(false);
+        }
+      } else {
+        setCategoryMessageIds([]);
+      }
+    };
+
+    const fetchLabelEmails = async () => {
+      if (activeLabel) {
+        // Check if this is a folder-based label (don't fetch from API)
+        const labelConfig = LABEL_CONFIG[activeLabel];
+        if (labelConfig?.isFolder) {
+          // Folder-based labels - emails come from the folder, no API filtering needed
+          setLabelMessageIds([]);
+          setLoadingCategory(false);
+          return;
+        }
+
+        setLoadingCategory(true);
+        try {
+          let response;
+          if (activeLabel === 'starred') {
+            response = await api.get('/mail/starred');
+            setLabelMessageIds(response.data.message_ids || []);
+          } else if (activeLabel === 'important') {
+            response = await api.get('/mail/important');
+            setLabelMessageIds(response.data.message_ids || []);
+          } else if (activeLabel === 'snoozed') {
+            response = await api.get('/mail/snoozed');
+            setLabelMessageIds((response.data.snoozed || []).map((s: any) => s.message_id));
+          } else {
+            setLabelMessageIds([]);
+          }
+        } catch (error) {
+          console.error('Failed to fetch label emails:', error);
+          setLabelMessageIds([]);
+        } finally {
+          setLoadingCategory(false);
+        }
+      } else {
+        setLabelMessageIds([]);
+      }
+    };
+
+    if (activeLabel) {
+      // When label is active, clear category IDs and fetch label emails
+      setCategoryMessageIds([]);
+      fetchLabelEmails();
+    } else {
+      // When no label, clear label IDs and fetch category emails
+      setLabelMessageIds([]);
+      fetchCategoryEmails();
+    }
+  }, [activeCategory, activeLabel]);
+
+  // Filter emails by category/label and search query
+  // Priority: Label (API-based only) > Category > All
+  const filteredEmails = useMemo(() => {
+    let result = emails;
+
+    // Check if active label is folder-based (no filtering needed - emails come from folder)
+    const isLabelFolderBased = activeLabel && LABEL_CONFIG[activeLabel]?.isFolder;
+
+    // If label is active and NOT folder-based, filter by label message IDs
+    if (activeLabel && !isLabelFolderBased && labelMessageIds.length > 0) {
+      result = result.filter(e => labelMessageIds.includes(e.id));
+    }
+    // If no active label (or folder-based label), filter by category (if not 'all')
+    else if (!activeLabel && activeCategory && activeCategory !== 'all' && categoryMessageIds.length > 0) {
+      result = result.filter(e => categoryMessageIds.includes(e.id));
+    }
+    // For folder-based labels, show all emails from the current folder (no filtering)
+
+    // Filter by search query
+    if (searchQuery) {
+      result = result.filter(
         (e) =>
           e.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
           e.from.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
           e.from.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
           e.body?.toLowerCase().includes(searchQuery.toLowerCase())
-      )
-    : emails;
+      );
+    }
+
+    return result;
+  }, [emails, activeCategory, activeLabel, categoryMessageIds, labelMessageIds, searchQuery]);
+
 
   const handleSelectAll = () => {
     if (selectedEmails.length === filteredEmails.length) {
@@ -83,7 +216,15 @@ export default function MailList({ onSelectEmail, selectedEmailId }: MailListPro
     clearSelection();
   };
 
-  const getFolderTitle = () => {
+  // Get title and icon based on active category or label
+  const getViewConfig = () => {
+    if (activeLabel && LABEL_CONFIG[activeLabel]) {
+      return LABEL_CONFIG[activeLabel];
+    }
+    if (activeCategory && CATEGORY_CONFIG[activeCategory]) {
+      return CATEGORY_CONFIG[activeCategory];
+    }
+    // Fallback to folder titles
     const titles: Record<string, string> = {
       INBOX: 'Inbox',
       Sent: 'Sent',
@@ -92,17 +233,27 @@ export default function MailList({ onSelectEmail, selectedEmailId }: MailListPro
       Trash: 'Trash',
       Archive: 'Archive',
     };
-    return titles[currentFolder] || currentFolder;
+    return {
+      title: titles[currentFolder] || currentFolder,
+      icon: Mail,
+      color: 'text-gray-600'
+    };
   };
+
+  const viewConfig = getViewConfig();
+  const ViewIcon = viewConfig.icon;
 
   return (
     <div className="h-full flex flex-col bg-white">
       {/* Header */}
       <div className="flex-shrink-0 px-4 py-3 border-b border-gray-200">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-lg font-semibold text-gray-900">
-            {getFolderTitle()}
-          </h2>
+          <div className="flex items-center gap-2">
+            <ViewIcon size={20} className={viewConfig.color} />
+            <h2 className="text-lg font-semibold text-gray-900">
+              {viewConfig.title}
+            </h2>
+          </div>
           <div className="flex items-center gap-2">
             <span className="text-sm text-gray-500">
               {pagination.total} emails
@@ -186,18 +337,18 @@ export default function MailList({ onSelectEmail, selectedEmailId }: MailListPro
 
       {/* Email List */}
       <div className="flex-1 overflow-y-auto mail-scrollbar">
-        {loading.emails ? (
+        {(loading.emails || loadingCategory) ? (
           <div className="p-4">
             <SkeletonList count={8} />
           </div>
         ) : filteredEmails.length === 0 ? (
           <EmptyState
-            icon={Mail}
+            icon={ViewIcon}
             title={searchQuery ? 'No emails found' : 'No emails'}
             description={
               searchQuery
                 ? `No emails match "${searchQuery}"`
-                : `Your ${getFolderTitle().toLowerCase()} is empty`
+                : `Your ${viewConfig.title.toLowerCase()} is empty`
             }
             action={
               searchQuery

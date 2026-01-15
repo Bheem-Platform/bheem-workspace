@@ -6,10 +6,11 @@ import {
   Calendar,
   Video,
   FileText,
+  HardDrive,
   type LucideIcon,
 } from 'lucide-react';
 
-export type AppId = 'dashboard' | 'mail' | 'calendar' | 'meet' | 'docs';
+export type AppId = 'dashboard' | 'mail' | 'calendar' | 'meet' | 'docs' | 'drive';
 
 interface AppItem {
   id: AppId;
@@ -54,6 +55,13 @@ const apps: AppItem[] = [
     icon: FileText,
     href: '/docs',
     gradient: 'from-purple-500 to-pink-500',
+  },
+  {
+    id: 'drive',
+    name: 'Drive',
+    icon: HardDrive,
+    href: '/drive',
+    gradient: 'from-amber-500 to-yellow-500',
   },
 ];
 
@@ -120,5 +128,6 @@ function detectActiveApp(pathname: string): AppId {
   if (pathname.startsWith('/calendar')) return 'calendar';
   if (pathname.startsWith('/meet')) return 'meet';
   if (pathname.startsWith('/docs')) return 'docs';
+  if (pathname.startsWith('/drive')) return 'drive';
   return 'dashboard';
 }

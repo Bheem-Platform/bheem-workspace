@@ -1,13 +1,13 @@
 /**
  * Bheem Mail - Main Page
- * Enhanced with Settings, Advanced Search, Shared Mailboxes, and more
+ * Gmail-like UI with Categories, Tabs, Snooze, and more
  */
 import { useEffect, useState, useCallback } from 'react';
 import Head from 'next/head';
 import { useHotkeys } from 'react-hotkeys-hook';
 import AppSwitcherBar from '@/components/shared/AppSwitcherBar';
 import MailHeader from '@/components/mail/MailHeader';
-import MailSidebar from '@/components/mail/MailSidebar';
+import GmailSidebar from '@/components/mail/GmailSidebar';
 import MailList from '@/components/mail/MailList';
 import MailViewer from '@/components/mail/MailViewer';
 import ConversationView from '@/components/mail/ConversationView';
@@ -57,6 +57,39 @@ export default function MailPage() {
   const [showSharedMailbox, setShowSharedMailbox] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'labels' | 'filters' | 'signatures' | 'templates' | 'vacation'>('labels');
   const [sessionVerified, setSessionVerified] = useState(false);
+
+  // Gmail-like category and label state
+  const [activeCategory, setActiveCategory] = useState('all');
+  const [activeLabel, setActiveLabel] = useState<string | null>(null);
+
+  // Handle category change - fetch emails for the selected category
+  const handleCategoryChange = useCallback(async (category: string, preserveLabel: boolean = false) => {
+    setActiveCategory(category);
+    // Only clear label if not preserving it (e.g., when user clicks category tab directly)
+    if (!preserveLabel) {
+      setActiveLabel(null);
+    }
+    console.log('[Mail] Category changed to:', category);
+
+    // For 'all', fetch all inbox emails
+    // For specific categories, we'll filter in MailList
+    if (category === 'all') {
+      setCurrentFolder('INBOX');
+    }
+    fetchEmails();
+  }, [setCurrentFolder, fetchEmails]);
+
+  // Handle label change
+  const handleLabelChange = useCallback((label: string | null) => {
+    setActiveLabel(label);
+    if (label) {
+      console.log('[Mail] Label changed to:', label);
+      // Fetch emails for the new view
+      fetchEmails();
+    } else {
+      console.log('[Mail] Label cleared');
+    }
+  }, [fetchEmails]);
 
   // WebSocket for real-time updates
   const { isConnected, subscribeFolder, unsubscribeFolder } = useMailWebSocket({
@@ -202,9 +235,15 @@ export default function MailPage() {
 
         {/* Main Content - offset by header (56px) and app switcher (60px) */}
         <div className="flex h-[calc(100vh-56px)] pt-14 ml-[60px]">
-          {/* Mail Sidebar - Folders */}
-          <div className="w-60 flex-shrink-0 bg-white border-r border-gray-200 h-full overflow-y-auto mail-scrollbar">
-            <MailSidebar onCompose={() => openCompose()} />
+          {/* Gmail-like Sidebar - Categories, Labels, Bheem Apps */}
+          <div className="w-64 flex-shrink-0 bg-white border-r border-gray-200 h-full overflow-hidden">
+            <GmailSidebar
+              onCompose={() => openCompose()}
+              activeCategory={activeCategory}
+              onCategoryChange={handleCategoryChange}
+              activeLabel={activeLabel}
+              onLabelChange={handleLabelChange}
+            />
           </div>
 
           {/* Email List */}
@@ -212,6 +251,8 @@ export default function MailPage() {
             <MailList
               onSelectEmail={handleSelectEmail}
               selectedEmailId={selectedEmail?.id}
+              activeCategory={activeCategory}
+              activeLabel={activeLabel}
             />
           </div>
 

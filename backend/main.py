@@ -293,6 +293,12 @@ except Exception as e:
     print(f"Could not load mail attachments router: {e}")
 
 try:
+    from api.mail_gmail_features import router as mail_gmail_features_router
+    app.include_router(mail_gmail_features_router, prefix="/api/v1")
+except Exception as e:
+    print(f"Could not load mail gmail features router: {e}")
+
+try:
     from api.calendar import router as calendar_router
     app.include_router(calendar_router, prefix="/api/v1")
 except Exception as e:
@@ -953,6 +959,28 @@ async def calendar_proxy(request: Request, path: str = ""):
             )
         except httpx.RequestError as e:
             return HTMLResponse(content=f"<h1>Calendar service unavailable</h1><p>{str(e)}</p>", status_code=503)
+
+# Bheem Drive - Proxy to Next.js server
+@app.api_route("/drive/{path:path}", methods=["GET"])
+@app.api_route("/drive", methods=["GET"])
+async def drive_proxy(request: Request, path: str = ""):
+    """Proxy drive routes to Next.js server"""
+    target_url = f"{NEXTJS_URL}/drive/{path}" if path else f"{NEXTJS_URL}/drive"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Drive service unavailable</h1><p>{str(e)}</p>", status_code=503)
 
 if __name__ == "__main__":
     import uvicorn

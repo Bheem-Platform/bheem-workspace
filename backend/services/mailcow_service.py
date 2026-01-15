@@ -131,25 +131,114 @@ class MailcowService:
         """
         try:
             result = await self.update_mailbox_password(email, password)
-            if result:
+
+            # Check if API response indicates success
+            # Mailcow API returns [{"type":"success",...}] on success
+            # or [{"type":"danger","msg":"access_denied"}] on failure
+            api_success = False
+            if isinstance(result, list) and len(result) > 0:
+                first_result = result[0]
+                if isinstance(first_result, dict):
+                    result_type = first_result.get("type", "")
+                    if result_type == "success":
+                        api_success = True
+                        print(f"[Mailcow] Password updated via API for {email}")
+                    else:
+                        error_msg = first_result.get("msg", "unknown error")
+                        print(f"[Mailcow] API password update failed for {email}: {error_msg}")
+
+            if api_success:
                 return True
-            # If API fails, try direct database update via SSH
-            return await self._sync_password_direct(email, password)
+
+            # If API fails, try direct MySQL connection first, then SSH fallback
+            print(f"[Mailcow] Falling back to direct database method for {email}")
+
+            # Try direct MySQL connection (without SSH)
+            direct_result = await self._sync_password_mysql_direct(email, password)
+            if direct_result:
+                return True
+
+            # If direct MySQL fails, try SSH method
+            print(f"[Mailcow] Direct MySQL failed, trying SSH method for {email}")
+            return await self._sync_password_ssh(email, password)
         except Exception as e:
             print(f"Failed to sync password to Mailcow: {e}")
             return False
 
-    async def _sync_password_direct(self, email: str, password: str) -> bool:
+    async def _sync_password_mysql_direct(self, email: str, password: str) -> bool:
         """
-        Direct password sync via Dovecot password hash.
-        Fallback when Mailcow API is unavailable.
+        Direct MySQL connection to Mailcow database.
+        Uses bcrypt to generate Dovecot-compatible password hash.
+        """
+        import bcrypt
+
+        # Check if MySQL credentials are configured
+        if not self.mysql_password:
+            print("[Mailcow] MySQL password not configured")
+            return False
+
+        try:
+            import pymysql
+
+            # Generate Dovecot BLF-CRYPT (bcrypt) password hash
+            # Mailcow/Dovecot expects format: {BLF-CRYPT}$2y$...
+            salt = bcrypt.gensalt(rounds=10)
+            hashed = bcrypt.hashpw(password.encode('utf-8'), salt)
+            # Convert from $2b$ to $2y$ for Dovecot compatibility
+            password_hash = "{BLF-CRYPT}" + hashed.decode('utf-8').replace('$2b$', '$2y$')
+
+            # Connect directly to MySQL (port 3306)
+            connection = pymysql.connect(
+                host=self.imap_host,  # Same host as IMAP
+                port=3306,
+                user=self.mysql_user,
+                password=self.mysql_password,
+                database='mailcow',
+                connect_timeout=10
+            )
+
+            with connection.cursor() as cursor:
+                # Update password for the mailbox
+                cursor.execute(
+                    "UPDATE mailbox SET password = %s WHERE username = %s",
+                    (password_hash, email)
+                )
+                rows_affected = cursor.rowcount
+                connection.commit()
+
+            connection.close()
+
+            if rows_affected > 0:
+                print(f"[Mailcow] Password updated via direct MySQL for {email}")
+                return True
+            else:
+                print(f"[Mailcow] No mailbox found for {email} in MySQL")
+                return False
+
+        except ImportError:
+            print("[Mailcow] pymysql not installed, skipping direct MySQL method")
+            return False
+        except Exception as e:
+            print(f"[Mailcow] Direct MySQL connection failed: {e}")
+            return False
+
+    async def _sync_password_ssh(self, email: str, password: str) -> bool:
+        """
+        Password sync via SSH to Mailcow server.
+        Fallback when direct MySQL connection is not available.
         """
         import subprocess
         import shlex
 
         # Check if SSH credentials are configured
         if not self.ssh_host or not self.ssh_key_path or not self.mysql_password:
-            print("Direct password sync not configured - SSH credentials missing")
+            print("[Mailcow] SSH credentials not configured")
+            return False
+
+        # Check if SSH key exists
+        import os
+        if not os.path.exists(self.ssh_key_path):
+            print(f"[Mailcow] SSH key not found at {self.ssh_key_path}")
             return False
 
         try:
@@ -159,6 +248,7 @@ class MailcowService:
 
             result = subprocess.run(ssh_cmd, shell=True, capture_output=True, text=True, timeout=30)
             if result.returncode != 0:
+                print(f"[Mailcow] SSH hash generation failed: {result.stderr}")
                 return False
 
             password_hash = result.stdout.strip()
@@ -168,10 +258,15 @@ class MailcowService:
             ssh_update = f"ssh -i {shlex.quote(self.ssh_key_path)} -o StrictHostKeyChecking=no {self.ssh_user}@{self.ssh_host} {shlex.quote(update_cmd)}"
 
             result = subprocess.run(ssh_update, shell=True, capture_output=True, text=True, timeout=30)
-            return result.returncode == 0
+            if result.returncode == 0:
+                print(f"[Mailcow] Password updated via SSH for {email}")
+                return True
+            else:
+                print(f"[Mailcow] SSH update failed: {result.stderr}")
+                return False
 
         except Exception as e:
-            print(f"Direct password sync failed: {e}")
+            print(f"[Mailcow] SSH password sync failed: {e}")
             return False
 
     def get_inbox(self, email: str, password: str, folder: str = "INBOX", limit: int = 50) -> List[Dict[str, Any]]:

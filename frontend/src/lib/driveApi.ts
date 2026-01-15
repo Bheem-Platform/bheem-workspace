@@ -406,6 +406,180 @@ export async function emptyTrash(): Promise<void> {
   }
 }
 
+// Activity
+export interface DriveActivity {
+  id: string;
+  file_id: string;
+  file_name: string;
+  action: string;
+  actor_name: string;
+  actor_email: string;
+  created_at: string;
+  details?: Record<string, any>;
+}
+
+export async function getActivity(limit: number = 50): Promise<DriveActivity[]> {
+  const response = await fetch(`${API_BASE}/activity?limit=${limit}`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to get activity');
+  }
+
+  return response.json();
+}
+
+// Home (Quick Access)
+export async function getHomeFiles(): Promise<DriveFile[]> {
+  const response = await fetch(`${API_BASE}/home`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to get home files');
+  }
+
+  return response.json();
+}
+
+// Workspace Files
+export async function getWorkspaceFiles(): Promise<DriveFile[]> {
+  const response = await fetch(`${API_BASE}/workspace`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to get workspace files');
+  }
+
+  return response.json();
+}
+
+// Shared with me
+export async function getSharedWithMe(): Promise<DriveFile[]> {
+  const response = await fetch(`${API_BASE}/shared-with-me`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to get shared files');
+  }
+
+  return response.json();
+}
+
+// Spam
+export async function getSpamFiles(): Promise<DriveFile[]> {
+  const response = await fetch(`${API_BASE}/spam`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to get spam files');
+  }
+
+  return response.json();
+}
+
+// Shared Drives
+export interface SharedDrive {
+  id: string;
+  name: string;
+  description?: string;
+  created_by: string;
+  created_at: string;
+  member_count?: number;
+}
+
+export async function getSharedDrives(): Promise<SharedDrive[]> {
+  const response = await fetch(`${API_BASE}/shared-drives`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to get shared drives');
+  }
+
+  return response.json();
+}
+
+export async function getSharedDriveContents(driveId: string): Promise<DriveFile[]> {
+  const response = await fetch(`${API_BASE}/shared-drives/${driveId}/contents`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to get shared drive contents');
+  }
+
+  return response.json();
+}
+
+// Advanced Filtering
+export interface AdvancedFilterParams {
+  type?: string; // folder, document, spreadsheet, presentation, pdf, image, video, audio, archive
+  people?: string; // me, not-me
+  modified?: string; // today, yesterday, week, month, year
+  location?: string; // my-drive, shared-with-me, starred, trash
+  search?: string;
+  sort_by?: string;
+  sort_order?: 'asc' | 'desc';
+  skip?: number;
+  limit?: number;
+}
+
+export async function listFilesAdvanced(params: AdvancedFilterParams = {}): Promise<DriveFile[]> {
+  const queryParams = new URLSearchParams();
+
+  if (params.type) queryParams.append('type', params.type);
+  if (params.people) queryParams.append('people', params.people);
+  if (params.modified) queryParams.append('modified', params.modified);
+  if (params.location) queryParams.append('location', params.location);
+  if (params.search) queryParams.append('search', params.search);
+  if (params.sort_by) queryParams.append('sort_by', params.sort_by);
+  if (params.sort_order) queryParams.append('sort_order', params.sort_order);
+  if (params.skip !== undefined) queryParams.append('skip', String(params.skip));
+  if (params.limit !== undefined) queryParams.append('limit', String(params.limit));
+
+  const url = `${API_BASE}/files/search${queryParams.toString() ? '?' + queryParams.toString() : ''}`;
+
+  const response = await fetch(url, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to search files');
+  }
+
+  return response.json();
+}
+
+// Categories (file type summary)
+export interface DriveCategories {
+  documents: number;
+  spreadsheets: number;
+  presentations: number;
+  pdfs: number;
+  images: number;
+  videos: number;
+  audio: number;
+  archives: number;
+  others: number;
+}
+
+export async function getCategories(): Promise<DriveCategories> {
+  const response = await fetch(`${API_BASE}/categories`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to get categories');
+  }
+
+  return response.json();
+}
+
 // Helpers
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 Bytes';

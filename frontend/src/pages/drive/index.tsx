@@ -8,25 +8,22 @@ import { useRouter } from 'next/router';
 import { useDropzone } from 'react-dropzone';
 import {
   Upload,
-  FolderPlus,
-  Grid,
-  List,
   Search,
   ChevronRight,
-  HardDrive,
-  Clock,
-  Star,
-  Trash2,
-  Settings,
-  Plus,
-  FileUp,
-  FolderUp,
+  Grid,
+  List,
   SortAsc,
   SortDesc,
-  MoreHorizontal,
+  Trash2,
+  Settings,
+  Info,
+  LayoutGrid,
+  LayoutList,
 } from 'lucide-react';
 
-import AppSwitcher from '@/components/shared/AppSwitcher';
+import AppSwitcherBar from '@/components/shared/AppSwitcherBar';
+import DriveSidebar from '@/components/drive/DriveSidebar';
+import DriveFilterBar, { FilterState } from '@/components/drive/DriveFilterBar';
 import FileGrid from '@/components/drive/FileGrid';
 import {
   CreateFolderModal,
@@ -37,7 +34,6 @@ import {
 } from '@/components/drive/DriveModals';
 import { useDriveStore } from '@/stores/driveStore';
 import { useRequireAuth } from '@/stores/authStore';
-import { formatFileSize } from '@/lib/driveApi';
 import type { DriveFile } from '@/lib/driveApi';
 
 export default function DrivePage() {
@@ -58,12 +54,7 @@ export default function DrivePage() {
     error,
     uploadQueue,
     isUploading,
-    storageUsed,
-    storageTotal,
     fetchFiles,
-    fetchRecentFiles,
-    fetchStarredFiles,
-    fetchTrashFiles,
     navigateToFolder,
     uploadFiles,
     deleteFiles,
@@ -72,17 +63,16 @@ export default function DrivePage() {
     setSortBy,
     setSortOrder,
     setSearchQuery,
-    setActiveFilter,
     selectAll,
     clearSelection,
     clearError,
     openCreateFolderModal,
     fetchStorageUsage,
+    setAdvancedFilters,
+    advancedFilters,
   } = useDriveStore();
 
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showUploadModal, setShowUploadModal] = useState(false);
-  const [showNewMenu, setShowNewMenu] = useState(false);
   const [showSortMenu, setShowSortMenu] = useState(false);
 
   // Fetch files on mount
@@ -110,7 +100,6 @@ export default function DrivePage() {
   });
 
   const handleFileOpen = (file: DriveFile) => {
-    // Open file in appropriate viewer/editor
     if (file.mime_type?.includes('document') || file.mime_type?.includes('word')) {
       router.push(`/docs/editor/${file.id}`);
     } else if (file.mime_type?.includes('spreadsheet') || file.mime_type?.includes('excel')) {
@@ -122,21 +111,7 @@ export default function DrivePage() {
     } else if (file.mime_type?.includes('pdf')) {
       window.open(`/api/v1/drive/files/${file.id}/preview`, '_blank');
     } else {
-      // Download other files
       window.open(`/api/v1/drive/files/${file.id}/download`, '_blank');
-    }
-  };
-
-  const handleSidebarNav = (filter: 'all' | 'recent' | 'starred' | 'trash') => {
-    if (filter === 'all') {
-      setActiveFilter('all');
-      navigateToFolder(null);
-    } else if (filter === 'recent') {
-      fetchRecentFiles();
-    } else if (filter === 'starred') {
-      fetchStarredFiles();
-    } else if (filter === 'trash') {
-      fetchTrashFiles();
     }
   };
 
@@ -146,14 +121,41 @@ export default function DrivePage() {
     }
   };
 
-  // Calculate storage percentage
-  const storagePercentage = storageTotal > 0 ? (storageUsed / storageTotal) * 100 : 0;
+  const handleFilterChange = (newFilters: FilterState) => {
+    setAdvancedFilters(newFilters);
+  };
+
+  const getPageTitle = () => {
+    switch (activeFilter) {
+      case 'home':
+        return 'Home';
+      case 'activity':
+        return 'Activity';
+      case 'workspace':
+        return 'Workspace';
+      case 'recent':
+        return 'Recent';
+      case 'starred':
+        return 'Starred';
+      case 'shared-with-me':
+        return 'Shared with me';
+      case 'spam':
+        return 'Spam';
+      case 'trash':
+        return 'Trash';
+      default:
+        return 'My Drive';
+    }
+  };
 
   // Show loading while checking auth
   if (authLoading) {
     return (
       <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500" />
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto" />
+          <p className="mt-4 text-gray-600">Loading Drive...</p>
+        </div>
       </div>
     );
   }
@@ -161,12 +163,12 @@ export default function DrivePage() {
   return (
     <>
       <Head>
-        <title>Drive | Bheem</title>
+        <title>{getPageTitle()} | Bheem Drive</title>
       </Head>
 
       <div
         {...getRootProps()}
-        className={`min-h-screen flex bg-gray-50 ${isDragActive ? 'bg-blue-50' : ''}`}
+        className={`h-screen bg-gray-50 ${isDragActive ? 'bg-blue-50' : ''}`}
       >
         <input {...getInputProps()} />
 
@@ -180,335 +182,264 @@ export default function DrivePage() {
           </div>
         )}
 
-        {/* App Switcher */}
-        <AppSwitcher
-          activeApp="drive"
-          collapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-        />
+        {/* App Switcher Bar (60px) */}
+        <AppSwitcherBar activeApp="drive" />
 
-        {/* Drive Sidebar */}
-        <aside
-          className="fixed top-0 bg-white border-r border-gray-200 h-screen overflow-y-auto transition-all duration-300 z-10"
-          style={{
-            left: sidebarCollapsed ? 64 : 240,
-            width: 240,
-          }}
-        >
-          <div className="p-4">
-            {/* New Button */}
-            <div className="relative mb-6">
-              <button
-                onClick={() => setShowNewMenu(!showNewMenu)}
-                className="w-full flex items-center gap-3 px-6 py-3 bg-white border border-gray-300 rounded-2xl shadow-sm hover:shadow-md transition-shadow text-gray-700 font-medium"
-              >
-                <Plus size={24} className="text-gray-600" />
-                <span>New</span>
-              </button>
-
-              {showNewMenu && (
-                <>
-                  <div className="fixed inset-0 z-10" onClick={() => setShowNewMenu(false)} />
-                  <div className="absolute left-0 top-full mt-2 w-56 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-20">
-                    <button
-                      onClick={() => {
-                        openCreateFolderModal();
-                        setShowNewMenu(false);
-                      }}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 text-left"
-                    >
-                      <FolderPlus size={20} className="text-gray-500" />
-                      <span>New folder</span>
-                    </button>
-                    <hr className="my-2" />
-                    <button
-                      onClick={() => {
-                        setShowUploadModal(true);
-                        setShowNewMenu(false);
-                      }}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 text-left"
-                    >
-                      <FileUp size={20} className="text-gray-500" />
-                      <span>File upload</span>
-                    </button>
-                    <button
-                      onClick={() => {
-                        setShowUploadModal(true);
-                        setShowNewMenu(false);
-                      }}
-                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-gray-50 text-left"
-                    >
-                      <FolderUp size={20} className="text-gray-500" />
-                      <span>Folder upload</span>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Navigation */}
-            <nav className="space-y-1">
-              <button
-                onClick={() => handleSidebarNav('all')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-full text-left transition-colors ${
-                  activeFilter === 'all'
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'text-gray-700 hover:bg-gray-100'
-                }`}
-              >
-                <HardDrive size={20} />
-                <span className="font-medium">My Drive</span>
-              </button>
-
-              <button
-                onClick={() => handleSidebarNav('recent')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-full text-left transition-colors ${
-                  activeFilter === 'recent'
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'text-gray-700 hover:bg-gray-100'
-                }`}
-              >
-                <Clock size={20} />
-                <span>Recent</span>
-              </button>
-
-              <button
-                onClick={() => handleSidebarNav('starred')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-full text-left transition-colors ${
-                  activeFilter === 'starred'
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'text-gray-700 hover:bg-gray-100'
-                }`}
-              >
-                <Star size={20} />
-                <span>Starred</span>
-              </button>
-
-              <button
-                onClick={() => handleSidebarNav('trash')}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-full text-left transition-colors ${
-                  activeFilter === 'trash'
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'text-gray-700 hover:bg-gray-100'
-                }`}
-              >
-                <Trash2 size={20} />
-                <span>Trash</span>
-              </button>
-            </nav>
-
-            {/* Storage */}
-            <div className="mt-8 pt-6 border-t border-gray-200">
-              <div className="flex items-center gap-2 mb-2">
-                <HardDrive size={18} className="text-gray-400" />
-                <span className="text-sm text-gray-600">Storage</span>
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-1.5 mb-2">
-                <div
-                  className={`h-1.5 rounded-full transition-all ${
-                    storagePercentage > 90 ? 'bg-red-500' : storagePercentage > 70 ? 'bg-yellow-500' : 'bg-blue-500'
-                  }`}
-                  style={{ width: `${Math.min(storagePercentage, 100)}%` }}
-                />
-              </div>
-              <p className="text-xs text-gray-500">
-                {formatFileSize(storageUsed)} of {formatFileSize(storageTotal)} used
-              </p>
-            </div>
+        {/* Main Layout */}
+        <div className="flex h-[calc(100vh-60px)] pt-[60px]">
+          {/* Drive Sidebar */}
+          <div className="fixed left-[60px] top-[60px] h-[calc(100vh-60px)] z-10">
+            <DriveSidebar
+              onNewFolder={openCreateFolderModal}
+              onUpload={() => setShowUploadModal(true)}
+            />
           </div>
-        </aside>
 
-        {/* Main Content */}
-        <div
-          className="flex-1 transition-all duration-300"
-          style={{ marginLeft: sidebarCollapsed ? 64 + 240 : 240 + 240 }}
-        >
-          <div className="max-w-7xl mx-auto px-6 py-6">
-            {/* Header */}
-            <div className="flex items-center justify-between mb-6">
-              {/* Breadcrumb */}
-              <div className="flex items-center gap-1 text-gray-600">
-                {breadcrumb.map((item, index) => (
-                  <div key={item.id || 'root'} className="flex items-center">
-                    {index > 0 && <ChevronRight size={16} className="mx-1 text-gray-400" />}
-                    <button
-                      onClick={() => navigateToFolder(item.id, item.name)}
-                      className={`px-2 py-1 rounded hover:bg-gray-100 ${
-                        index === breadcrumb.length - 1
-                          ? 'text-gray-900 font-medium'
-                          : 'text-gray-600'
-                      }`}
-                    >
-                      {item.name}
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              {/* Actions */}
-              <div className="flex items-center gap-3">
-                {/* Search */}
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                  <input
-                    type="text"
-                    placeholder="Search in Drive"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-10 pr-4 py-2 bg-gray-100 rounded-full border-0 focus:ring-2 focus:ring-blue-500 text-sm w-72"
-                  />
-                </div>
-
-                {/* View Toggle */}
-                <div className="flex bg-gray-100 rounded-lg p-1">
-                  <button
-                    onClick={() => setViewMode('grid')}
-                    className={`p-1.5 rounded transition-colors ${
-                      viewMode === 'grid' ? 'bg-white shadow-sm' : ''
-                    }`}
-                  >
-                    <Grid
-                      size={18}
-                      className={viewMode === 'grid' ? 'text-blue-500' : 'text-gray-500'}
-                    />
-                  </button>
-                  <button
-                    onClick={() => setViewMode('list')}
-                    className={`p-1.5 rounded transition-colors ${
-                      viewMode === 'list' ? 'bg-white shadow-sm' : ''
-                    }`}
-                  >
-                    <List
-                      size={18}
-                      className={viewMode === 'list' ? 'text-blue-500' : 'text-gray-500'}
-                    />
-                  </button>
-                </div>
-
-                {/* Sort */}
-                <div className="relative">
-                  <button
-                    onClick={() => setShowSortMenu(!showSortMenu)}
-                    className="p-2 hover:bg-gray-100 rounded-lg"
-                  >
-                    {sortOrder === 'asc' ? <SortAsc size={18} /> : <SortDesc size={18} />}
-                  </button>
-
-                  {showSortMenu && (
-                    <>
-                      <div className="fixed inset-0 z-10" onClick={() => setShowSortMenu(false)} />
-                      <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20">
-                        {['name', 'created_at', 'updated_at', 'size'].map((field) => (
+          {/* Main Content */}
+          <main className="flex-1 ml-[324px] overflow-y-auto">
+            <div className="max-w-7xl mx-auto px-6 py-4">
+              {/* Header */}
+              <div className="flex items-center justify-between mb-2">
+                {/* Title / Breadcrumb */}
+                <div className="flex items-center gap-2">
+                  {activeFilter === 'all' && breadcrumb.length > 1 ? (
+                    <div className="flex items-center gap-1 text-gray-600">
+                      {breadcrumb.map((item, index) => (
+                        <div key={item.id || 'root'} className="flex items-center">
+                          {index > 0 && (
+                            <ChevronRight size={16} className="mx-1 text-gray-400" />
+                          )}
                           <button
-                            key={field}
-                            onClick={() => {
-                              if (sortBy === field) {
-                                setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-                              } else {
-                                setSortBy(field as any);
-                                setSortOrder('asc');
-                              }
-                              setShowSortMenu(false);
-                            }}
-                            className={`w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-gray-50 ${
-                              sortBy === field ? 'text-blue-600' : 'text-gray-700'
+                            onClick={() => navigateToFolder(item.id, item.name)}
+                            className={`px-2 py-1 rounded hover:bg-gray-100 ${
+                              index === breadcrumb.length - 1
+                                ? 'text-gray-900 font-semibold text-xl'
+                                : 'text-gray-600'
                             }`}
                           >
-                            <span className="capitalize">{field.replace('_', ' ')}</span>
-                            {sortBy === field && (
-                              sortOrder === 'asc' ? <SortAsc size={14} /> : <SortDesc size={14} />
-                            )}
+                            {item.name}
                           </button>
-                        ))}
-                      </div>
-                    </>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <h1 className="text-2xl font-semibold text-gray-900">{getPageTitle()}</h1>
                   )}
                 </div>
-              </div>
-            </div>
 
-            {/* Error Banner */}
-            {error && (
-              <div className="mb-6 px-4 py-3 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between">
-                <span className="text-sm text-red-700">{error}</span>
-                <button
-                  onClick={clearError}
-                  className="text-red-500 hover:text-red-700 text-sm font-medium"
-                >
-                  Dismiss
-                </button>
-              </div>
-            )}
+                {/* Actions */}
+                <div className="flex items-center gap-3">
+                  {/* Search */}
+                  <div className="relative">
+                    <Search
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                      size={18}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Search in Drive"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-10 pr-4 py-2 bg-gray-100 rounded-full border-0 focus:ring-2 focus:ring-blue-500 focus:bg-white text-sm w-80 transition-all"
+                    />
+                  </div>
 
-            {/* Bulk Actions Bar */}
-            {selectedFiles.length > 0 && (
-              <div className="mb-4 px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <span className="text-sm text-blue-700 font-medium">
-                    {selectedFiles.length} selected
-                  </span>
-                  <button
-                    onClick={handleBulkDelete}
-                    className="flex items-center gap-1 px-3 py-1.5 text-red-600 hover:bg-red-50 rounded-lg text-sm"
-                  >
-                    <Trash2 size={16} />
-                    {activeFilter === 'trash' ? 'Delete permanently' : 'Move to trash'}
+                  {/* View Toggle */}
+                  <div className="flex bg-gray-100 rounded-lg p-1">
+                    <button
+                      onClick={() => setViewMode('grid')}
+                      className={`p-2 rounded transition-colors ${
+                        viewMode === 'grid' ? 'bg-white shadow-sm' : ''
+                      }`}
+                      title="Grid view"
+                    >
+                      <LayoutGrid
+                        size={18}
+                        className={viewMode === 'grid' ? 'text-blue-600' : 'text-gray-500'}
+                      />
+                    </button>
+                    <button
+                      onClick={() => setViewMode('list')}
+                      className={`p-2 rounded transition-colors ${
+                        viewMode === 'list' ? 'bg-white shadow-sm' : ''
+                      }`}
+                      title="List view"
+                    >
+                      <LayoutList
+                        size={18}
+                        className={viewMode === 'list' ? 'text-blue-600' : 'text-gray-500'}
+                      />
+                    </button>
+                  </div>
+
+                  {/* Sort */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowSortMenu(!showSortMenu)}
+                      className="p-2 hover:bg-gray-100 rounded-lg"
+                      title="Sort options"
+                    >
+                      {sortOrder === 'asc' ? (
+                        <SortAsc size={18} className="text-gray-600" />
+                      ) : (
+                        <SortDesc size={18} className="text-gray-600" />
+                      )}
+                    </button>
+
+                    {showSortMenu && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-10"
+                          onClick={() => setShowSortMenu(false)}
+                        />
+                        <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20">
+                          {['name', 'created_at', 'updated_at', 'size'].map((field) => (
+                            <button
+                              key={field}
+                              onClick={() => {
+                                if (sortBy === field) {
+                                  setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+                                } else {
+                                  setSortBy(field as any);
+                                  setSortOrder('asc');
+                                }
+                                setShowSortMenu(false);
+                              }}
+                              className={`w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-gray-50 ${
+                                sortBy === field ? 'text-blue-600 bg-blue-50' : 'text-gray-700'
+                              }`}
+                            >
+                              <span className="capitalize">{field.replace('_', ' ')}</span>
+                              {sortBy === field &&
+                                (sortOrder === 'asc' ? (
+                                  <SortAsc size={14} />
+                                ) : (
+                                  <SortDesc size={14} />
+                                ))}
+                            </button>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Info */}
+                  <button className="p-2 hover:bg-gray-100 rounded-lg" title="Details">
+                    <Info size={18} className="text-gray-600" />
                   </button>
                 </div>
-                <button
-                  onClick={clearSelection}
-                  className="text-sm text-blue-600 hover:text-blue-800"
-                >
-                  Clear selection
-                </button>
               </div>
-            )}
 
-            {/* Trash actions */}
-            {activeFilter === 'trash' && files.length > 0 && (
-              <div className="mb-4 flex justify-end">
-                <button
-                  onClick={emptyTrash}
-                  className="flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg text-sm font-medium"
-                >
-                  <Trash2 size={16} />
-                  Empty trash
-                </button>
-              </div>
-            )}
+              {/* Filter Bar */}
+              <DriveFilterBar onFilterChange={handleFilterChange} activeFilters={advancedFilters} />
 
-            {/* Upload Progress */}
-            {isUploading && uploadQueue.length > 0 && (
-              <div className="mb-6 bg-white rounded-xl border border-gray-200 p-4">
-                <h3 className="text-sm font-medium text-gray-700 mb-3">
-                  Uploading {uploadQueue.length} file(s)...
-                </h3>
-                <div className="space-y-2">
-                  {uploadQueue.map((item) => (
-                    <div key={item.id} className="flex items-center gap-3">
-                      <div className="flex-1">
-                        <p className="text-sm text-gray-900 truncate">{item.filename}</p>
-                        <div className="mt-1 w-full bg-gray-200 rounded-full h-1.5">
-                          <div
-                            className={`h-1.5 rounded-full transition-all ${
-                              item.status === 'error' ? 'bg-red-500' : 'bg-blue-500'
-                            }`}
-                            style={{ width: `${item.progress}%` }}
-                          />
-                        </div>
-                      </div>
-                      <span className="text-xs text-gray-500">
-                        {item.status === 'error' ? 'Failed' : `${item.progress}%`}
-                      </span>
-                    </div>
-                  ))}
+              {/* Error Banner */}
+              {error && (
+                <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 rounded-lg flex items-center justify-between">
+                  <span className="text-sm text-red-700">{error}</span>
+                  <button
+                    onClick={clearError}
+                    className="text-red-500 hover:text-red-700 text-sm font-medium"
+                  >
+                    Dismiss
+                  </button>
                 </div>
-              </div>
-            )}
+              )}
 
-            {/* Files Grid/List */}
-            <FileGrid onFileOpen={handleFileOpen} />
-          </div>
+              {/* Bulk Actions Bar */}
+              {selectedFiles.length > 0 && (
+                <div className="mb-4 px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <span className="text-sm text-blue-700 font-medium">
+                      {selectedFiles.length} selected
+                    </span>
+                    <button
+                      onClick={handleBulkDelete}
+                      className="flex items-center gap-1 px-3 py-1.5 text-red-600 hover:bg-red-50 rounded-lg text-sm"
+                    >
+                      <Trash2 size={16} />
+                      {activeFilter === 'trash' ? 'Delete permanently' : 'Move to trash'}
+                    </button>
+                  </div>
+                  <button
+                    onClick={clearSelection}
+                    className="text-sm text-blue-600 hover:text-blue-800"
+                  >
+                    Clear selection
+                  </button>
+                </div>
+              )}
+
+              {/* Trash actions */}
+              {activeFilter === 'trash' && files.length > 0 && (
+                <div className="mb-4 flex justify-end">
+                  <button
+                    onClick={emptyTrash}
+                    className="flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg text-sm font-medium"
+                  >
+                    <Trash2 size={16} />
+                    Empty trash
+                  </button>
+                </div>
+              )}
+
+              {/* Upload Progress */}
+              {isUploading && uploadQueue.length > 0 && (
+                <div className="mb-6 bg-white rounded-xl border border-gray-200 p-4 shadow-sm">
+                  <h3 className="text-sm font-medium text-gray-700 mb-3">
+                    Uploading {uploadQueue.length} file(s)...
+                  </h3>
+                  <div className="space-y-2">
+                    {uploadQueue.map((item) => (
+                      <div key={item.id} className="flex items-center gap-3">
+                        <div className="flex-1">
+                          <p className="text-sm text-gray-900 truncate">{item.filename}</p>
+                          <div className="mt-1 w-full bg-gray-200 rounded-full h-1.5">
+                            <div
+                              className={`h-1.5 rounded-full transition-all ${
+                                item.status === 'error' ? 'bg-red-500' : 'bg-blue-500'
+                              }`}
+                              style={{ width: `${item.progress}%` }}
+                            />
+                          </div>
+                        </div>
+                        <span className="text-xs text-gray-500">
+                          {item.status === 'error' ? 'Failed' : `${item.progress}%`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Home View - Quick Access */}
+              {activeFilter === 'home' && (
+                <div className="mb-6">
+                  <h2 className="text-lg font-medium text-gray-900 mb-4">Quick Access</h2>
+                  <div className="grid grid-cols-4 gap-4">
+                    {/* Quick access items would go here */}
+                    <div className="p-4 bg-white rounded-xl border border-gray-200 hover:shadow-md transition-shadow cursor-pointer">
+                      <p className="text-sm text-gray-500">No recent files</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Activity View */}
+              {activeFilter === 'activity' && (
+                <div className="mb-6">
+                  <div className="bg-white rounded-xl border border-gray-200 p-6">
+                    <p className="text-gray-500 text-center">Activity feed coming soon</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Files Grid/List */}
+              {activeFilter !== 'home' && activeFilter !== 'activity' && (
+                <FileGrid onFileOpen={handleFileOpen} />
+              )}
+            </div>
+          </main>
         </div>
 
         {/* Modals */}
