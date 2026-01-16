@@ -258,6 +258,90 @@ class EmailTemplate(Base):
 
 
 # =============================================
+# Task Lists (Google Tasks-like)
+# =============================================
+
+class TaskList(Base):
+    """User task lists (My Tasks, custom lists)"""
+    __tablename__ = "task_lists"
+    __table_args__ = (
+        Index('idx_task_lists_user', 'user_id'),
+        Index('idx_task_lists_tenant', 'tenant_id'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tenants.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+
+    # List info
+    name = Column(String(255), nullable=False)
+    color = Column(String(20), default='#4285f4')
+    icon = Column(String(50), default='list')
+    is_default = Column(Boolean, default=False)  # "My Tasks" list
+    sort_order = Column(Integer, default=0)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    tasks = relationship("Task", back_populates="task_list", cascade="all, delete-orphan")
+
+
+class Task(Base):
+    """Individual tasks"""
+    __tablename__ = "tasks"
+    __table_args__ = (
+        Index('idx_tasks_user', 'user_id'),
+        Index('idx_tasks_list', 'task_list_id'),
+        Index('idx_tasks_status', 'status'),
+        Index('idx_tasks_due', 'due_date'),
+        Index('idx_tasks_starred', 'is_starred'),
+        Index('idx_tasks_erp', 'erp_task_id'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tenants.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+    task_list_id = Column(UUID(as_uuid=True), ForeignKey("workspace.task_lists.id", ondelete="CASCADE"))
+
+    # Task info
+    title = Column(String(500), nullable=False)
+    notes = Column(Text)
+    due_date = Column(DateTime)
+    due_time = Column(String(5))  # HH:MM
+
+    # Status
+    status = Column(String(20), default='needsAction')  # needsAction, completed
+    completed_at = Column(DateTime)
+
+    # Organization
+    is_starred = Column(Boolean, default=False)
+    priority = Column(String(20), default='normal')  # low, normal, high
+    sort_order = Column(Integer, default=0)
+
+    # Parent task (for subtasks)
+    parent_task_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tasks.id", ondelete="CASCADE"))
+
+    # ERP Integration (for project tasks)
+    erp_task_id = Column(String(100))  # Link to ERP project task
+    erp_project_id = Column(String(100))
+    source = Column(String(20), default='personal')  # personal, erp
+
+    # Related calendar event
+    calendar_event_id = Column(String(255))
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    task_list = relationship("TaskList", back_populates="tasks")
+
+
+# =============================================
 # Search Index
 # =============================================
 

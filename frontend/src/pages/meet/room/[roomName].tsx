@@ -3,6 +3,7 @@ import { useRouter } from 'next/router';
 import Head from 'next/head';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
+import { GetServerSideProps } from 'next';
 import PreJoinScreen from '@/components/meet/PreJoinScreen';
 import ChatPanel from '@/components/meet/ChatPanel';
 import ParticipantsPanel from '@/components/meet/ParticipantsPanel';
@@ -15,6 +16,15 @@ import RecordingIndicator from '@/components/meet/RecordingIndicator';
 import { useMeetStore } from '@/stores/meetStore';
 import { useAuthStore } from '@/stores/authStore';
 import type { ChatMessage } from '@/types/meet';
+
+// Server-side props for Open Graph meta tags
+interface MeetingRoomProps {
+  roomCode: string;
+  meetingTitle: string;
+  meetingDescription: string;
+  ogImageUrl: string;
+  baseUrl: string;
+}
 
 // Dynamically import LiveKit components to avoid SSR issues
 const LiveKitComponents = dynamic(
@@ -32,9 +42,22 @@ const LiveKitComponents = dynamic(
   }
 );
 
-export default function MeetingRoom() {
+export default function MeetingRoom({
+  roomCode: serverRoomCode,
+  meetingTitle: serverMeetingTitle,
+  meetingDescription,
+  ogImageUrl,
+  baseUrl
+}: MeetingRoomProps) {
   const router = useRouter();
   const { roomName } = router.query;
+
+  // Use server-provided values for SEO, fall back to client values
+  const pageRoomCode = serverRoomCode || (roomName as string);
+  const pageTitle = serverMeetingTitle || 'Bheem Meet';
+  const pageDescription = meetingDescription || 'Join video meeting on Bheem Meet - Secure video conferencing for teams';
+  const pageUrl = `${baseUrl}/meet/room/${pageRoomCode}`;
+  const pageImage = ogImageUrl || `${baseUrl}/images/meet-og-preview.png`;
 
   const { user, isLoading: isAuthLoading } = useAuthStore();
   const {
@@ -407,33 +430,65 @@ export default function MeetingRoom() {
     console.log('Auth loading, hasToken:', hasToken);
 
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="text-center"
-        >
-          <div className="w-16 h-16 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-6" />
-          <p className="text-white text-lg">Loading...</p>
-        </motion.div>
-      </div>
+      <>
+        <Head>
+          <title>{pageTitle} | Bheem Meet</title>
+          <meta name="description" content={pageDescription} />
+          <meta property="og:type" content="website" />
+          <meta property="og:url" content={pageUrl} />
+          <meta property="og:title" content={`${pageTitle} | Join Meeting`} />
+          <meta property="og:description" content={pageDescription} />
+          <meta property="og:image" content={pageImage} />
+          <meta property="og:image:width" content="1200" />
+          <meta property="og:image:height" content="630" />
+          <meta property="og:site_name" content="Bheem Meet" />
+          <meta name="twitter:card" content="summary_large_image" />
+          <meta name="twitter:title" content={`${pageTitle} | Join Meeting`} />
+          <meta name="twitter:description" content={pageDescription} />
+          <meta name="twitter:image" content={pageImage} />
+        </Head>
+        <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-center"
+          >
+            <div className="w-16 h-16 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-6" />
+            <p className="text-white text-lg">Loading...</p>
+          </motion.div>
+        </div>
+      </>
     );
   }
 
   // Show auto-rejoin loading screen
   if (isAutoRejoining) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="text-center"
-        >
-          <div className="w-16 h-16 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-6" />
-          <p className="text-white text-lg">Reconnecting to meeting...</p>
-          <p className="text-gray-400 text-sm mt-2">Please wait while we restore your session</p>
-        </motion.div>
-      </div>
+      <>
+        <Head>
+          <title>{pageTitle} | Bheem Meet</title>
+          <meta name="description" content={pageDescription} />
+          <meta property="og:type" content="website" />
+          <meta property="og:url" content={pageUrl} />
+          <meta property="og:title" content={`${pageTitle} | Join Meeting`} />
+          <meta property="og:description" content={pageDescription} />
+          <meta property="og:image" content={pageImage} />
+          <meta property="og:site_name" content="Bheem Meet" />
+          <meta name="twitter:card" content="summary_large_image" />
+          <meta name="twitter:image" content={pageImage} />
+        </Head>
+        <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-center"
+          >
+            <div className="w-16 h-16 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-6" />
+            <p className="text-white text-lg">Reconnecting to meeting...</p>
+            <p className="text-gray-400 text-sm mt-2">Please wait while we restore your session</p>
+          </motion.div>
+        </div>
+      </>
     );
   }
 
@@ -477,7 +532,29 @@ export default function MeetingRoom() {
     return (
       <>
         <Head>
-          <title>Join Meeting | Bheem Meet</title>
+          <title>{pageTitle} | Join Meeting - Bheem Meet</title>
+          <meta name="description" content={pageDescription} />
+
+          {/* Open Graph / Facebook */}
+          <meta property="og:type" content="website" />
+          <meta property="og:url" content={pageUrl} />
+          <meta property="og:title" content={`${pageTitle} | Join Meeting`} />
+          <meta property="og:description" content={pageDescription} />
+          <meta property="og:image" content={pageImage} />
+          <meta property="og:image:width" content="1200" />
+          <meta property="og:image:height" content="630" />
+          <meta property="og:site_name" content="Bheem Meet" />
+
+          {/* Twitter */}
+          <meta name="twitter:card" content="summary_large_image" />
+          <meta name="twitter:url" content={pageUrl} />
+          <meta name="twitter:title" content={`${pageTitle} | Join Meeting`} />
+          <meta name="twitter:description" content={pageDescription} />
+          <meta name="twitter:image" content={pageImage} />
+
+          {/* Additional meta */}
+          <meta name="theme-color" content="#10B981" />
+          <link rel="canonical" href={pageUrl} />
         </Head>
         <PreJoinScreen
           roomCode={roomName as string}
@@ -493,43 +570,61 @@ export default function MeetingRoom() {
   // Show error
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="text-center max-w-md mx-auto p-8 bg-gray-800 rounded-3xl border border-gray-700"
-        >
-          <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-            <span className="text-3xl text-red-400">!</span>
-          </div>
-          <h2 className="text-xl font-semibold text-white mb-3">
-            Unable to join meeting
-          </h2>
-          <p className="text-gray-400 mb-8">{error}</p>
-          <button
-            onClick={() => router.push('/meet')}
-            className="px-8 py-3 bg-emerald-500 text-white font-medium rounded-xl hover:bg-emerald-600 transition-colors"
+      <>
+        <Head>
+          <title>{pageTitle} | Bheem Meet</title>
+          <meta property="og:title" content={`${pageTitle} | Join Meeting`} />
+          <meta property="og:description" content={pageDescription} />
+          <meta property="og:image" content={pageImage} />
+          <meta property="og:site_name" content="Bheem Meet" />
+        </Head>
+        <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="text-center max-w-md mx-auto p-8 bg-gray-800 rounded-3xl border border-gray-700"
           >
-            Back to Meetings
-          </button>
-        </motion.div>
-      </div>
+            <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
+              <span className="text-3xl text-red-400">!</span>
+            </div>
+            <h2 className="text-xl font-semibold text-white mb-3">
+              Unable to join meeting
+            </h2>
+            <p className="text-gray-400 mb-8">{error}</p>
+            <button
+              onClick={() => router.push('/meet')}
+              className="px-8 py-3 bg-emerald-500 text-white font-medium rounded-xl hover:bg-emerald-600 transition-colors"
+            >
+              Back to Meetings
+            </button>
+          </motion.div>
+        </div>
+      </>
     );
   }
 
   // Show loading
   if (loading.joining) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="text-center"
-        >
-          <div className="w-16 h-16 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-6" />
-          <p className="text-white text-lg">Joining meeting...</p>
-        </motion.div>
-      </div>
+      <>
+        <Head>
+          <title>{pageTitle} | Bheem Meet</title>
+          <meta property="og:title" content={`${pageTitle} | Join Meeting`} />
+          <meta property="og:description" content={pageDescription} />
+          <meta property="og:image" content={pageImage} />
+          <meta property="og:site_name" content="Bheem Meet" />
+        </Head>
+        <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="text-center"
+          >
+            <div className="w-16 h-16 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-6" />
+            <p className="text-white text-lg">Joining meeting...</p>
+          </motion.div>
+        </div>
+      </>
     );
   }
 
@@ -543,7 +638,29 @@ export default function MeetingRoom() {
   return (
     <>
       <Head>
-        <title>{meetingName || roomName} | Bheem Meet</title>
+        <title>{meetingName || pageTitle} | Bheem Meet</title>
+        <meta name="description" content={pageDescription} />
+
+        {/* Open Graph / Facebook */}
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content={pageUrl} />
+        <meta property="og:title" content={`${meetingName || pageTitle} | Bheem Meet`} />
+        <meta property="og:description" content={pageDescription} />
+        <meta property="og:image" content={pageImage} />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+        <meta property="og:site_name" content="Bheem Meet" />
+
+        {/* Twitter */}
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:url" content={pageUrl} />
+        <meta name="twitter:title" content={`${meetingName || pageTitle} | Bheem Meet`} />
+        <meta name="twitter:description" content={pageDescription} />
+        <meta name="twitter:image" content={pageImage} />
+
+        {/* Additional meta */}
+        <meta name="theme-color" content="#10B981" />
+        <link rel="canonical" href={pageUrl} />
       </Head>
 
       <div className="h-screen bg-gray-900 flex flex-col overflow-hidden">
@@ -755,3 +872,61 @@ export default function MeetingRoom() {
     </>
   );
 }
+
+// Server-side props for Open Graph meta tags (link previews)
+export const getServerSideProps: GetServerSideProps<MeetingRoomProps> = async (context) => {
+  const { roomName } = context.params || {};
+  const roomCode = roomName as string;
+
+  // Base URL for meta tags
+  const protocol = context.req.headers['x-forwarded-proto'] || 'https';
+  const host = context.req.headers['x-forwarded-host'] || context.req.headers.host || 'workspace.bheem.cloud';
+  const baseUrl = `${protocol}://${host}`;
+
+  // Default values
+  let meetingTitle = 'Video Meeting';
+  let meetingDescription = `Join this Bheem Meet video call. Meeting code: ${roomCode}. Click to join securely from any device.`;
+
+  // Try to fetch meeting info from backend
+  // Use internal URL for server-side requests (faster and more reliable)
+  const internalBackendUrl = process.env.INTERNAL_API_URL || 'http://localhost:8000/api/v1';
+  const publicBackendUrl = process.env.NEXT_PUBLIC_API_URL || `${baseUrl}/api/v1`;
+
+  // Try internal URL first (for same-server deployment), then public URL
+  const backendUrls = [internalBackendUrl, publicBackendUrl];
+
+  for (const backendUrl of backendUrls) {
+    try {
+      const response = await fetch(`${backendUrl}/meet/rooms/${roomCode}/info`, {
+        headers: { 'Content-Type': 'application/json' },
+        // Short timeout for SSR
+        signal: AbortSignal.timeout(3000),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.name) {
+          meetingTitle = data.name;
+          meetingDescription = `You're invited to join "${data.name}" on Bheem Meet. Meeting code: ${roomCode}. Secure video conferencing for teams.`;
+          break; // Successfully got data, stop trying
+        }
+      }
+    } catch (error) {
+      // Try next URL or use defaults
+      console.log(`Could not fetch from ${backendUrl}:`, error);
+    }
+  }
+
+  // OG Image - use a dynamic image or static fallback
+  const ogImageUrl = `${baseUrl}/api/og/meet?title=${encodeURIComponent(meetingTitle)}&code=${encodeURIComponent(roomCode)}`;
+
+  return {
+    props: {
+      roomCode,
+      meetingTitle,
+      meetingDescription,
+      ogImageUrl,
+      baseUrl,
+    },
+  };
+};

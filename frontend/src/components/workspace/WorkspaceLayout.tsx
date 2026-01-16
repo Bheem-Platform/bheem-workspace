@@ -23,6 +23,7 @@ import {
   MessageCircle,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
+import AppLauncher from '@/components/shared/AppLauncher';
 
 interface WorkspaceLayoutProps {
   children: ReactNode;
@@ -222,6 +223,9 @@ export default function WorkspaceLayout({ children, title }: WorkspaceLayoutProp
 
             {/* Right side actions */}
             <div className="flex items-center space-x-2 lg:space-x-3">
+              {/* App Launcher */}
+              <AppLauncher />
+
               {/* Notifications */}
               <button className="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">
                 <Bell size={20} />

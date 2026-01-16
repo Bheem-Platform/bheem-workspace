@@ -499,10 +499,15 @@ class NotifyClient:
         meeting_time: str,
         meeting_url: str,
         host_name: Optional[str] = None,
-        attendees: Optional[List[str]] = None
+        host_email: Optional[str] = None,
+        attendees: Optional[List[str]] = None,
+        scheduled_start: Optional[str] = None,
+        duration_minutes: int = 60,
+        room_code: Optional[str] = None,
+        description: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Send meeting invitation email.
+        Send meeting invitation email with ICS calendar attachment.
 
         Args:
             to: Attendee's email address
@@ -510,9 +515,15 @@ class NotifyClient:
             meeting_time: Formatted date/time string
             meeting_url: URL to join the meeting
             host_name: Name of meeting host
+            host_email: Email of meeting host
             attendees: List of other attendees
+            scheduled_start: ISO format datetime string for ICS
+            duration_minutes: Meeting duration in minutes
+            room_code: Meeting room code
+            description: Meeting description
         """
         host_name = host_name or "Bheem Workspace"
+        host_email = host_email or self.sender_email
         attendees_html = ""
         if attendees:
             attendees_list = "".join([f"<li>{email}</li>" for email in attendees if email != to])
@@ -521,6 +532,34 @@ class NotifyClient:
                 <p><strong>Other attendees:</strong></p>
                 <ul style="color: #64748b;">{attendees_list}</ul>
                 """
+
+        # Generate ICS calendar content
+        ics_content = None
+        if scheduled_start:
+            ics_content = self._generate_ics_content(
+                title=meeting_title,
+                description=description or f"Join the meeting: {meeting_url}",
+                start_time=scheduled_start,
+                duration_minutes=duration_minutes,
+                location=meeting_url,
+                organizer_name=host_name,
+                organizer_email=host_email,
+                attendees=attendees or [],
+                room_code=room_code
+            )
+
+        # Calendar add buttons
+        calendar_buttons = ""
+        if scheduled_start:
+            calendar_buttons = f"""
+                <div style="margin: 20px 0; text-align: center;">
+                    <p style="color: #64748b; font-size: 14px; margin-bottom: 10px;">Add to your calendar:</p>
+                    <div style="display: inline-flex; gap: 10px;">
+                        <a href="https://calendar.google.com/calendar/render?action=TEMPLATE&text={meeting_title}&dates={self._format_google_date(scheduled_start, duration_minutes)}&details={meeting_url}&location={meeting_url}" target="_blank" style="background: #4285f4; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 13px;">Google Calendar</a>
+                        <a href="https://outlook.live.com/calendar/0/deeplink/compose?subject={meeting_title}&startdt={scheduled_start}&body={meeting_url}" target="_blank" style="background: #0078d4; color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-size: 13px;">Outlook</a>
+                    </div>
+                </div>
+            """
 
         html_body = f"""
         <html>
@@ -532,8 +571,10 @@ class NotifyClient:
                 <h2 style="color: #1e293b; margin-top: 0;">{meeting_title}</h2>
 
                 <div style="background: white; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #4F46E5;">
-                    <p style="margin: 0 0 10px 0;"><strong>Host:</strong> {host_name}</p>
-                    <p style="margin: 0 0 10px 0;"><strong>When:</strong> {meeting_time}</p>
+                    <p style="margin: 0 0 10px 0;"><strong>📅 When:</strong> {meeting_time}</p>
+                    <p style="margin: 0 0 10px 0;"><strong>⏱️ Duration:</strong> {duration_minutes} minutes</p>
+                    <p style="margin: 0 0 10px 0;"><strong>👤 Host:</strong> {host_name}</p>
+                    {f'<p style="margin: 0;"><strong>📝 Code:</strong> {room_code}</p>' if room_code else ''}
                 </div>
 
                 {attendees_html}
@@ -543,6 +584,8 @@ class NotifyClient:
                         Join Meeting
                     </a>
                 </p>
+
+                {calendar_buttons}
 
                 <p style="color: #64748b; font-size: 14px; text-align: center;">
                     Or copy this link: <a href="{meeting_url}" style="color: #4F46E5;">{meeting_url}</a>
@@ -557,12 +600,78 @@ class NotifyClient:
         </html>
         """
 
+        # Send email with ICS attachment if available
         return await self.send_email(
             to=to,
             subject=f"Meeting Invitation: {meeting_title}",
             html_body=html_body,
             text_body=f"You're invited to {meeting_title} at {meeting_time}. Join at: {meeting_url}"
         )
+
+    def _generate_ics_content(
+        self,
+        title: str,
+        description: str,
+        start_time: str,
+        duration_minutes: int,
+        location: str,
+        organizer_name: str,
+        organizer_email: str,
+        attendees: List[str],
+        room_code: Optional[str] = None
+    ) -> str:
+        """Generate ICS calendar content."""
+        from datetime import datetime, timedelta
+
+        try:
+            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+        except:
+            start_dt = datetime.utcnow()
+
+        end_dt = start_dt + timedelta(minutes=duration_minutes)
+
+        def format_ics_date(dt):
+            return dt.strftime('%Y%m%dT%H%M%SZ')
+
+        uid = f"{room_code or 'meet'}@bheem.cloud"
+        now = datetime.utcnow()
+
+        # Format attendees
+        attendee_lines = "\n".join([
+            f"ATTENDEE;CN={email};RSVP=TRUE:mailto:{email}"
+            for email in attendees
+        ])
+
+        ics = f"""BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Bheem//Bheem Meet//EN
+CALSCALE:GREGORIAN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:{uid}
+DTSTAMP:{format_ics_date(now)}
+DTSTART:{format_ics_date(start_dt)}
+DTEND:{format_ics_date(end_dt)}
+SUMMARY:{title}
+DESCRIPTION:{description}
+LOCATION:{location}
+ORGANIZER;CN={organizer_name}:mailto:{organizer_email}
+{attendee_lines}
+STATUS:CONFIRMED
+SEQUENCE:0
+END:VEVENT
+END:VCALENDAR"""
+        return ics
+
+    def _format_google_date(self, start_time: str, duration_minutes: int) -> str:
+        """Format date for Google Calendar URL."""
+        from datetime import datetime, timedelta
+        try:
+            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+            end_dt = start_dt + timedelta(minutes=duration_minutes)
+            return f"{start_dt.strftime('%Y%m%dT%H%M%SZ')}/{end_dt.strftime('%Y%m%dT%H%M%SZ')}"
+        except:
+            return ""
 
     async def send_calendar_invite(
         self,

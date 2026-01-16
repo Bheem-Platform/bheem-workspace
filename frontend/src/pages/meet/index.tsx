@@ -13,6 +13,7 @@ import {
   Sparkles,
 } from 'lucide-react';
 import AppSwitcher from '@/components/shared/AppSwitcher';
+import AppLauncher from '@/components/shared/AppLauncher';
 import MeetingCard from '@/components/meet/MeetingCard';
 import QuickJoinInput from '@/components/meet/QuickJoinInput';
 import NewMeetingModal from '@/components/meet/NewMeetingModal';
@@ -129,6 +130,7 @@ export default function MeetPage() {
                   >
                     New Meeting
                   </MeetButton>
+                  <AppLauncher variant="dark" />
                   <button className="p-2 rounded-full hover:bg-gray-800 transition-colors">
                     <Settings size={20} className="text-gray-400" />
                   </button>

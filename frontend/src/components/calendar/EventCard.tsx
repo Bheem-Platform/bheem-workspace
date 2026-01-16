@@ -1,5 +1,5 @@
 import dayjs from 'dayjs';
-import { MapPin, Users, User, Briefcase, Target, Flag } from 'lucide-react';
+import { MapPin, Users, User, Briefcase, Target, Flag, Video, ExternalLink } from 'lucide-react';
 import type { CalendarEvent } from '@/types/calendar';
 
 interface EventCardProps {
@@ -27,6 +27,9 @@ function getEventColor(event: CalendarEvent): string {
 
 // Get icon based on event source and type
 function getEventIcon(event: CalendarEvent) {
+  if (event.eventSource === 'bheem_meet') {
+    return Video;
+  }
   if (event.eventSource === 'project') {
     switch (event.eventType) {
       case 'milestone': return Flag;
@@ -46,7 +49,10 @@ export default function EventCard({ event, onClick, compact = false }: EventCard
   if (compact) {
     return (
       <button
-        onClick={onClick}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick();
+        }}
         className="w-full text-left px-2 py-1 rounded text-xs font-medium truncate transition-opacity hover:opacity-80 flex items-center gap-1"
         style={{
           backgroundColor: eventColor,
@@ -61,7 +67,10 @@ export default function EventCard({ event, onClick, compact = false }: EventCard
 
   return (
     <button
-      onClick={onClick}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
       className="w-full text-left p-2 rounded-lg transition-all hover:shadow-md group"
       style={{
         backgroundColor: `${eventColor}15`,
@@ -91,7 +100,25 @@ export default function EventCard({ event, onClick, compact = false }: EventCard
         </div>
       </div>
 
-      {(event.location || (event.attendees && event.attendees.length > 0)) && (
+      {/* Bheem Meet - Show join button */}
+      {event.eventSource === 'bheem_meet' && (event.location || event.meetingLink) && (
+        <div className="mt-2">
+          <a
+            href={event.location || event.meetingLink}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1 px-2 py-1 bg-emerald-500 text-white text-xs font-medium rounded hover:bg-emerald-600 transition-colors"
+          >
+            <Video size={12} />
+            Join Meeting
+            <ExternalLink size={10} />
+          </a>
+        </div>
+      )}
+
+      {/* Location and attendees for non-meet events */}
+      {event.eventSource !== 'bheem_meet' && (event.location || (event.attendees && event.attendees.length > 0)) && (
         <div className="mt-2 space-y-1">
           {event.location && (
             <div className="flex items-center gap-1 text-xs text-gray-500">

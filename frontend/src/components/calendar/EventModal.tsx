@@ -11,6 +11,8 @@ import {
   Trash2,
   Briefcase,
   User,
+  Video,
+  ExternalLink,
 } from 'lucide-react';
 import { useCalendarStore } from '@/stores/calendarStore';
 import {
@@ -186,7 +188,11 @@ export default function EventModal({ isOpen, onClose }: EventModalProps) {
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <h2 className="text-lg font-semibold text-gray-900">
-            {isEditMode ? 'Edit Event' : 'Create Event'}
+            {isEditMode
+              ? selectedEvent?.eventSource === 'bheem_meet'
+                ? 'Meeting Details'
+                : 'Edit Event'
+              : 'Create Event'}
           </h2>
           <button
             onClick={onClose}
@@ -198,6 +204,13 @@ export default function EventModal({ isOpen, onClose }: EventModalProps) {
 
         {/* Form */}
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-6 space-y-5">
+          {/* Read-only notice for Bheem Meet events */}
+          {isEditMode && selectedEvent?.eventSource === 'bheem_meet' && (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800">
+              This is a Bheem Meet event. To edit or cancel, please use the Bheem Meet app.
+            </div>
+          )}
+
           {/* Title */}
           <div>
             <input
@@ -207,6 +220,7 @@ export default function EventModal({ isOpen, onClose }: EventModalProps) {
               placeholder="Add title"
               className="w-full text-xl font-medium border-0 border-b-2 border-gray-200 pb-2 focus:border-blue-500 focus:ring-0 outline-none transition-colors"
               autoFocus
+              readOnly={isEditMode && selectedEvent?.eventSource === 'bheem_meet'}
             />
           </div>
 
@@ -280,20 +294,53 @@ export default function EventModal({ isOpen, onClose }: EventModalProps) {
 
           {/* Show event source badge in edit mode */}
           {isEditMode && selectedEvent?.eventSource && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span
                 className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium"
                 style={{
-                  backgroundColor: selectedEvent.eventSource === 'personal' ? '#dbeafe' : '#dcfce7',
-                  color: selectedEvent.eventSource === 'personal' ? '#1d4ed8' : '#166534',
+                  backgroundColor: selectedEvent.eventSource === 'bheem_meet' ? '#d1fae5' :
+                                   selectedEvent.eventSource === 'personal' ? '#dbeafe' : '#dcfce7',
+                  color: selectedEvent.eventSource === 'bheem_meet' ? '#047857' :
+                         selectedEvent.eventSource === 'personal' ? '#1d4ed8' : '#166534',
                 }}
               >
-                {selectedEvent.eventSource === 'personal' ? (
+                {selectedEvent.eventSource === 'bheem_meet' ? (
+                  <><Video size={12} /> Bheem Meet</>
+                ) : selectedEvent.eventSource === 'personal' ? (
                   <><User size={12} /> Personal</>
                 ) : (
                   <><Briefcase size={12} /> Project{selectedEvent.projectName ? `: ${selectedEvent.projectName}` : ''}</>
                 )}
               </span>
+            </div>
+          )}
+
+          {/* Bheem Meet - Join Meeting Button */}
+          {isEditMode && selectedEvent?.eventSource === 'bheem_meet' && (selectedEvent.location || selectedEvent.meetingLink) && (
+            <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-emerald-500 rounded-lg flex items-center justify-center">
+                    <Video size={20} className="text-white" />
+                  </div>
+                  <div>
+                    <p className="font-medium text-emerald-900">Video Meeting</p>
+                    <p className="text-sm text-emerald-600 truncate max-w-[200px]">
+                      {selectedEvent.location || selectedEvent.meetingLink}
+                    </p>
+                  </div>
+                </div>
+                <a
+                  href={selectedEvent.location || selectedEvent.meetingLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white font-medium rounded-lg hover:bg-emerald-600 transition-colors"
+                >
+                  <Video size={16} />
+                  Join Meeting
+                  <ExternalLink size={14} />
+                </a>
+              </div>
             </div>
           )}
 
@@ -460,7 +507,7 @@ export default function EventModal({ isOpen, onClose }: EventModalProps) {
 
         {/* Footer */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-gray-200 bg-gray-50">
-          {isEditMode ? (
+          {isEditMode && selectedEvent?.eventSource !== 'bheem_meet' ? (
             <button
               type="button"
               onClick={handleDelete}
@@ -485,15 +532,18 @@ export default function EventModal({ isOpen, onClose }: EventModalProps) {
               onClick={onClose}
               className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
             >
-              Cancel
+              {isEditMode && selectedEvent?.eventSource === 'bheem_meet' ? 'Close' : 'Cancel'}
             </button>
-            <button
-              onClick={handleSubmit}
-              disabled={loading.action || !title.trim()}
-              className="px-6 py-2 bg-blue-500 text-white font-medium rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {loading.action ? 'Saving...' : isEditMode ? 'Save' : 'Create'}
-            </button>
+            {/* Hide save button for Bheem Meet events (read-only) */}
+            {!(isEditMode && selectedEvent?.eventSource === 'bheem_meet') && (
+              <button
+                onClick={handleSubmit}
+                disabled={loading.action || !title.trim()}
+                className="px-6 py-2 bg-blue-500 text-white font-medium rounded-lg hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {loading.action ? 'Saving...' : isEditMode ? 'Save' : 'Create'}
+              </button>
+            )}
           </div>
         </div>
       </div>

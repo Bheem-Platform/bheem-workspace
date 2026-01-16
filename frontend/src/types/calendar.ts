@@ -2,12 +2,13 @@
 // Combines Personal (Nextcloud) + Project (ERP) events
 
 // Event source types for unified calendar
-export type EventSource = 'personal' | 'project';
+export type EventSource = 'personal' | 'project' | 'bheem_meet';
 export type ERPEventType = 'meeting' | 'task' | 'milestone' | 'reminder';
 
 // Source color coding
 export const EVENT_SOURCE_COLORS = {
   personal: '#3b82f6',      // Blue - Personal events (Nextcloud)
+  bheem_meet: '#10B981',    // Emerald - Bheem Meet video calls
   meeting: '#22c55e',       // Green - Project meetings (ERP)
   task: '#f97316',          // Orange - Project tasks (ERP)
   milestone: '#ef4444',     // Red - Project milestones (ERP)

@@ -25,6 +25,9 @@ import {
 } from 'lucide-react';
 import { useRequireAuth } from '@/stores/authStore';
 import { api } from '@/lib/api';
+import AppSwitcherBar from '@/components/shared/AppSwitcherBar';
+import AppLauncher from '@/components/shared/AppLauncher';
+import DocsSidebar from '@/components/docs/DocsSidebar';
 
 interface Spreadsheet {
   id: string;
@@ -151,47 +154,56 @@ export default function SheetsPage() {
         <title>Bheem Sheets - Spreadsheets</title>
       </Head>
 
-      <div className="min-h-screen bg-gray-50">
-        {/* Header */}
-        <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between h-16">
-              <div className="flex items-center space-x-4">
-                <Link href="/dashboard" className="flex items-center space-x-2">
-                  <FileSpreadsheet className="h-8 w-8 text-green-600" />
-                  <span className="text-xl font-semibold text-gray-900">Bheem Sheets</span>
-                </Link>
-              </div>
+      <div className="min-h-screen bg-gray-50 flex">
+        {/* App Switcher Bar */}
+        <AppSwitcherBar activeApp="docs" />
 
-              {/* Search */}
-              <div className="flex-1 max-w-2xl mx-8">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-                  <input
-                    type="text"
-                    placeholder="Search spreadsheets..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 bg-gray-100 border border-transparent rounded-lg focus:bg-white focus:border-green-500 focus:ring-1 focus:ring-green-500"
-                  />
+        {/* Docs Sidebar */}
+        <div className="fixed left-[60px] top-0 bottom-0 w-[240px] z-40">
+          <DocsSidebar activeType="sheets" />
+        </div>
+
+        {/* Main Content */}
+        <div className="flex-1 ml-[300px]">
+          {/* Header */}
+          <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
+            <div className="px-6">
+              <div className="flex items-center justify-between h-16">
+                <div className="flex items-center space-x-4">
+                  <FileSpreadsheet className="h-8 w-8 text-green-600" />
+                  <span className="text-xl font-semibold text-gray-900">Spreadsheets</span>
+                </div>
+
+                {/* Search */}
+                <div className="flex-1 max-w-xl mx-8">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+                    <input
+                      type="text"
+                      placeholder="Search spreadsheets..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 bg-gray-100 border border-transparent rounded-lg focus:bg-white focus:border-green-500 focus:ring-1 focus:ring-green-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
+                    className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
+                    title={viewMode === 'grid' ? 'List view' : 'Grid view'}
+                  >
+                    {viewMode === 'grid' ? <List size={20} /> : <Grid size={20} />}
+                  </button>
+                  <AppLauncher />
                 </div>
               </div>
-
-              {/* Actions */}
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
-                  className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
-                  title={viewMode === 'grid' ? 'List view' : 'Grid view'}
-                >
-                  {viewMode === 'grid' ? <List size={20} /> : <Grid size={20} />}
-                </button>
-              </div>
             </div>
-          </div>
-        </header>
+          </header>
 
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <main className="px-6 py-8">
           {/* Create New Section */}
           <section className="mb-8">
             <h2 className="text-sm font-medium text-gray-500 mb-4">Start a new spreadsheet</h2>
@@ -419,47 +431,48 @@ export default function SheetsPage() {
               </table>
             </div>
           )}
-        </main>
+          </main>
 
-        {/* Context Menu */}
-        {contextMenu && (
-          <>
-            <div
-              className="fixed inset-0 z-50"
-              onClick={() => setContextMenu(null)}
-            />
-            <div
-              className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-48"
-              style={{ left: contextMenu.x, top: contextMenu.y }}
-            >
-              <button
-                onClick={() => duplicateSpreadsheet(contextMenu.id)}
-                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+          {/* Context Menu */}
+          {contextMenu && (
+            <>
+              <div
+                className="fixed inset-0 z-50"
+                onClick={() => setContextMenu(null)}
+              />
+              <div
+                className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-48"
+                style={{ left: contextMenu.x, top: contextMenu.y }}
               >
-                <Copy size={16} />
-                <span>Make a copy</span>
-              </button>
-              <button
-                onClick={() => {
-                  setContextMenu(null);
-                  // Share modal would go here
-                }}
-                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
-              >
-                <Share2 size={16} />
-                <span>Share</span>
-              </button>
-              <hr className="my-1" />
-              <button
-                onClick={() => deleteSpreadsheet(contextMenu.id)}
-                className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center space-x-2"
-              >
-                <Trash2 size={16} />
-                <span>Remove</span>
-              </button>
-            </div>
-          </>
-        )}
+                <button
+                  onClick={() => duplicateSpreadsheet(contextMenu.id)}
+                  className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+                >
+                  <Copy size={16} />
+                  <span>Make a copy</span>
+                </button>
+                <button
+                  onClick={() => {
+                    setContextMenu(null);
+                    // Share modal would go here
+                  }}
+                  className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+                >
+                  <Share2 size={16} />
+                  <span>Share</span>
+                </button>
+                <hr className="my-1" />
+                <button
+                  onClick={() => deleteSpreadsheet(contextMenu.id)}
+                  className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center space-x-2"
+                >
+                  <Trash2 size={16} />
+                  <span>Remove</span>
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </>
   );

@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useMailStore } from '@/stores/mailStore';
+import AppLauncher from '@/components/shared/AppLauncher';
 
 interface MailHeaderProps {
   onSearch?: (query: string) => void;
@@ -116,6 +117,9 @@ export default function MailHeader({
 
       {/* Right side - Actions */}
       <div className="flex items-center gap-2">
+        {/* App Launcher */}
+        <AppLauncher variant="dark" />
+
         {/* View Mode Toggle */}
         <button
           onClick={onToggleViewMode}

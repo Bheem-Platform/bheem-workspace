@@ -415,6 +415,97 @@ class FormShare(Base):
 
 
 # =============================================
+# Bheem Videos Models
+# =============================================
+
+class VideoStatus(str, enum.Enum):
+    UPLOADING = "uploading"
+    PROCESSING = "processing"
+    READY = "ready"
+    ERROR = "error"
+
+
+class Video(Base):
+    """Video - for storing and managing video content"""
+    __tablename__ = "videos"
+    __table_args__ = (
+        Index('idx_videos_tenant', 'tenant_id'),
+        Index('idx_videos_owner', 'created_by'),
+        Index('idx_videos_status', 'status'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tenants.id", ondelete="CASCADE"), nullable=False)
+    title = Column(String(255), nullable=False)
+    description = Column(Text)
+    folder_id = Column(UUID(as_uuid=True))
+
+    # Video file info
+    file_path = Column(Text)  # Storage path
+    file_size = Column(Integer)  # Size in bytes
+    duration = Column(Integer)  # Duration in seconds
+    format = Column(String(50))  # mp4, webm, etc.
+    resolution = Column(String(20))  # 1920x1080, etc.
+
+    # Thumbnails
+    thumbnail_url = Column(Text)
+
+    # Processing status
+    status = Column(String(20), default='uploading')  # uploading, processing, ready, error
+    processing_progress = Column(Integer, default=0)  # 0-100
+    error_message = Column(Text)
+
+    # Playback settings
+    settings = Column(JSONB, default={
+        "autoplay": False,
+        "loop": False,
+        "muted": False,
+        "allow_download": True,
+        "privacy": "private"  # private, unlisted, public
+    })
+
+    # Status
+    is_starred = Column(Boolean, default=False)
+    is_deleted = Column(Boolean, default=False)
+    deleted_at = Column(DateTime)
+
+    # Stats
+    view_count = Column(Integer, default=0)
+
+    # Metadata
+    created_by = Column(UUID(as_uuid=True), ForeignKey("workspace.tenant_users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    shares = relationship("VideoShare", back_populates="video", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<Video(id={self.id}, title={self.title}, status={self.status})>"
+
+
+class VideoShare(Base):
+    """Sharing permissions for videos"""
+    __tablename__ = "video_shares"
+    __table_args__ = (
+        Index('idx_video_shares_user', 'user_id'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    video_id = Column(UUID(as_uuid=True), ForeignKey("workspace.videos.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tenant_users.id", ondelete="CASCADE"), nullable=False)
+    permission = Column(String(20), nullable=False, default='view')  # view, edit
+
+    created_by = Column(UUID(as_uuid=True))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    video = relationship("Video", back_populates="shares")
+
+
+# =============================================
 # Content Folders (shared across apps)
 # =============================================
 

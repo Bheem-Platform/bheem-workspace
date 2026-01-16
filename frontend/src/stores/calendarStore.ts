@@ -11,6 +11,19 @@ import type {
 } from '@/types/calendar';
 import type { Project } from '@/lib/calendarApi';
 
+// Helper to extract error message from API response
+function getErrorMessage(error: any, fallback: string): string {
+  const detail = error?.response?.data?.detail;
+  if (!detail) return fallback;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    // Pydantic validation errors - extract messages
+    return detail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join(', ');
+  }
+  if (typeof detail === 'object' && detail.message) return detail.message;
+  return fallback;
+}
+
 interface CalendarState {
   // Data
   calendars: Calendar[];
@@ -125,11 +138,11 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         visibleCalendarIds: mappedCalendars.map((c) => c.id),
       });
     } catch (error: any) {
-      const detail = error.response?.data?.detail;
-      if (detail?.includes('credentials required') || detail?.includes('login to Mail')) {
+      const errorMsg = getErrorMessage(error, 'Failed to fetch calendars');
+      if (errorMsg.includes('credentials required') || errorMsg.includes('login to Mail')) {
         set({ error: 'Please login to Mail first to access your calendar.' });
       } else {
-        set({ error: detail || 'Failed to fetch calendars' });
+        set({ error: errorMsg });
       }
     } finally {
       set((state) => ({ loading: { ...state.loading, calendars: false } }));
@@ -176,9 +189,10 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         uid: e.uid || e.id,
         title: e.title || e.summary || 'Untitled',
         description: e.description || '',
-        location: e.location || '',
+        location: e.location || e.conference_url || '',
         start: e.start,
         end: e.end || e.start,
+        meetingLink: e.conference_url || e.location || '',
         allDay: e.all_day || false,
         calendarId: e.calendar_id || 'personal',
         color: e.source_color || e.color || '#3b82f6',  // Use source color if available
@@ -212,11 +226,11 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
 
       set({ events: mappedEvents });
     } catch (error: any) {
-      const detail = error.response?.data?.detail;
-      if (detail?.includes('credentials required') || detail?.includes('login to Mail')) {
+      const errorMsg = getErrorMessage(error, 'Failed to fetch events');
+      if (errorMsg.includes('credentials required') || errorMsg.includes('login to Mail')) {
         set({ error: 'Please login to Mail first to access your calendar.' });
       } else {
-        set({ error: detail || 'Failed to fetch events' });
+        set({ error: errorMsg });
       }
     } finally {
       set((state) => ({ loading: { ...state.loading, events: false } }));
@@ -254,7 +268,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       set({ isEventModalOpen: false, eventFormData: {} });
       return true;
     } catch (error: any) {
-      set({ error: error.response?.data?.detail || 'Failed to create event' });
+      set({ error: getErrorMessage(error, 'Failed to create event') });
       return false;
     } finally {
       set((state) => ({ loading: { ...state.loading, action: false } }));
@@ -277,7 +291,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
       set({ isEventModalOpen: false, eventFormData: {}, isEditMode: false });
       return true;
     } catch (error: any) {
-      set({ error: error.response?.data?.detail || 'Failed to update event' });
+      set({ error: getErrorMessage(error, 'Failed to update event') });
       return false;
     } finally {
       set((state) => ({ loading: { ...state.loading, action: false } }));
@@ -301,7 +315,7 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
         selectedEvent: state.selectedEvent?.uid === uid ? null : state.selectedEvent,
       }));
     } catch (error: any) {
-      set({ error: error.response?.data?.detail || 'Failed to delete event' });
+      set({ error: getErrorMessage(error, 'Failed to delete event') });
     } finally {
       set((state) => ({ loading: { ...state.loading, action: false } }));
     }
@@ -416,7 +430,12 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
   getEventsForDate: (date: Date) => {
     const { events, visibleCalendarIds } = get();
     return events.filter((event) => {
-      if (!visibleCalendarIds.includes(event.calendarId)) return false;
+      // If no calendars are loaded yet, show all events (especially Bheem Meet)
+      // Also always show bheem_meet events
+      const isVisible = visibleCalendarIds.length === 0 ||
+                        visibleCalendarIds.includes(event.calendarId) ||
+                        event.eventSource === 'bheem_meet';
+      if (!isVisible) return false;
       return calendarApi.isEventOnDate(event, date);
     });
   },
@@ -427,7 +446,12 @@ export const useCalendarStore = create<CalendarState>((set, get) => ({
     const weekEnd = dayjs(currentDate).endOf('week');
 
     return events.filter((event) => {
-      if (!visibleCalendarIds.includes(event.calendarId)) return false;
+      // If no calendars are loaded yet, show all events (especially Bheem Meet)
+      // Also always show bheem_meet events
+      const isVisible = visibleCalendarIds.length === 0 ||
+                        visibleCalendarIds.includes(event.calendarId) ||
+                        event.eventSource === 'bheem_meet';
+      if (!isVisible) return false;
       const eventStart = dayjs(event.start);
       const eventEnd = dayjs(event.end);
       return eventStart.isBefore(weekEnd) && eventEnd.isAfter(weekStart);

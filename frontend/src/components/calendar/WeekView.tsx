@@ -25,9 +25,13 @@ export default function WeekView({ onEventClick, onTimeSlotClick }: WeekViewProp
 
   const today = dayjs().startOf('day');
 
-  // Filter visible events
+  // Filter visible events - include bheem_meet events even if calendar not selected
   const visibleEvents = useMemo(() => {
-    return events.filter((e) => visibleCalendarIds.includes(e.calendarId));
+    return events.filter((e) =>
+      visibleCalendarIds.length === 0 ||
+      visibleCalendarIds.includes(e.calendarId) ||
+      e.eventSource === 'bheem_meet'
+    );
   }, [events, visibleCalendarIds]);
 
   // Separate all-day events from timed events

@@ -108,7 +108,9 @@ async def create_room(
     invites_sent = []
     if request.send_invites and request.participants:
         host_name = current_user.get("username", "Host")
-        meeting_time = request.scheduled_time.strftime("%B %d, %Y at %I:%M %p") if request.scheduled_time else "Now"
+        host_email = current_user.get("email")
+        meeting_time = request.scheduled_time.strftime("%B %d, %Y at %I:%M %p") if request.scheduled_time else "Starting now"
+        scheduled_start_iso = request.scheduled_time.isoformat() if request.scheduled_time else None
 
         for participant_email in request.participants:
             try:
@@ -118,12 +120,35 @@ async def create_room(
                     meeting_time=meeting_time,
                     meeting_url=join_url,
                     host_name=host_name,
-                    attendees=request.participants
+                    host_email=host_email,
+                    attendees=request.participants,
+                    scheduled_start=scheduled_start_iso,
+                    duration_minutes=request.duration_minutes or 60,
+                    room_code=room_code,
+                    description=request.description
                 )
                 if not result.get("error"):
                     invites_sent.append(participant_email)
             except Exception as e:
                 print(f"Failed to send meeting invite to {participant_email}: {e}")
+
+    # Create calendar event for scheduled meetings
+    if request.scheduled_time:
+        try:
+            # Create calendar event for host
+            await _create_meeting_calendar_event(
+                db=db,
+                user_id=current_user.get("id"),
+                meeting_title=request.name,
+                meeting_description=request.description or f"Join at: {join_url}",
+                scheduled_start=request.scheduled_time,
+                duration_minutes=request.duration_minutes or 60,
+                meeting_url=join_url,
+                room_code=room_code,
+                attendees=request.participants or []
+            )
+        except Exception as e:
+            print(f"Failed to create calendar event: {e}")
 
     response = CreateRoomResponse(
         room_id=room_id,
@@ -280,6 +305,51 @@ async def get_room(
             "join_url": livekit_service.get_join_url(room_code),
             "ws_url": livekit_service.get_ws_url()
         }
+
+@router.get("/rooms/{room_code}/info")
+async def get_room_info_public(
+    room_code: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get public room info for Open Graph meta tags (no auth required).
+    Used for link previews when sharing meeting links.
+    """
+    try:
+        result = await db.execute(
+            text("""
+                SELECT room_name, host_name, scheduled_start, max_participants
+                FROM workspace.meet_rooms
+                WHERE room_code = :room_code
+            """),
+            {"room_code": room_code}
+        )
+        room = result.fetchone()
+
+        if not room:
+            return {
+                "room_code": room_code,
+                "name": "Video Meeting",
+                "host_name": None,
+                "scheduled_time": None,
+            }
+
+        return {
+            "room_code": room_code,
+            "name": room.room_name or "Video Meeting",
+            "host_name": room.host_name,
+            "scheduled_time": room.scheduled_start,
+            "max_participants": room.max_participants
+        }
+    except Exception as e:
+        print(f"Error getting public room info: {e}")
+        return {
+            "room_code": room_code,
+            "name": "Video Meeting",
+            "host_name": None,
+            "scheduled_time": None,
+        }
+
 
 @router.post("/rooms/{room_code}/end")
 async def end_room(
@@ -821,3 +891,128 @@ async def export_attendance(
                 for a in report.attendees
             ]
         }
+
+
+# =============================================================================
+# Calendar Integration Helper
+# =============================================================================
+
+async def _create_meeting_calendar_event(
+    db: AsyncSession,
+    user_id: str,
+    meeting_title: str,
+    meeting_description: str,
+    scheduled_start: datetime,
+    duration_minutes: int,
+    meeting_url: str,
+    room_code: str,
+    attendees: List[str]
+) -> Optional[str]:
+    """
+    Create a calendar event for a scheduled meeting.
+
+    This adds the meeting to the user's Bheem Calendar automatically,
+    similar to how Google Calendar creates events for Google Meet.
+
+    Args:
+        db: Database session
+        user_id: ID of the meeting host
+        meeting_title: Title of the meeting
+        meeting_description: Description/notes
+        scheduled_start: When the meeting starts
+        duration_minutes: Duration in minutes
+        meeting_url: URL to join the meeting
+        room_code: Meeting room code
+        attendees: List of attendee email addresses
+
+    Returns:
+        Event ID if created, None otherwise
+    """
+    from datetime import timedelta
+
+    event_id = str(uuid.uuid4())
+    event_uid = f"meet-{room_code}@bheem.cloud"
+    scheduled_end = scheduled_start + timedelta(minutes=duration_minutes)
+
+    # Format attendees as JSON array
+    attendees_json = ",".join([f'"{email}"' for email in attendees]) if attendees else ""
+
+    try:
+        # First, check if user has a primary calendar - create one if not
+        result = await db.execute(
+            text("""
+                SELECT id FROM workspace.calendars
+                WHERE user_id = CAST(:user_id AS uuid) AND is_primary = TRUE
+                LIMIT 1
+            """),
+            {"user_id": user_id}
+        )
+        calendar = result.fetchone()
+
+        if not calendar:
+            # Create a primary calendar for the user
+            calendar_id = str(uuid.uuid4())
+            await db.execute(
+                text("""
+                    INSERT INTO workspace.calendars (id, user_id, name, is_primary, color, timezone, created_at, updated_at)
+                    VALUES (:calendar_id, CAST(:user_id AS uuid), 'Primary', TRUE, '#4F46E5', 'UTC', NOW(), NOW())
+                    ON CONFLICT (user_id, name) DO UPDATE SET is_primary = TRUE
+                    RETURNING id
+                """),
+                {"calendar_id": calendar_id, "user_id": user_id}
+            )
+            await db.commit()
+            print(f"Created primary calendar for user {user_id}: {calendar_id}")
+        else:
+            calendar_id = str(calendar.id)
+
+        # Insert event into calendar_events table
+        await db.execute(
+            text("""
+                INSERT INTO workspace.calendar_events
+                (id, uid, calendar_id, user_id, summary, description, location,
+                 start_time, end_time, all_day, status, visibility,
+                 conference_type, conference_url, conference_data,
+                 created_at, updated_at)
+                VALUES (
+                    :event_id,
+                    :event_uid,
+                    CAST(:calendar_id AS uuid),
+                    CAST(:user_id AS uuid),
+                    :summary,
+                    :description,
+                    :location,
+                    :start_time,
+                    :end_time,
+                    FALSE,
+                    'confirmed',
+                    'default',
+                    'bheem_meet',
+                    :conference_url,
+                    :conference_data,
+                    NOW(),
+                    NOW()
+                )
+            """),
+            {
+                "event_id": event_id,
+                "event_uid": event_uid,
+                "calendar_id": calendar_id,
+                "user_id": user_id,
+                "summary": meeting_title,
+                "description": f"{meeting_description}\n\nMeeting Code: {room_code}",
+                "location": meeting_url,
+                "start_time": scheduled_start,
+                "end_time": scheduled_end,
+                "conference_url": meeting_url,
+                "conference_data": f'{{"type": "bheem_meet", "room_code": "{room_code}", "join_url": "{meeting_url}"}}'
+            }
+        )
+        await db.commit()
+        print(f"Calendar event created for meeting {room_code}: {event_id}")
+        return event_id
+
+    except Exception as e:
+        print(f"Failed to create calendar event: {e}")
+        # Don't fail the meeting creation if calendar fails
+        return None

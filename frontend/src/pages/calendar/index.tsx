@@ -8,10 +8,16 @@ import WeekView from '@/components/calendar/WeekView';
 import DayView from '@/components/calendar/DayView';
 import MonthView from '@/components/calendar/MonthView';
 import EventModal from '@/components/calendar/EventModal';
+import TasksPanel from '@/components/calendar/TasksPanel';
+import BookingPagesPanel from '@/components/calendar/BookingPagesPanel';
+import MeetSection from '@/components/calendar/MeetSection';
 import { useCalendarStore } from '@/stores/calendarStore';
 import { useCredentialsStore } from '@/stores/credentialsStore';
 import { useRequireAuth } from '@/stores/authStore';
 import type { CalendarEvent } from '@/types/calendar';
+import { Calendar as CalendarIcon, CheckSquare, Link2, Video } from 'lucide-react';
+
+type CalendarTab = 'calendar' | 'tasks' | 'booking';
 
 export default function CalendarPage() {
   const { isAuthenticated: isLoggedIn, isLoading: authLoading } = useRequireAuth();
@@ -35,16 +41,20 @@ export default function CalendarPage() {
 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showMailLoginPrompt, setShowMailLoginPrompt] = useState(false);
+  const [activeTab, setActiveTab] = useState<CalendarTab>('calendar');
+  const [showMeetPanel, setShowMeetPanel] = useState(false);
 
   // Fetch calendars and events on mount
-  // Calendar now uses mail session automatically - no separate Nextcloud login needed
+  // Always fetch events - Bheem Meet events work without mail auth
+  // Personal calendar (Nextcloud) requires mail session
   useEffect(() => {
     if (!authLoading && isLoggedIn) {
-      if (!isMailAuthenticated) {
-        setShowMailLoginPrompt(true);
-      } else {
+      // Always fetch events - Bheem Meet events don't require mail auth
+      fetchEvents();
+
+      // Fetch calendars if mail is authenticated
+      if (isMailAuthenticated) {
         fetchCalendars();
-        fetchEvents();
       }
     }
   }, [authLoading, isLoggedIn, isMailAuthenticated]);
@@ -85,15 +95,8 @@ export default function CalendarPage() {
     );
   }
 
-  // Show mail login prompt if not authenticated with mail
-  // Calendar uses the same credentials as Mail - no separate login needed
-  if (showMailLoginPrompt) {
-    return <MailLoginPrompt onSuccess={() => {
-      setShowMailLoginPrompt(false);
-      fetchCalendars();
-      fetchEvents();
-    }} />;
-  }
+  // Note: We no longer block the calendar if mail is not authenticated
+  // Bheem Meet events will show; personal calendar just won't be available
 
   const renderCalendarView = () => {
     switch (viewType) {
@@ -154,37 +157,105 @@ export default function CalendarPage() {
           style={{ marginLeft: sidebarCollapsed ? 64 : 240 }}
         >
           {/* Calendar Sidebar */}
-          <div className="w-64 flex-shrink-0 border-r border-gray-200">
-            <CalendarSidebar onCreateEvent={() => openEventModal()} />
+          <div className="w-64 flex-shrink-0 border-r border-gray-200 flex flex-col">
+            {/* Meet Button */}
+            <div className="p-4 border-b border-gray-200">
+              <button
+                onClick={() => setShowMeetPanel(!showMeetPanel)}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border-2 border-blue-500 text-blue-600 rounded-xl hover:bg-blue-50 transition-all font-medium"
+              >
+                <Video size={20} />
+                <span>Meet</span>
+              </button>
+            </div>
+
+            {/* Meet Panel or Calendar Sidebar */}
+            {showMeetPanel ? (
+              <MeetSection onClose={() => setShowMeetPanel(false)} />
+            ) : (
+              <CalendarSidebar onCreateEvent={() => openEventModal()} />
+            )}
           </div>
 
-          {/* Calendar Content */}
+          {/* Main Content Area */}
           <div className="flex-1 flex flex-col min-w-0">
-            {/* Header */}
-            <CalendarHeader />
-
-            {/* Error Banner */}
-            {error && (
-              <div className="px-6 py-3 bg-red-50 border-b border-red-200 flex items-center justify-between">
-                <span className="text-sm text-red-700">{error}</span>
+            {/* Tabs */}
+            <div className="bg-white border-b border-gray-200">
+              <div className="flex items-center gap-1 px-4 pt-3">
                 <button
-                  onClick={clearError}
-                  className="text-red-500 hover:text-red-700 text-sm font-medium"
+                  onClick={() => setActiveTab('calendar')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-t-lg font-medium text-sm transition-colors ${
+                    activeTab === 'calendar'
+                      ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600'
+                      : 'text-gray-600 hover:bg-gray-50'
+                  }`}
                 >
-                  Dismiss
+                  <CalendarIcon size={18} />
+                  <span>Calendar</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('tasks')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-t-lg font-medium text-sm transition-colors ${
+                    activeTab === 'tasks'
+                      ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600'
+                      : 'text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  <CheckSquare size={18} />
+                  <span>Tasks</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('booking')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-t-lg font-medium text-sm transition-colors ${
+                    activeTab === 'booking'
+                      ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600'
+                      : 'text-gray-600 hover:bg-gray-50'
+                  }`}
+                >
+                  <Link2 size={18} />
+                  <span>Booking Pages</span>
                 </button>
               </div>
+            </div>
+
+            {/* Tab Content */}
+            {activeTab === 'calendar' && (
+              <>
+                {/* Header */}
+                <CalendarHeader />
+
+                {/* Error Banner */}
+                {error && (
+                  <div className="px-6 py-3 bg-red-50 border-b border-red-200 flex items-center justify-between">
+                    <span className="text-sm text-red-700">{error}</span>
+                    <button
+                      onClick={clearError}
+                      className="text-red-500 hover:text-red-700 text-sm font-medium"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+
+                {/* Loading Overlay */}
+                {(loading.calendars || loading.events) && (
+                  <div className="px-6 py-2 bg-blue-50 border-b border-blue-200">
+                    <span className="text-sm text-blue-700">Loading...</span>
+                  </div>
+                )}
+
+                {/* Calendar View */}
+                {renderCalendarView()}
+              </>
             )}
 
-            {/* Loading Overlay */}
-            {(loading.calendars || loading.events) && (
-              <div className="px-6 py-2 bg-blue-50 border-b border-blue-200">
-                <span className="text-sm text-blue-700">Loading...</span>
-              </div>
+            {activeTab === 'tasks' && (
+              <TasksPanel />
             )}
 
-            {/* Calendar View */}
-            {renderCalendarView()}
+            {activeTab === 'booking' && (
+              <BookingPagesPanel />
+            )}
           </div>
         </div>
 
@@ -203,9 +274,13 @@ function ScheduleView({ onEventClick }: { onEventClick: (event: CalendarEvent) =
   const { events, visibleCalendarIds, currentDate } = useCalendarStore();
   const dayjs = require('dayjs');
 
-  // Group events by date
+  // Group events by date - include bheem_meet events even if calendar not selected
   const groupedEvents = events
-    .filter((e) => visibleCalendarIds.includes(e.calendarId))
+    .filter((e) =>
+      visibleCalendarIds.length === 0 ||
+      visibleCalendarIds.includes(e.calendarId) ||
+      e.eventSource === 'bheem_meet'
+    )
     .filter((e) => dayjs(e.start).isAfter(dayjs(currentDate).startOf('day')))
     .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())
     .reduce((groups: Record<string, CalendarEvent[]>, event) => {
@@ -268,7 +343,7 @@ function ScheduleView({ onEventClick }: { onEventClick: (event: CalendarEvent) =
 }
 
 // Mail Login Prompt - Calendar uses mail session credentials
-import { Mail, Calendar as CalendarIcon, ArrowRight } from 'lucide-react';
+import { Mail, ArrowRight } from 'lucide-react';
 
 function MailLoginPrompt({ onSuccess }: { onSuccess: () => void }) {
   const { isMailAuthenticated, checkMailSession } = useCredentialsStore();

@@ -21,7 +21,7 @@ export default function DayView({ onEventClick, onTimeSlotClick }: DayViewProps)
   const today = dayjs().startOf('day');
   const isToday = dayjs(currentDate).isSame(today, 'day');
 
-  // Filter visible events for the current day
+  // Filter visible events for the current day - include bheem_meet events
   const { allDayEvents, timedEvents } = useMemo(() => {
     const dayStart = dayjs(currentDate).startOf('day');
     const dayEnd = dayjs(currentDate).endOf('day');
@@ -30,7 +30,11 @@ export default function DayView({ onEventClick, onTimeSlotClick }: DayViewProps)
     const timed: CalendarEvent[] = [];
 
     events
-      .filter((e) => visibleCalendarIds.includes(e.calendarId))
+      .filter((e) =>
+        visibleCalendarIds.length === 0 ||
+        visibleCalendarIds.includes(e.calendarId) ||
+        e.eventSource === 'bheem_meet'
+      )
       .forEach((event) => {
         const eventStart = dayjs(event.start);
         const eventEnd = dayjs(event.end);

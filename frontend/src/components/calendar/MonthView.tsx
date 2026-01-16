@@ -35,9 +35,13 @@ export default function MonthView({ onEventClick, onDateClick }: MonthViewProps)
     return result;
   }, [currentDate]);
 
-  // Filter visible events
+  // Filter visible events - include bheem_meet events even if calendar not selected
   const visibleEvents = useMemo(() => {
-    return events.filter((e) => visibleCalendarIds.includes(e.calendarId));
+    return events.filter((e) =>
+      visibleCalendarIds.length === 0 ||
+      visibleCalendarIds.includes(e.calendarId) ||
+      e.eventSource === 'bheem_meet'
+    );
   }, [events, visibleCalendarIds]);
 
   // Get events for a specific day

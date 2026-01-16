@@ -20,7 +20,8 @@ from core.security import (
     require_superadmin,
     require_tenant_admin,
     has_permission,
-    Permission
+    Permission,
+    get_user_tenant_role
 )
 from models.admin_models import (
     Tenant, TenantUser, Domain, DomainDNSRecord,
@@ -468,9 +469,19 @@ async def get_tenant(
     """Get tenant details (authenticated users can access their own tenant)"""
     # Check access: SuperAdmin can access any, others only their own
     if current_user.get("role") != "SuperAdmin":
+        # First check company_code/company_id match (for internal ERP users)
         user_company = current_user.get("company_code") or current_user.get("company_id")
-        if user_company and str(tenant_id).lower() != str(user_company).lower():
-            raise HTTPException(status_code=403, detail="Access denied to this tenant")
+        company_match = user_company and str(tenant_id).lower() == str(user_company).lower()
+
+        # If no company match, check tenant_users membership (for external customers)
+        if not company_match:
+            user_id = current_user.get("id") or current_user.get("user_id")
+            if user_id:
+                tenant_info = await get_user_tenant_role(user_id, db)
+                if not tenant_info or str(tenant_info.get("tenant_id")).lower() != str(tenant_id).lower():
+                    raise HTTPException(status_code=403, detail="Access denied to this tenant")
+            else:
+                raise HTTPException(status_code=403, detail="Access denied to this tenant")
     resolved_id = await resolve_tenant_id(tenant_id, db)
     result = await db.execute(
         select(Tenant).where(Tenant.id == resolved_id)
@@ -2238,9 +2249,19 @@ async def get_admin_dashboard(
     """Get complete admin dashboard data (requires authentication)"""
     # Check access: SuperAdmin can access any, others only their own
     if current_user.get("role") != "SuperAdmin":
+        # First check company_code/company_id match (for internal ERP users)
         user_company = current_user.get("company_code") or current_user.get("company_id")
-        if user_company and str(tenant_id).lower() != str(user_company).lower():
-            raise HTTPException(status_code=403, detail="Access denied to this tenant")
+        company_match = user_company and str(tenant_id).lower() == str(user_company).lower()
+
+        # If no company match, check tenant_users membership (for external customers)
+        if not company_match:
+            user_id = current_user.get("id") or current_user.get("user_id")
+            if user_id:
+                tenant_info = await get_user_tenant_role(user_id, db)
+                if not tenant_info or str(tenant_info.get("tenant_id")).lower() != str(tenant_id).lower():
+                    raise HTTPException(status_code=403, detail="Access denied to this tenant")
+            else:
+                raise HTTPException(status_code=403, detail="Access denied to this tenant")
 
     resolved_id = await resolve_tenant_id(tenant_id, db)
 

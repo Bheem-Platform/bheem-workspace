@@ -2,6 +2,7 @@ import dayjs from 'dayjs';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCalendarStore } from '@/stores/calendarStore';
 import CalendarSearchBar from './CalendarSearchBar';
+import AppLauncher from '@/components/shared/AppLauncher';
 import type { CalendarViewType, CalendarEvent } from '@/types/calendar';
 
 interface CalendarHeaderProps {
@@ -95,6 +96,9 @@ export default function CalendarHeader({ onEventClick }: CalendarHeaderProps = {
             </button>
           ))}
         </div>
+
+        {/* App Launcher */}
+        <AppLauncher />
       </div>
     </div>
   );

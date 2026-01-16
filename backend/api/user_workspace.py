@@ -101,3 +101,18 @@ async def update_tenant_profile(
         "message": "Workspace profile updated",
         "tenant_id": str(tenant_id)
     }
+
+
+@router.get("/dashboard-stats")
+async def get_dashboard_stats(
+    current_user: dict = Depends(require_tenant_member()),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get dashboard statistics for the current user's workspace."""
+    # Return basic stats - can be expanded later with real data
+    return {
+        "unreadEmails": 0,
+        "todayEvents": 0,
+        "recentDocs": 0,
+        "activeMeets": 0
+    }

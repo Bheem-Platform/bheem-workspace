@@ -4,7 +4,10 @@ import Link from 'next/link';
 import Script from 'next/script';
 import {
   Zap, Mail, FileText, Video, Shield, Bot,
-  Check, X, Star, ArrowRight, Play, ChevronRight
+  Check, Star, ArrowRight, Play,
+  Sparkles, Calendar, HardDrive, Users,
+  Clock, TrendingUp, Award, CheckCircle2,
+  BarChart3, Lock, Globe, Cpu
 } from 'lucide-react';
 
 declare global {
@@ -27,9 +30,36 @@ interface CheckoutResponse {
   };
 }
 
+// Floating particles configuration
+const particles = [
+  { size: 4, x: 10, y: 20, duration: 20, delay: 0 },
+  { size: 6, x: 20, y: 60, duration: 25, delay: 2 },
+  { size: 3, x: 80, y: 30, duration: 22, delay: 1 },
+  { size: 5, x: 70, y: 70, duration: 28, delay: 3 },
+  { size: 4, x: 90, y: 15, duration: 24, delay: 0.5 },
+  { size: 7, x: 15, y: 85, duration: 26, delay: 1.5 },
+  { size: 3, x: 50, y: 10, duration: 21, delay: 2.5 },
+  { size: 5, x: 85, y: 55, duration: 23, delay: 4 },
+  { size: 4, x: 30, y: 40, duration: 27, delay: 1 },
+  { size: 6, x: 60, y: 80, duration: 29, delay: 3.5 },
+];
+
 export default function LandingPage() {
   const [loading, setLoading] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [mounted, setMounted] = useState(false);
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
+
+  useEffect(() => {
+    setMounted(true);
+
+    const handleMouseMove = (e: MouseEvent) => {
+      setMousePosition({ x: e.clientX, y: e.clientY });
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    return () => window.removeEventListener('mousemove', handleMouseMove);
+  }, []);
 
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     setToast({ message, type });
@@ -40,17 +70,14 @@ export default function LandingPage() {
     setLoading(planId);
 
     try {
-      // Get auth token from localStorage
       const authToken = localStorage.getItem('auth_token');
 
       if (!authToken) {
-        // Store selected plan and redirect to login
         sessionStorage.setItem('pending_plan', planId);
         window.location.href = '/login?redirect=/&plan=' + planId;
         return;
       }
 
-      // Create checkout session
       const response = await fetch('/api/v1/billing/checkout', {
         method: 'POST',
         headers: {
@@ -70,7 +97,6 @@ export default function LandingPage() {
 
       const session: CheckoutResponse = await response.json();
 
-      // Initialize Razorpay
       if (!window.Razorpay) {
         throw new Error('Razorpay not loaded');
       }
@@ -83,7 +109,6 @@ export default function LandingPage() {
         description: `${session.plan_name} Subscription`,
         order_id: session.order_id,
         handler: async function(response: any) {
-          // Payment successful - verify on backend
           try {
             const verifyResponse = await fetch('/api/v1/billing/verify', {
               method: 'POST',
@@ -110,12 +135,8 @@ export default function LandingPage() {
             showToast('Payment verification failed. Please contact support.', 'error');
           }
         },
-        prefill: {
-          email: '',
-        },
-        theme: {
-          color: '#2563eb'
-        },
+        prefill: { email: '' },
+        theme: { color: '#8B5CF6' },
         modal: {
           ondismiss: function() {
             setLoading(null);
@@ -134,11 +155,9 @@ export default function LandingPage() {
     } catch (error: any) {
       setLoading(null);
       showToast(error.message || 'Something went wrong', 'error');
-      console.error('Checkout error:', error);
     }
   };
 
-  // Check for pending plan on mount
   useEffect(() => {
     const pendingPlan = sessionStorage.getItem('pending_plan');
     const authToken = localStorage.getItem('auth_token');
@@ -152,75 +171,46 @@ export default function LandingPage() {
   const features = [
     {
       icon: Mail,
-      title: 'Professional Email',
-      description: 'Your domain, your email. AI writes replies in your tone, sorts your inbox, and flags what matters.',
-      benefit: '2x faster email responses',
-      gradient: 'from-orange-500 to-orange-600'
+      title: 'Smart Email',
+      description: 'AI-powered inbox that writes replies in your tone, automatically sorts messages, and flags what matters most.',
+      color: '#EA4335',
+      bg: 'bg-red-500/10'
     },
     {
       icon: FileText,
-      title: 'Smart Documents',
-      description: 'Write, edit, and collaborate in real-time. AI helps draft, summarize, and format your docs.',
-      benefit: 'Cut writing time by 50%',
-      gradient: 'from-green-500 to-green-600'
+      title: 'Collaborative Docs',
+      description: 'Create, edit, and collaborate in real-time. AI assists with drafting, summarizing, and formatting.',
+      color: '#4285F4',
+      bg: 'bg-blue-500/10'
     },
     {
       icon: Video,
       title: 'HD Video Meetings',
-      description: 'Crystal clear calls with up to 500 people. AI transcribes, summarizes, and creates action items.',
-      benefit: 'Never miss meeting notes again',
-      gradient: 'from-blue-500 to-blue-600'
+      description: 'Crystal clear video calls with AI transcription, automatic meeting notes, and action item tracking.',
+      color: '#34A853',
+      bg: 'bg-green-500/10'
     },
     {
-      icon: Zap,
-      title: 'Workflow Automation',
-      description: 'Connect everything with Bheem Flow. When a meeting ends, docs update, emails send—automatically.',
-      benefit: 'Eliminate repetitive tasks',
-      gradient: 'from-purple-500 to-purple-600'
+      icon: Calendar,
+      title: 'Smart Calendar',
+      description: 'Intelligent scheduling with conflict detection, timezone management, and automated reminders.',
+      color: '#8E24AA',
+      bg: 'bg-purple-500/10'
+    },
+    {
+      icon: HardDrive,
+      title: 'Secure Drive',
+      description: 'Store, share, and collaborate on files with enterprise-grade security and smart search.',
+      color: '#FBBC04',
+      bg: 'bg-yellow-500/10'
     },
     {
       icon: Bot,
-      title: 'AI Built-In',
-      description: 'Not a $30/user add-on. AI is included in every plan—writing, transcription, summaries, and more.',
-      benefit: 'Save $360/user/year vs competitors',
-      gradient: 'from-pink-500 to-pink-600'
-    },
-    {
-      icon: Shield,
-      title: 'Enterprise Security',
-      description: 'AES-256 encryption, SOC 2 compliance, and DRM protection for recordings. Self-host option available.',
-      benefit: '100% data ownership',
-      gradient: 'from-cyan-500 to-cyan-600'
+      title: 'AI Assistant',
+      description: 'Built-in AI for writing, analysis, and productivity tasks. No expensive add-ons required.',
+      color: '#00ACC1',
+      bg: 'bg-cyan-500/10'
     }
-  ];
-
-  const testimonials = [
-    {
-      text: "We switched from Google Workspace and saved over $15,000/year. The AI features alone are worth it—my team spends 50% less time on emails now.",
-      author: "Sarah Kim",
-      role: "CEO, TechStart Inc.",
-      initials: "SK"
-    },
-    {
-      text: "The meeting transcription is a game-changer. I used to spend an hour after each call writing notes. Now Bheem does it automatically.",
-      author: "Marcus Rodriguez",
-      role: "Product Lead, ScaleUp",
-      initials: "MR"
-    },
-    {
-      text: "Finally, one tool instead of five. We cancelled Zoom, Notion, Gmail, and Slack. Bheem does it all—and the AI is actually useful.",
-      author: "Jennifer Lee",
-      role: "Operations Director, GlobalCo",
-      initials: "JL"
-    }
-  ];
-
-  const comparison = [
-    { feature: 'AI writing & summaries', bheem: true, google: 'Limited', microsoft: '+$30/user' },
-    { feature: 'Meeting transcription', bheem: true, google: 'Add-on', microsoft: 'Premium only' },
-    { feature: 'Workflow automation', bheem: true, google: false, microsoft: 'Power Auto' },
-    { feature: 'Self-host option', bheem: true, google: false, microsoft: false },
-    { feature: 'White-label available', bheem: true, google: false, microsoft: false },
   ];
 
   const plans = [
@@ -230,17 +220,18 @@ export default function LandingPage() {
       description: 'For small teams getting started',
       price: '₹999',
       period: '/user/month',
-      features: ['Email, Docs, Meetings', '50 AI actions/month', '10 GB storage/user', 'Custom domain'],
-      popular: false
+      features: ['Email, Docs, Meet, Calendar', '50 AI actions/month', '10 GB storage per user', 'Custom domain support', 'Standard support'],
+      gradient: 'from-blue-500 to-cyan-500'
     },
     {
       id: 'WORKSPACE-PROFESSIONAL',
       name: 'Professional',
-      description: 'For growing teams',
+      description: 'For growing businesses',
       price: '₹2,499',
       period: '/user/month',
-      features: ['Everything in Starter', 'Unlimited AI actions', '100 GB storage/user', 'Bheem Flow automation', 'Priority support'],
-      popular: true
+      features: ['Everything in Starter', 'Unlimited AI actions', '100 GB storage per user', 'Bheem Flow automation', 'Advanced analytics', 'Priority support'],
+      popular: true,
+      gradient: 'from-purple-500 to-pink-500'
     },
     {
       id: 'WORKSPACE-ENTERPRISE',
@@ -248,158 +239,259 @@ export default function LandingPage() {
       description: 'For large organizations',
       price: 'Custom',
       period: '',
-      features: ['Everything in Professional', 'Self-hosted option', 'White-label branding', 'Dedicated support', 'SLA guarantee'],
-      popular: false,
-      isEnterprise: true
+      features: ['Everything in Professional', 'Unlimited storage', 'Self-hosted option', 'White-label branding', 'Dedicated account manager', 'SLA guarantee'],
+      isEnterprise: true,
+      gradient: 'from-orange-500 to-red-500'
+    }
+  ];
+
+  const stats = [
+    { value: '47%', label: 'Productivity boost', icon: TrendingUp },
+    { value: '12hrs', label: 'Saved weekly', icon: Clock },
+    { value: '10K+', label: 'Teams worldwide', icon: Users },
+    { value: '99.9%', label: 'Uptime SLA', icon: Award },
+  ];
+
+  const testimonials = [
+    {
+      quote: "We switched from Google Workspace and saved over $15,000/year. The AI features alone make it worth every penny.",
+      author: "Sarah Kim",
+      role: "CEO, TechStart Inc.",
+      avatar: "SK"
+    },
+    {
+      quote: "The meeting transcription is a game-changer. I used to spend hours writing notes. Now it's completely automatic.",
+      author: "Marcus Rodriguez",
+      role: "Product Lead, ScaleUp",
+      avatar: "MR"
+    },
+    {
+      quote: "Finally, one platform instead of five. We cancelled Zoom, Notion, and Slack. Bheem does it all better.",
+      author: "Jennifer Lee",
+      role: "Operations Director, GlobalCo",
+      avatar: "JL"
     }
   ];
 
   return (
     <>
       <Head>
-        <title>Bheem Workspace | Where Teams Get More Done</title>
-        <meta name="description" content="Email, Docs, Meetings—all in one place with AI built-in. Stop juggling 5 different tools." />
+        <title>Bheem Workspace | AI-Powered Productivity Suite</title>
+        <meta name="description" content="Email, Docs, Meetings—all in one place with AI built-in. The modern workspace for productive teams." />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" href="/favicon.ico" />
       </Head>
 
       <Script src="https://checkout.razorpay.com/v1/checkout.js" strategy="lazyOnload" />
 
-      {/* Toast Notification */}
+      {/* Toast */}
       {toast && (
-        <div
-          className={`fixed bottom-5 right-5 z-50 px-6 py-4 rounded-lg text-white font-medium shadow-lg animate-slide-in ${
-            toast.type === 'error' ? 'bg-red-500' : toast.type === 'success' ? 'bg-green-500' : 'bg-blue-500'
-          }`}
-        >
+        <div className={`fixed bottom-5 right-5 z-50 px-6 py-4 rounded-2xl text-white font-medium shadow-2xl glass animate-slide-in ${
+          toast.type === 'error' ? 'bg-red-500/80' : toast.type === 'success' ? 'bg-green-500/80' : 'bg-blue-500/80'
+        }`}>
           {toast.message}
         </div>
       )}
 
-      <div className="min-h-screen bg-white">
-        {/* Top Banner */}
-        <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white text-center py-3 px-4 text-sm font-medium">
-          🎉 Limited Time: Get 3 months free when you switch from Google or Microsoft.{' '}
-          <a href="#pricing" className="underline font-bold hover:no-underline">Claim offer →</a>
+      <div className="min-h-screen bg-[#050508] text-white overflow-hidden">
+        {/* Animated Background */}
+        <div className="fixed inset-0 z-0">
+          {/* Main gradient orbs */}
+          <div className="absolute top-[-20%] left-[-10%] w-[600px] h-[600px] bg-purple-600/30 rounded-full blur-[120px] animate-blob" />
+          <div className="absolute top-[20%] right-[-10%] w-[500px] h-[500px] bg-blue-600/25 rounded-full blur-[120px] animate-blob animation-delay-2000" />
+          <div className="absolute bottom-[-10%] left-[30%] w-[550px] h-[550px] bg-pink-600/20 rounded-full blur-[120px] animate-blob animation-delay-4000" />
+          <div className="absolute top-[50%] left-[50%] w-[400px] h-[400px] bg-cyan-600/15 rounded-full blur-[100px] animate-pulse-slow" />
+
+          {/* Grid overlay */}
+          <div
+            className="absolute inset-0 opacity-[0.02]"
+            style={{
+              backgroundImage: `linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)`,
+              backgroundSize: '50px 50px'
+            }}
+          />
+
+          {/* Floating particles */}
+          {mounted && particles.map((particle, i) => (
+            <div
+              key={i}
+              className="absolute rounded-full bg-white/20 animate-float-particle"
+              style={{
+                width: particle.size,
+                height: particle.size,
+                left: `${particle.x}%`,
+                top: `${particle.y}%`,
+                animationDuration: `${particle.duration}s`,
+                animationDelay: `${particle.delay}s`,
+              }}
+            />
+          ))}
+
+          {/* Mouse follow gradient */}
+          {mounted && (
+            <div
+              className="pointer-events-none absolute w-[600px] h-[600px] rounded-full opacity-20 transition-all duration-300 ease-out"
+              style={{
+                background: 'radial-gradient(circle, rgba(139, 92, 246, 0.3) 0%, transparent 70%)',
+                left: mousePosition.x - 300,
+                top: mousePosition.y - 300,
+              }}
+            />
+          )}
         </div>
 
-        {/* Navigation */}
-        <nav className="sticky top-0 bg-white/95 backdrop-blur-sm border-b border-gray-200 z-50">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex justify-between items-center h-16">
-              <Link href="/" className="flex items-center gap-2 font-bold text-xl text-gray-900">
-                <div className="w-9 h-9 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-                  <span className="text-white font-bold text-lg">B</span>
+        {/* Navigation - Glassmorphism */}
+        <nav className="fixed top-0 left-0 right-0 z-50">
+          <div className="mx-4 mt-4">
+            <div className="max-w-7xl mx-auto glass rounded-2xl border border-white/10">
+              <div className="px-6 flex justify-between items-center h-16">
+                <Link href="/" className="flex items-center gap-2">
+                  <div className="w-9 h-9 bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 rounded-xl flex items-center justify-center shadow-lg shadow-purple-500/25">
+                    <span className="text-white font-bold text-sm">B</span>
+                  </div>
+                  <span className="text-lg font-bold">Bheem</span>
+                </Link>
+
+                <div className="hidden md:flex items-center gap-1">
+                  <a href="#features" className="text-sm text-gray-400 hover:text-white transition-colors px-4 py-2 rounded-lg hover:bg-white/5">Features</a>
+                  <a href="#pricing" className="text-sm text-gray-400 hover:text-white transition-colors px-4 py-2 rounded-lg hover:bg-white/5">Pricing</a>
+                  <a href="#testimonials" className="text-sm text-gray-400 hover:text-white transition-colors px-4 py-2 rounded-lg hover:bg-white/5">Customers</a>
                 </div>
-                Bheem
-              </Link>
 
-              <div className="hidden md:flex items-center gap-8">
-                <a href="#features" className="text-gray-600 hover:text-gray-900 font-medium">Features</a>
-                <a href="#testimonials" className="text-gray-600 hover:text-gray-900 font-medium">Customers</a>
-                <a href="#pricing" className="text-gray-600 hover:text-gray-900 font-medium">Pricing</a>
-                <a href="https://academy.bheem.cloud" className="text-gray-600 hover:text-gray-900 font-medium">Academy</a>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <Link href="/login" className="text-gray-600 hover:text-gray-900 font-medium px-4 py-2">
-                  Sign in
-                </Link>
-                <Link href="/login?mode=signup" className="bg-blue-600 text-white px-5 py-2.5 rounded-lg font-semibold hover:bg-blue-700 transition-colors">
-                  Start free trial
-                </Link>
+                <div className="flex items-center gap-3">
+                  <Link href="/login" className="text-sm text-gray-400 hover:text-white transition-colors px-4 py-2">
+                    Sign in
+                  </Link>
+                  <Link href="/login?mode=signup" className="text-sm bg-white text-gray-900 px-5 py-2.5 rounded-xl font-medium hover:bg-gray-100 transition-all hover:shadow-lg hover:shadow-white/10">
+                    Get started
+                  </Link>
+                </div>
               </div>
             </div>
           </div>
         </nav>
 
         {/* Hero Section */}
-        <section className="py-20 lg:py-28 px-4 sm:px-6 lg:px-8">
-          <div className="max-w-7xl mx-auto">
+        <section className="relative z-10 pt-36 pb-20 lg:pt-44 lg:pb-32">
+          <div className="max-w-7xl mx-auto px-6 lg:px-8">
             <div className="grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
-              <div>
-                <div className="inline-flex items-center gap-2 bg-blue-50 border border-blue-200 text-blue-700 px-4 py-2 rounded-full text-sm font-semibold mb-6">
-                  <Zap size={16} />
-                  AI-Powered Workspace
+              {/* Left content */}
+              <div className="text-left">
+                <div className="inline-flex items-center gap-2 glass-subtle px-4 py-2 rounded-full mb-6 border border-white/10">
+                  <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+                  <span className="text-xs text-gray-300">Now with GPT-4 powered AI</span>
+                  <ArrowRight size={12} className="text-gray-500" />
                 </div>
 
-                <h1 className="text-4xl lg:text-5xl xl:text-6xl font-extrabold text-gray-900 leading-tight mb-6">
-                  Email. Docs. Meetings.
+                <h1 className="text-4xl lg:text-6xl font-bold leading-[1.1] mb-6">
+                  The workspace
                   <br />
-                  <span className="text-blue-600">All in one place.</span>
+                  <span className="bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent animate-gradient">
+                    that works for you
+                  </span>
                 </h1>
 
-                <p className="text-xl text-gray-600 mb-8 leading-relaxed">
-                  Stop juggling 5 different tools. Bheem Workspace gives your team everything they need to communicate, collaborate, and get work done—with AI that actually helps.
+                <p className="text-lg text-gray-400 mb-8 max-w-lg leading-relaxed">
+                  Email, docs, meetings, and calendar—unified with AI that actually helps.
+                  Stop paying for 5 different tools. Start getting things done.
                 </p>
 
-                <div className="flex flex-col sm:flex-row gap-4 mb-10">
-                  <Link
-                    href="/login?mode=signup"
-                    className="inline-flex items-center justify-center gap-2 bg-blue-600 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:bg-blue-700 transition-all hover:-translate-y-0.5 shadow-lg shadow-blue-500/25"
-                  >
+                <div className="flex flex-col sm:flex-row gap-4 mb-8">
+                  <Link href="/login?mode=signup" className="group inline-flex items-center justify-center gap-2 bg-gradient-to-r from-purple-500 to-pink-500 px-6 py-3.5 rounded-xl font-semibold transition-all hover:shadow-lg hover:shadow-purple-500/25 hover:scale-[1.02]">
                     Start free trial
-                    <ArrowRight size={20} />
+                    <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
                   </Link>
-                  <a
-                    href="#demo"
-                    className="inline-flex items-center justify-center gap-2 bg-white text-gray-900 px-8 py-4 rounded-xl font-semibold text-lg border-2 border-gray-200 hover:border-blue-600 hover:text-blue-600 transition-colors"
-                  >
-                    <Play size={20} />
+                  <a href="#demo" className="inline-flex items-center justify-center gap-2 glass px-6 py-3.5 rounded-xl font-semibold hover:bg-white/10 transition-all border border-white/10">
+                    <Play size={18} />
                     Watch demo
                   </a>
                 </div>
 
-                <div className="flex flex-wrap items-center gap-6 pt-6 border-t border-gray-200">
-                  {['14-day free trial', 'No credit card required', 'Cancel anytime'].map((item) => (
-                    <div key={item} className="flex items-center gap-2 text-gray-600">
-                      <Check size={20} className="text-green-500" />
-                      {item}
-                    </div>
-                  ))}
+                <div className="flex flex-wrap items-center gap-6 text-sm text-gray-500">
+                  <span className="flex items-center gap-2">
+                    <Check size={16} className="text-green-400" />
+                    14-day free trial
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <Check size={16} className="text-green-400" />
+                    No credit card
+                  </span>
+                  <span className="flex items-center gap-2">
+                    <Check size={16} className="text-green-400" />
+                    Cancel anytime
+                  </span>
                 </div>
               </div>
 
+              {/* Right content - Dashboard Preview with Glassmorphism */}
               <div className="relative">
-                <div className="bg-gray-100 rounded-2xl p-4 shadow-2xl border border-gray-200">
-                  <div className="bg-white rounded-xl overflow-hidden">
-                    <div className="bg-gray-200 h-10 flex items-center px-4 gap-2">
-                      <div className="w-3 h-3 rounded-full bg-red-400"></div>
-                      <div className="w-3 h-3 rounded-full bg-yellow-400"></div>
-                      <div className="w-3 h-3 rounded-full bg-green-400"></div>
+                <div className="absolute -inset-4 bg-gradient-to-r from-blue-500/20 via-purple-500/20 to-pink-500/20 rounded-3xl blur-2xl animate-pulse-slow" />
+                <div className="relative glass rounded-2xl border border-white/10 p-1.5 shadow-2xl">
+                  {/* Browser bar */}
+                  <div className="glass-subtle rounded-t-xl px-4 py-3 flex items-center gap-3 border-b border-white/5">
+                    <div className="flex gap-1.5">
+                      <div className="w-3 h-3 rounded-full bg-red-500/80" />
+                      <div className="w-3 h-3 rounded-full bg-yellow-500/80" />
+                      <div className="w-3 h-3 rounded-full bg-green-500/80" />
                     </div>
-                    <div className="p-6 space-y-4">
-                      <div className="h-6 bg-gray-900 rounded w-3/4"></div>
-                      <div className="h-3 bg-gray-200 rounded w-full"></div>
-                      <div className="h-3 bg-gray-200 rounded w-5/6"></div>
-                      <div className="h-3 bg-gray-200 rounded w-4/5"></div>
-                      <div className="grid grid-cols-3 gap-3 pt-4">
-                        <div className="h-20 bg-blue-100 rounded-lg"></div>
-                        <div className="h-20 bg-green-100 rounded-lg"></div>
-                        <div className="h-20 bg-yellow-100 rounded-lg"></div>
+                    <div className="flex-1 bg-white/5 rounded-lg px-3 py-1.5 text-xs text-gray-500">
+                      workspace.bheem.cloud
+                    </div>
+                  </div>
+
+                  {/* Dashboard content */}
+                  <div className="p-4 space-y-3">
+                    <div className="flex gap-3">
+                      <div className="w-12 glass-subtle rounded-lg p-2 space-y-2">
+                        <div className="w-6 h-6 bg-blue-500/30 rounded animate-pulse" />
+                        <div className="w-6 h-6 bg-green-500/30 rounded animate-pulse animation-delay-500" />
+                        <div className="w-6 h-6 bg-purple-500/30 rounded animate-pulse animation-delay-1000" />
+                        <div className="w-6 h-6 bg-yellow-500/30 rounded animate-pulse animation-delay-1500" />
+                      </div>
+                      <div className="flex-1 space-y-3">
+                        <div className="h-6 bg-gradient-to-r from-purple-500/30 to-pink-500/30 rounded-lg w-1/2 animate-shimmer" />
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="h-20 glass-subtle rounded-lg border border-blue-500/20 p-2 hover:border-blue-500/40 transition-colors">
+                            <div className="w-4 h-4 bg-blue-500/40 rounded mb-1" />
+                            <div className="h-2 bg-white/10 rounded w-3/4" />
+                          </div>
+                          <div className="h-20 glass-subtle rounded-lg border border-green-500/20 p-2 hover:border-green-500/40 transition-colors">
+                            <div className="w-4 h-4 bg-green-500/40 rounded mb-1" />
+                            <div className="h-2 bg-white/10 rounded w-2/3" />
+                          </div>
+                          <div className="h-20 glass-subtle rounded-lg border border-purple-500/20 p-2 hover:border-purple-500/40 transition-colors">
+                            <div className="w-4 h-4 bg-purple-500/40 rounded mb-1" />
+                            <div className="h-2 bg-white/10 rounded w-4/5" />
+                          </div>
+                        </div>
+                        <div className="h-24 glass-subtle rounded-lg" />
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Floating cards */}
-                <div className="absolute -top-4 -right-4 bg-white rounded-xl p-4 shadow-lg border border-gray-100 flex items-center gap-3">
-                  <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
-                    <Check size={20} className="text-green-600" />
-                  </div>
-                  <div>
-                    <div className="font-bold text-green-600">12 hrs saved</div>
-                    <div className="text-sm text-gray-500">per week, per user</div>
+                {/* Floating cards with glassmorphism */}
+                <div className="absolute -bottom-6 -left-6 glass rounded-xl p-3 border border-white/10 shadow-xl animate-float">
+                  <div className="flex items-center gap-2">
+                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-green-500/30 to-green-500/10 flex items-center justify-center backdrop-blur-sm">
+                      <TrendingUp size={18} className="text-green-400" />
+                    </div>
+                    <div>
+                      <div className="text-green-400 font-bold text-sm">+47%</div>
+                      <div className="text-gray-500 text-xs">Productivity</div>
+                    </div>
                   </div>
                 </div>
 
-                <div className="absolute -bottom-4 -left-4 bg-white rounded-xl p-4 shadow-lg border border-gray-100 flex items-center gap-3">
-                  <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                    <Bot size={20} className="text-blue-600" />
-                  </div>
-                  <div>
-                    <div className="font-bold text-gray-900">AI Assistant</div>
-                    <div className="text-sm text-gray-500">Writes emails for you</div>
+                <div className="absolute -top-4 -right-4 glass rounded-xl p-3 border border-white/10 shadow-xl animate-float animation-delay-1000">
+                  <div className="flex items-center gap-2">
+                    <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-purple-500/30 to-purple-500/10 flex items-center justify-center backdrop-blur-sm">
+                      <Sparkles size={18} className="text-purple-400" />
+                    </div>
+                    <div>
+                      <div className="text-white font-bold text-sm">AI Ready</div>
+                      <div className="text-gray-500 text-xs">Always on</div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -407,132 +499,234 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* Stats */}
-        <section className="py-16 px-4 sm:px-6 lg:px-8 bg-gray-50">
-          <div className="max-w-6xl mx-auto grid grid-cols-2 lg:grid-cols-4 gap-8">
-            {[
-              { value: '47%', label: 'Increase in productivity' },
-              { value: '12 hrs', label: 'Saved per user weekly' },
-              { value: '60%', label: 'Less tool switching' },
-              { value: '99.9%', label: 'Uptime guaranteed' },
-            ].map((stat) => (
-              <div key={stat.label} className="text-center p-6 bg-white rounded-2xl border border-gray-200">
-                <div className="text-4xl font-extrabold text-blue-600 mb-2">{stat.value}</div>
-                <div className="text-gray-600">{stat.label}</div>
+        {/* Stats Section - Glassmorphism */}
+        <section className="relative z-10 py-16">
+          <div className="max-w-7xl mx-auto px-6 lg:px-8">
+            <div className="glass rounded-3xl border border-white/10 p-8 lg:p-12">
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-8">
+                {stats.map((stat, index) => (
+                  <div key={index} className="text-center group">
+                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500/20 to-pink-500/20 mb-4 group-hover:scale-110 transition-transform">
+                      <stat.icon size={24} className="text-purple-400" />
+                    </div>
+                    <div className="text-3xl lg:text-4xl font-bold mb-1 bg-gradient-to-r from-white to-gray-300 bg-clip-text text-transparent">{stat.value}</div>
+                    <div className="text-sm text-gray-500">{stat.label}</div>
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
           </div>
         </section>
 
-        {/* Features */}
-        <section id="features" className="py-24 px-4 sm:px-6 lg:px-8">
-          <div className="max-w-7xl mx-auto">
-            <div className="text-center mb-16">
-              <span className="inline-block bg-blue-100 text-blue-700 px-4 py-1.5 rounded-full text-sm font-semibold uppercase tracking-wide mb-4">
-                Features
-              </span>
-              <h2 className="text-3xl lg:text-4xl font-extrabold text-gray-900 mb-4">
-                Everything your team needs
+        {/* Features Section */}
+        <section id="features" className="relative z-10 py-24">
+          <div className="max-w-7xl mx-auto px-6 lg:px-8">
+            {/* Section header - left aligned */}
+            <div className="max-w-2xl mb-16">
+              <div className="inline-flex items-center gap-2 glass-subtle px-3 py-1.5 rounded-full mb-4 border border-purple-500/20">
+                <Cpu size={14} className="text-purple-400" />
+                <span className="text-xs text-purple-400 font-medium">Features</span>
+              </div>
+              <h2 className="text-3xl lg:text-4xl font-bold mb-4">
+                Everything your team needs,
+                <span className="text-gray-500"> nothing it doesn't</span>
               </h2>
-              <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-                One platform for email, documents, video calls, and automation. AI built-in, not bolted on.
+              <p className="text-gray-400 text-lg">
+                One platform for email, documents, meetings, and automation. AI built-in, not bolted on.
               </p>
             </div>
 
-            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-8">
-              {features.map((feature) => (
+            {/* Features grid with glassmorphism cards */}
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {features.map((feature, index) => (
                 <div
-                  key={feature.title}
-                  className="bg-white p-8 rounded-2xl border border-gray-200 hover:border-blue-500 hover:shadow-lg transition-all hover:-translate-y-1"
+                  key={index}
+                  className="group glass rounded-2xl border border-white/5 p-6 hover:border-white/20 transition-all duration-300 hover:shadow-lg hover:shadow-purple-500/5 hover:-translate-y-1"
                 >
-                  <div className={`w-14 h-14 rounded-xl bg-gradient-to-br ${feature.gradient} flex items-center justify-center mb-5`}>
-                    <feature.icon size={28} className="text-white" />
+                  <div
+                    className={`w-14 h-14 rounded-xl ${feature.bg} backdrop-blur-sm flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300 border border-white/10`}
+                  >
+                    <feature.icon size={28} style={{ color: feature.color }} />
                   </div>
-                  <h3 className="text-xl font-bold text-gray-900 mb-3">{feature.title}</h3>
-                  <p className="text-gray-600 mb-5 leading-relaxed">{feature.description}</p>
-                  <div className="flex items-center gap-2 text-green-600 font-semibold">
-                    <ChevronRight size={18} />
-                    {feature.benefit}
-                  </div>
+                  <h3 className="text-lg font-semibold mb-2">{feature.title}</h3>
+                  <p className="text-gray-400 text-sm leading-relaxed">{feature.description}</p>
                 </div>
               ))}
+            </div>
+          </div>
+        </section>
+
+        {/* AI Section - Left/Right Layout */}
+        <section className="relative z-10 py-24">
+          <div className="max-w-7xl mx-auto px-6 lg:px-8">
+            <div className="glass rounded-3xl border border-white/10 p-8 lg:p-16 overflow-hidden relative">
+              {/* Background glow */}
+              <div className="absolute top-0 right-0 w-[400px] h-[400px] bg-purple-500/20 rounded-full blur-[100px]" />
+              <div className="absolute bottom-0 left-0 w-[300px] h-[300px] bg-pink-500/20 rounded-full blur-[100px]" />
+
+              <div className="relative grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+                {/* Left content */}
+                <div>
+                  <div className="inline-flex items-center gap-2 glass-subtle px-3 py-1.5 rounded-full mb-4 border border-white/10">
+                    <Sparkles size={14} className="text-purple-400" />
+                    <span className="text-xs font-medium">AI-Powered</span>
+                  </div>
+
+                  <h2 className="text-3xl lg:text-4xl font-bold mb-6">
+                    AI that works
+                    <span className="bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent"> for you</span>
+                  </h2>
+
+                  <p className="text-gray-400 text-lg mb-8 leading-relaxed">
+                    Not a $30/user add-on. AI is included in every plan—writing assistance,
+                    meeting transcription, smart summaries, and more.
+                  </p>
+
+                  <div className="space-y-4">
+                    {[
+                      'Write emails and documents 3x faster',
+                      'Automatic meeting transcription & notes',
+                      'Smart inbox prioritization',
+                      'Instant document summaries'
+                    ].map((item, i) => (
+                      <div key={i} className="flex items-center gap-3 group">
+                        <div className="w-6 h-6 rounded-full bg-gradient-to-r from-purple-500 to-pink-500 flex items-center justify-center group-hover:scale-110 transition-transform">
+                          <Check size={14} />
+                        </div>
+                        <span className="text-gray-300">{item}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Right content - AI Demo */}
+                <div className="relative">
+                  <div className="glass rounded-2xl border border-white/10 p-6">
+                    <div className="flex items-center gap-3 mb-6">
+                      <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shadow-lg shadow-purple-500/25">
+                        <Bot size={24} />
+                      </div>
+                      <div>
+                        <div className="font-semibold">Bheem AI</div>
+                        <div className="text-xs text-gray-500">Assistant</div>
+                      </div>
+                      <div className="ml-auto flex gap-1">
+                        <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                        <span className="text-xs text-gray-500">Online</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div className="glass-subtle rounded-xl p-4 border border-white/5">
+                        <p className="text-sm text-gray-400">Summarize my meeting with the design team</p>
+                      </div>
+                      <div className="glass rounded-xl p-4 border border-purple-500/30 bg-purple-500/5">
+                        <p className="text-sm leading-relaxed">
+                          <span className="text-purple-400 font-medium">Key decisions:</span> New dashboard design approved,
+                          launch date set for Q2.
+                          <br /><br />
+                          <span className="text-purple-400 font-medium">Action items:</span> Sarah to finalize mockups by Friday,
+                          Dev team to start implementation Monday.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Security Section - Right/Left Layout */}
+        <section className="relative z-10 py-24">
+          <div className="max-w-7xl mx-auto px-6 lg:px-8">
+            <div className="grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+              {/* Left - Visual */}
+              <div className="order-2 lg:order-1">
+                <div className="grid grid-cols-2 gap-4">
+                  {[
+                    { icon: Shield, label: 'AES-256', sub: 'Encryption', color: 'green' },
+                    { icon: Lock, label: 'SOC 2', sub: 'Compliant', color: 'blue' },
+                    { icon: Globe, label: 'GDPR', sub: 'Ready', color: 'purple' },
+                    { icon: BarChart3, label: '99.9%', sub: 'Uptime', color: 'orange' },
+                  ].map((item, i) => (
+                    <div key={i} className="glass rounded-2xl border border-white/10 p-6 hover:border-white/20 transition-all hover:-translate-y-1 group">
+                      <item.icon size={32} className={`text-${item.color}-400 mb-4 group-hover:scale-110 transition-transform`} />
+                      <div className="text-2xl font-bold mb-1">{item.label}</div>
+                      <div className="text-sm text-gray-500">{item.sub}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Right content */}
+              <div className="order-1 lg:order-2">
+                <div className="inline-flex items-center gap-2 glass-subtle px-3 py-1.5 rounded-full mb-4 border border-green-500/20">
+                  <Shield size={14} className="text-green-400" />
+                  <span className="text-xs text-green-400 font-medium">Enterprise Security</span>
+                </div>
+
+                <h2 className="text-3xl lg:text-4xl font-bold mb-6">
+                  Security you can
+                  <span className="text-gray-500"> trust</span>
+                </h2>
+
+                <p className="text-gray-400 text-lg mb-8 leading-relaxed">
+                  Your data is protected with enterprise-grade security. We're SOC 2 compliant,
+                  GDPR ready, and offer self-hosting for complete control.
+                </p>
+
+                <div className="space-y-4">
+                  {[
+                    'End-to-end encryption for all data',
+                    'Regular third-party security audits',
+                    'Self-hosted deployment option',
+                    'Granular access controls & SSO'
+                  ].map((item, i) => (
+                    <div key={i} className="flex items-center gap-3 group">
+                      <div className="w-6 h-6 rounded-full bg-gradient-to-r from-green-500 to-emerald-500 flex items-center justify-center group-hover:scale-110 transition-transform">
+                        <Check size={14} />
+                      </div>
+                      <span className="text-gray-300">{item}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
         </section>
 
         {/* Testimonials */}
-        <section id="testimonials" className="py-24 px-4 sm:px-6 lg:px-8 bg-gray-50">
-          <div className="max-w-7xl mx-auto">
-            <div className="text-center mb-16">
-              <span className="inline-block bg-blue-100 text-blue-700 px-4 py-1.5 rounded-full text-sm font-semibold uppercase tracking-wide mb-4">
-                Testimonials
-              </span>
-              <h2 className="text-3xl lg:text-4xl font-extrabold text-gray-900 mb-4">
-                Teams love Bheem
+        <section id="testimonials" className="relative z-10 py-24">
+          <div className="max-w-7xl mx-auto px-6 lg:px-8">
+            <div className="max-w-2xl mb-16">
+              <div className="inline-flex items-center gap-2 glass-subtle px-3 py-1.5 rounded-full mb-4 border border-yellow-500/20">
+                <Star size={14} className="text-yellow-400 fill-yellow-400" />
+                <span className="text-xs text-yellow-400 font-medium">Testimonials</span>
+              </div>
+              <h2 className="text-3xl lg:text-4xl font-bold">
+                Loved by teams
+                <span className="text-gray-500"> worldwide</span>
               </h2>
-              <p className="text-xl text-gray-600">
-                See why thousands of teams switched from Google and Microsoft.
-              </p>
             </div>
 
-            <div className="grid md:grid-cols-3 gap-8">
-              {testimonials.map((t) => (
-                <div key={t.author} className="bg-white p-8 rounded-2xl">
+            <div className="grid md:grid-cols-3 gap-6">
+              {testimonials.map((t, index) => (
+                <div key={index} className="glass rounded-2xl border border-white/5 p-6 hover:border-white/20 transition-all hover:-translate-y-1">
                   <div className="flex gap-1 mb-4">
                     {[...Array(5)].map((_, i) => (
-                      <Star key={i} size={20} className="text-yellow-400 fill-yellow-400" />
+                      <Star key={i} size={16} className="text-yellow-400 fill-yellow-400" />
                     ))}
                   </div>
-                  <p className="text-gray-700 mb-6 leading-relaxed">{t.text}</p>
+                  <p className="text-gray-300 mb-6 leading-relaxed">"{t.quote}"</p>
                   <div className="flex items-center gap-3">
-                    <div className="w-12 h-12 rounded-full bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center text-white font-bold">
-                      {t.initials}
+                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-sm font-bold shadow-lg shadow-purple-500/25">
+                      {t.avatar}
                     </div>
                     <div>
-                      <div className="font-semibold text-gray-900">{t.author}</div>
-                      <div className="text-sm text-gray-500">{t.role}</div>
+                      <div className="font-medium text-sm">{t.author}</div>
+                      <div className="text-gray-500 text-xs">{t.role}</div>
                     </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* Comparison */}
-        <section className="py-24 px-4 sm:px-6 lg:px-8">
-          <div className="max-w-4xl mx-auto">
-            <div className="text-center mb-16">
-              <span className="inline-block bg-blue-100 text-blue-700 px-4 py-1.5 rounded-full text-sm font-semibold uppercase tracking-wide mb-4">
-                Compare
-              </span>
-              <h2 className="text-3xl lg:text-4xl font-extrabold text-gray-900 mb-4">
-                Why teams switch to Bheem
-              </h2>
-            </div>
-
-            <div className="bg-white rounded-2xl overflow-hidden shadow-lg border border-gray-200">
-              <div className="grid grid-cols-4 bg-gray-900 text-white">
-                <div className="p-5 font-semibold">Feature</div>
-                <div className="p-5 font-semibold text-center bg-blue-600">Bheem</div>
-                <div className="p-5 font-semibold text-center">Google</div>
-                <div className="p-5 font-semibold text-center">Microsoft</div>
-              </div>
-              {comparison.map((row, i) => (
-                <div key={row.feature} className={`grid grid-cols-4 border-t border-gray-200 ${i % 2 === 0 ? 'bg-gray-50' : ''}`}>
-                  <div className="p-5 font-medium text-gray-900">{row.feature}</div>
-                  <div className="p-5 flex justify-center bg-blue-50">
-                    {row.bheem === true ? <Check size={24} className="text-green-500" /> : row.bheem}
-                  </div>
-                  <div className="p-5 flex justify-center">
-                    {row.google === true ? <Check size={24} className="text-green-500" /> :
-                     row.google === false ? <X size={24} className="text-red-400" /> :
-                     <span className="text-yellow-600 font-medium">{row.google}</span>}
-                  </div>
-                  <div className="p-5 flex justify-center">
-                    {row.microsoft === true ? <Check size={24} className="text-green-500" /> :
-                     row.microsoft === false ? <X size={24} className="text-red-400" /> :
-                     <span className="text-yellow-600 font-medium">{row.microsoft}</span>}
                   </div>
                 </div>
               ))}
@@ -541,49 +735,52 @@ export default function LandingPage() {
         </section>
 
         {/* Pricing */}
-        <section id="pricing" className="py-24 px-4 sm:px-6 lg:px-8 bg-gray-50">
-          <div className="max-w-6xl mx-auto">
-            <div className="text-center mb-16">
-              <span className="inline-block bg-blue-100 text-blue-700 px-4 py-1.5 rounded-full text-sm font-semibold uppercase tracking-wide mb-4">
-                Pricing
-              </span>
-              <h2 className="text-3xl lg:text-4xl font-extrabold text-gray-900 mb-4">
+        <section id="pricing" className="relative z-10 py-24">
+          <div className="max-w-7xl mx-auto px-6 lg:px-8">
+            <div className="text-center max-w-2xl mx-auto mb-16">
+              <div className="inline-flex items-center gap-2 glass-subtle px-3 py-1.5 rounded-full mb-4 border border-blue-500/20">
+                <Zap size={14} className="text-blue-400" />
+                <span className="text-xs text-blue-400 font-medium">Pricing</span>
+              </div>
+              <h2 className="text-3xl lg:text-4xl font-bold mb-4">
                 Simple, transparent pricing
               </h2>
-              <p className="text-xl text-gray-600">
+              <p className="text-gray-400 text-lg">
                 AI included in every plan. No hidden fees. Cancel anytime.
               </p>
             </div>
 
-            <div className="grid md:grid-cols-3 gap-8">
-              {plans.map((plan) => (
+            <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+              {plans.map((plan, index) => (
                 <div
-                  key={plan.id}
-                  className={`bg-white rounded-2xl p-8 border-2 transition-all relative ${
+                  key={index}
+                  className={`relative glass rounded-2xl border p-6 transition-all hover:-translate-y-1 ${
                     plan.popular
-                      ? 'border-blue-500 shadow-xl scale-105'
-                      : 'border-gray-200 hover:border-blue-500'
+                      ? 'border-purple-500/50 shadow-lg shadow-purple-500/10'
+                      : 'border-white/5 hover:border-white/20'
                   }`}
                 >
                   {plan.popular && (
-                    <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-blue-600 text-white px-4 py-1 rounded-full text-sm font-semibold">
+                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-gradient-to-r from-purple-500 to-pink-500 px-4 py-1 rounded-full text-xs font-semibold shadow-lg">
                       Most Popular
                     </div>
                   )}
 
-                  <h3 className="text-xl font-bold text-gray-900 mb-2">{plan.name}</h3>
-                  <p className="text-gray-600 mb-6">{plan.description}</p>
-
                   <div className="mb-6">
-                    <span className="text-4xl font-extrabold text-gray-900">{plan.price}</span>
-                    <span className="text-gray-500">{plan.period}</span>
+                    <h3 className="text-xl font-bold mb-1">{plan.name}</h3>
+                    <p className="text-sm text-gray-500">{plan.description}</p>
                   </div>
 
-                  <ul className="space-y-4 mb-8">
-                    {plan.features.map((feature) => (
-                      <li key={feature} className="flex items-center gap-3 text-gray-600">
-                        <Check size={20} className="text-green-500 flex-shrink-0" />
-                        {feature}
+                  <div className="mb-6">
+                    <span className="text-4xl font-bold">{plan.price}</span>
+                    <span className="text-gray-500 text-sm">{plan.period}</span>
+                  </div>
+
+                  <ul className="space-y-3 mb-6">
+                    {plan.features.map((feature, i) => (
+                      <li key={i} className="flex items-start gap-2 text-sm">
+                        <CheckCircle2 size={16} className="text-green-400 mt-0.5 flex-shrink-0" />
+                        <span className="text-gray-300">{feature}</span>
                       </li>
                     ))}
                   </ul>
@@ -591,7 +788,7 @@ export default function LandingPage() {
                   {plan.isEnterprise ? (
                     <a
                       href="mailto:sales@bheem.cloud"
-                      className="block w-full text-center py-4 rounded-xl font-semibold border-2 border-gray-200 text-gray-900 hover:border-blue-500 hover:text-blue-600 transition-colors"
+                      className="block w-full text-center py-3 rounded-xl font-medium glass border border-white/10 hover:bg-white/10 transition-all"
                     >
                       Contact sales
                     </a>
@@ -599,13 +796,13 @@ export default function LandingPage() {
                     <button
                       onClick={() => startCheckout(plan.id)}
                       disabled={loading === plan.id}
-                      className={`w-full py-4 rounded-xl font-semibold transition-all ${
+                      className={`w-full py-3 rounded-xl font-medium transition-all disabled:opacity-50 ${
                         plan.popular
-                          ? 'bg-blue-600 text-white hover:bg-blue-700'
-                          : 'border-2 border-gray-200 text-gray-900 hover:border-blue-500 hover:text-blue-600'
-                      } disabled:opacity-50 disabled:cursor-not-allowed`}
+                          ? 'bg-gradient-to-r from-purple-500 to-pink-500 hover:shadow-lg hover:shadow-purple-500/25'
+                          : 'glass border border-white/10 hover:bg-white/10'
+                      }`}
                     >
-                      {loading === plan.id ? 'Processing...' : 'Subscribe Now'}
+                      {loading === plan.id ? 'Processing...' : 'Get started'}
                     </button>
                   )}
                 </div>
@@ -614,88 +811,209 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* CTA */}
-        <section className="py-24 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-gray-900 to-gray-800 text-white">
-          <div className="max-w-3xl mx-auto text-center">
-            <h2 className="text-3xl lg:text-4xl font-extrabold mb-6">
-              Ready to work smarter?
-            </h2>
-            <p className="text-xl text-gray-300 mb-10">
-              Join thousands of teams who've already made the switch. Start your free trial today—no credit card required.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link
-                href="/login?mode=signup"
-                className="inline-flex items-center justify-center bg-white text-gray-900 px-8 py-4 rounded-xl font-semibold text-lg hover:bg-gray-100 transition-colors"
-              >
-                Start free trial
-              </Link>
-              <a
-                href="mailto:sales@bheem.cloud"
-                className="inline-flex items-center justify-center border-2 border-gray-600 text-white px-8 py-4 rounded-xl font-semibold text-lg hover:border-white transition-colors"
-              >
-                Talk to sales
-              </a>
+        {/* CTA Section */}
+        <section className="relative z-10 py-24">
+          <div className="max-w-4xl mx-auto px-6 lg:px-8">
+            <div className="relative glass rounded-3xl border border-white/10 p-12 lg:p-16 text-center overflow-hidden">
+              {/* Background effects */}
+              <div className="absolute top-0 left-1/4 w-[300px] h-[300px] bg-purple-500/30 rounded-full blur-[100px]" />
+              <div className="absolute bottom-0 right-1/4 w-[200px] h-[200px] bg-pink-500/30 rounded-full blur-[100px]" />
+
+              <div className="relative">
+                <h2 className="text-3xl lg:text-4xl font-bold mb-4">
+                  Ready to transform how your team works?
+                </h2>
+                <p className="text-gray-400 text-lg mb-8 max-w-xl mx-auto">
+                  Join thousands of teams who've already made the switch. Start your free trial today.
+                </p>
+                <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                  <Link href="/login?mode=signup" className="group inline-flex items-center justify-center gap-2 bg-white text-gray-900 px-8 py-4 rounded-xl font-semibold hover:bg-gray-100 transition-all hover:shadow-lg">
+                    Start free trial
+                    <ArrowRight size={18} className="group-hover:translate-x-1 transition-transform" />
+                  </Link>
+                  <a href="mailto:sales@bheem.cloud" className="inline-flex items-center justify-center px-8 py-4 rounded-xl font-semibold glass border border-white/10 hover:bg-white/10 transition-all">
+                    Talk to sales
+                  </a>
+                </div>
+              </div>
             </div>
           </div>
         </section>
 
         {/* Footer */}
-        <footer className="bg-gray-900 text-white py-16 px-4 sm:px-6 lg:px-8">
-          <div className="max-w-7xl mx-auto">
-            <div className="grid md:grid-cols-5 gap-12 mb-12">
-              <div className="md:col-span-2">
-                <Link href="/" className="flex items-center gap-2 font-bold text-xl mb-4">
-                  <div className="w-9 h-9 bg-gradient-to-br from-blue-600 to-purple-600 rounded-lg flex items-center justify-center">
-                    <span className="text-white font-bold text-lg">B</span>
+        <footer className="relative z-10 border-t border-white/5 py-12">
+          <div className="max-w-7xl mx-auto px-6 lg:px-8">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-8 mb-12">
+              <div className="col-span-2">
+                <Link href="/" className="flex items-center gap-2 mb-4">
+                  <div className="w-8 h-8 bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 rounded-lg flex items-center justify-center">
+                    <span className="text-white font-bold text-sm">B</span>
                   </div>
-                  Bheem
+                  <span className="text-lg font-bold">Bheem</span>
                 </Link>
-                <p className="text-gray-400 leading-relaxed max-w-xs">
+                <p className="text-gray-500 text-sm max-w-xs">
                   The all-in-one workspace for modern teams. Email, docs, meetings, and AI—together at last.
                 </p>
               </div>
 
-              {[
-                { title: 'Product', links: [{ label: 'Email', href: '/mail' }, { label: 'Documents', href: '/docs' }, { label: 'Meetings', href: '/meet' }] },
-                { title: 'Resources', links: [{ label: 'Academy', href: 'https://academy.bheem.cloud' }, { label: 'Documentation', href: '#' }, { label: 'API', href: '#' }] },
-                { title: 'Company', links: [{ label: 'About', href: '#' }, { label: 'Contact', href: 'mailto:sales@bheem.cloud' }, { label: 'Privacy', href: '#' }] },
-              ].map((col) => (
-                <div key={col.title}>
-                  <h4 className="text-sm font-semibold uppercase tracking-wide text-gray-500 mb-4">{col.title}</h4>
-                  <ul className="space-y-3">
-                    {col.links.map((link) => (
-                      <li key={link.label}>
-                        <a href={link.href} className="text-gray-400 hover:text-white transition-colors">{link.label}</a>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
+              <div>
+                <h4 className="text-sm font-semibold mb-4">Product</h4>
+                <ul className="space-y-2 text-sm text-gray-500">
+                  <li><a href="/mail" className="hover:text-white transition-colors">Email</a></li>
+                  <li><a href="/docs" className="hover:text-white transition-colors">Documents</a></li>
+                  <li><a href="/meet" className="hover:text-white transition-colors">Meetings</a></li>
+                  <li><a href="/calendar" className="hover:text-white transition-colors">Calendar</a></li>
+                </ul>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-semibold mb-4">Resources</h4>
+                <ul className="space-y-2 text-sm text-gray-500">
+                  <li><a href="https://academy.bheem.cloud" className="hover:text-white transition-colors">Academy</a></li>
+                  <li><a href="#" className="hover:text-white transition-colors">Documentation</a></li>
+                  <li><a href="#" className="hover:text-white transition-colors">API</a></li>
+                </ul>
+              </div>
+
+              <div>
+                <h4 className="text-sm font-semibold mb-4">Company</h4>
+                <ul className="space-y-2 text-sm text-gray-500">
+                  <li><a href="#" className="hover:text-white transition-colors">About</a></li>
+                  <li><a href="mailto:sales@bheem.cloud" className="hover:text-white transition-colors">Contact</a></li>
+                  <li><a href="#" className="hover:text-white transition-colors">Privacy</a></li>
+                </ul>
+              </div>
             </div>
 
-            <div className="pt-8 border-t border-gray-800 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div className="pt-8 border-t border-white/5 flex flex-col md:flex-row justify-between items-center gap-4">
               <p className="text-gray-500 text-sm">© 2024 Bheem Cloud. All rights reserved.</p>
-              <div className="flex gap-4">
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 rounded-lg text-sm text-gray-400">
-                  <Shield size={14} />
-                  SOC 2 Compliant
-                </div>
-                <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-800 rounded-lg text-sm text-gray-400">
-                  <Shield size={14} />
-                  GDPR Ready
-                </div>
+              <div className="flex gap-3">
+                <span className="flex items-center gap-2 px-3 py-1.5 glass rounded-lg text-xs text-gray-400 border border-white/5">
+                  <Shield size={12} />
+                  SOC 2
+                </span>
+                <span className="flex items-center gap-2 px-3 py-1.5 glass rounded-lg text-xs text-gray-400 border border-white/5">
+                  <Lock size={12} />
+                  GDPR
+                </span>
               </div>
             </div>
           </div>
         </footer>
       </div>
 
-      <style jsx>{`
+      <style jsx global>{`
+        /* Glassmorphism utilities */
+        .glass {
+          background: rgba(255, 255, 255, 0.03);
+          backdrop-filter: blur(20px);
+          -webkit-backdrop-filter: blur(20px);
+        }
+
+        .glass-subtle {
+          background: rgba(255, 255, 255, 0.02);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+        }
+
+        /* Animations */
+        @keyframes blob {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          25% { transform: translate(20px, -30px) scale(1.1); }
+          50% { transform: translate(-20px, 20px) scale(0.9); }
+          75% { transform: translate(30px, 10px) scale(1.05); }
+        }
+
+        .animate-blob {
+          animation: blob 20s ease-in-out infinite;
+        }
+
+        .animation-delay-2000 {
+          animation-delay: 2s;
+        }
+
+        .animation-delay-4000 {
+          animation-delay: 4s;
+        }
+
+        .animation-delay-500 {
+          animation-delay: 0.5s;
+        }
+
+        .animation-delay-1000 {
+          animation-delay: 1s;
+        }
+
+        .animation-delay-1500 {
+          animation-delay: 1.5s;
+        }
+
+        @keyframes float {
+          0%, 100% { transform: translateY(0px); }
+          50% { transform: translateY(-10px); }
+        }
+
+        .animate-float {
+          animation: float 4s ease-in-out infinite;
+        }
+
+        @keyframes float-particle {
+          0%, 100% {
+            transform: translate(0, 0) rotate(0deg);
+            opacity: 0.2;
+          }
+          25% {
+            transform: translate(10px, -20px) rotate(90deg);
+            opacity: 0.5;
+          }
+          50% {
+            transform: translate(-10px, -40px) rotate(180deg);
+            opacity: 0.3;
+          }
+          75% {
+            transform: translate(15px, -20px) rotate(270deg);
+            opacity: 0.4;
+          }
+        }
+
+        .animate-float-particle {
+          animation: float-particle ease-in-out infinite;
+        }
+
+        @keyframes pulse-slow {
+          0%, 100% { opacity: 0.15; transform: scale(1); }
+          50% { opacity: 0.25; transform: scale(1.05); }
+        }
+
+        .animate-pulse-slow {
+          animation: pulse-slow 8s ease-in-out infinite;
+        }
+
+        @keyframes gradient {
+          0%, 100% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+        }
+
+        .animate-gradient {
+          background-size: 200% 200%;
+          animation: gradient 3s ease-in-out infinite;
+        }
+
+        @keyframes shimmer {
+          0% { opacity: 0.3; }
+          50% { opacity: 0.6; }
+          100% { opacity: 0.3; }
+        }
+
+        .animate-shimmer {
+          animation: shimmer 2s ease-in-out infinite;
+        }
+
         @keyframes slide-in {
           from { transform: translateX(100%); opacity: 0; }
           to { transform: translateX(0); opacity: 1; }
         }
+
         .animate-slide-in {
           animation: slide-in 0.3s ease;
         }

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 
 import AppSwitcherBar from '@/components/shared/AppSwitcherBar';
+import AppLauncher from '@/components/shared/AppLauncher';
 import DriveSidebar from '@/components/drive/DriveSidebar';
 import DriveFilterBar, { FilterState } from '@/components/drive/DriveFilterBar';
 import FileGrid from '@/components/drive/FileGrid';
@@ -327,6 +328,9 @@ export default function DrivePage() {
                   <button className="p-2 hover:bg-gray-100 rounded-lg" title="Details">
                     <Info size={18} className="text-gray-600" />
                   </button>
+
+                  {/* App Launcher */}
+                  <AppLauncher />
                 </div>
               </div>
 

@@ -10,6 +10,7 @@ from pydantic import BaseModel, EmailStr
 from datetime import datetime, date
 
 from core.database import get_db
+from core.security import get_current_user, require_tenant_member
 from services.appointment_service import AppointmentService
 
 router = APIRouter(prefix="/appointments", tags=["Appointments"])
@@ -126,11 +127,17 @@ class AvailableSlotsResponse(BaseModel):
 @router.post("/types", response_model=AppointmentTypeResponse)
 async def create_appointment_type(
     request: CreateAppointmentTypeRequest,
-    tenant_id: UUID = Query(...),
-    user_id: UUID = Query(...),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_tenant_member())
 ):
-    """Create a new appointment type"""
+    """Create a new appointment type for the current user"""
+    # user_id references tenant_users.id, not users.id
+    tenant_user_id = current_user.get("tenant_user_id")
+    if not tenant_user_id:
+        raise HTTPException(status_code=400, detail="Tenant user ID not found")
+    user_id = UUID(tenant_user_id)
+    tenant_id = UUID(current_user.get("tenant_id"))
+
     service = AppointmentService(db)
     appointment_type = await service.create_appointment_type(
         tenant_id=tenant_id,
@@ -142,11 +149,20 @@ async def create_appointment_type(
 
 @router.get("/types", response_model=List[AppointmentTypeResponse])
 async def list_appointment_types(
-    user_id: UUID = Query(...),
+    user_id: Optional[UUID] = Query(None, description="Tenant User ID (defaults to current user)"),
     active_only: bool = True,
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_tenant_member())
 ):
-    """List appointment types for a user"""
+    """List appointment types for a user (defaults to current authenticated user)"""
+    # Use current user's tenant_user_id if not specified
+    # user_id references tenant_users.id, not users.id
+    if user_id is None:
+        tenant_user_id = current_user.get("tenant_user_id")
+        if not tenant_user_id:
+            raise HTTPException(status_code=400, detail="Tenant user ID not found")
+        user_id = UUID(tenant_user_id)
+
     service = AppointmentService(db)
     types = await service.list_appointment_types(
         user_id=user_id,
@@ -186,10 +202,16 @@ async def get_appointment_type_by_slug(
 async def update_appointment_type(
     appointment_type_id: UUID,
     request: UpdateAppointmentTypeRequest,
-    user_id: UUID = Query(...),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_tenant_member())
 ):
     """Update an appointment type"""
+    # user_id references tenant_users.id, not users.id
+    tenant_user_id = current_user.get("tenant_user_id")
+    if not tenant_user_id:
+        raise HTTPException(status_code=400, detail="Tenant user ID not found")
+    user_id = UUID(tenant_user_id)
+
     service = AppointmentService(db)
     apt_type = await service.update_appointment_type(
         appointment_type_id=appointment_type_id,
@@ -204,10 +226,16 @@ async def update_appointment_type(
 @router.delete("/types/{appointment_type_id}")
 async def delete_appointment_type(
     appointment_type_id: UUID,
-    user_id: UUID = Query(...),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_tenant_member())
 ):
     """Delete an appointment type"""
+    # user_id references tenant_users.id, not users.id
+    tenant_user_id = current_user.get("tenant_user_id")
+    if not tenant_user_id:
+        raise HTTPException(status_code=400, detail="Tenant user ID not found")
+    user_id = UUID(tenant_user_id)
+
     service = AppointmentService(db)
     success = await service.delete_appointment_type(
         appointment_type_id=appointment_type_id,
@@ -381,6 +409,36 @@ async def get_booking_stats(
 # =============================================
 # Public Booking Page
 # =============================================
+
+@router.get("/public/by-slug/{slug}")
+async def get_public_booking_page_by_slug(
+    slug: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get public booking page data by slug only (finds first active match)"""
+    service = AppointmentService(db)
+    apt_type = await service.get_appointment_type_by_slug_only(slug)
+    if not apt_type:
+        raise HTTPException(status_code=404, detail="Booking page not found")
+
+    # Return public-safe data including host info
+    return {
+        "id": apt_type.get("id"),
+        "user_id": apt_type.get("user_id"),
+        "host_name": apt_type.get("host_name"),
+        "host_email": apt_type.get("host_email"),
+        "name": apt_type.get("name"),
+        "slug": apt_type.get("slug"),
+        "description": apt_type.get("description"),
+        "duration_minutes": apt_type.get("duration_minutes"),
+        "color": apt_type.get("color"),
+        "location_type": apt_type.get("location_type"),
+        "questions": apt_type.get("questions", []),
+        "availability": apt_type.get("availability", {}),
+        "min_notice_hours": apt_type.get("min_notice_hours"),
+        "max_days_ahead": apt_type.get("max_days_ahead")
+    }
+
 
 @router.get("/public/{user_id}/{slug}")
 async def get_public_booking_page(

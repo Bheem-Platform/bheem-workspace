@@ -107,6 +107,67 @@ class AppointmentService:
         )
         return result.scalar_one_or_none()
 
+    async def get_appointment_type_by_slug_only(
+        self,
+        slug: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get an appointment type by slug only (finds first active match with host info)"""
+        from sqlalchemy import text
+
+        query = text("""
+            SELECT
+                at.id,
+                at.user_id,
+                at.tenant_id,
+                at.name,
+                at.slug,
+                at.description,
+                at.duration_minutes,
+                at.color,
+                at.location_type,
+                at.custom_location,
+                at.availability,
+                at.questions,
+                at.buffer_before_minutes,
+                at.buffer_after_minutes,
+                at.min_notice_hours,
+                at.max_days_ahead,
+                tu.email as host_email,
+                COALESCE(tu.name, tu.email) as host_name
+            FROM workspace.appointment_types at
+            JOIN workspace.tenant_users tu ON at.user_id = tu.id
+            WHERE at.slug = :slug
+            AND at.is_active = true
+            LIMIT 1
+        """)
+
+        result = await self.db.execute(query, {"slug": slug})
+        row = result.fetchone()
+
+        if not row:
+            return None
+
+        return {
+            "id": str(row.id),
+            "user_id": str(row.user_id),
+            "tenant_id": str(row.tenant_id),
+            "name": row.name,
+            "slug": row.slug,
+            "description": row.description,
+            "duration_minutes": row.duration_minutes,
+            "color": row.color,
+            "location_type": row.location_type,
+            "custom_location": row.custom_location,
+            "availability": row.availability or {},
+            "questions": row.questions or [],
+            "buffer_before_minutes": row.buffer_before_minutes,
+            "buffer_after_minutes": row.buffer_after_minutes,
+            "min_notice_hours": row.min_notice_hours,
+            "max_days_ahead": row.max_days_ahead,
+            "host_email": row.host_email,
+            "host_name": row.host_name
+        }
+
     async def list_appointment_types(
         self,
         user_id: UUID,

@@ -14,15 +14,25 @@ import {
   FilePlus,
   FileText,
   LayoutTemplate,
+  Table,
+  Presentation,
+  Video,
+  ClipboardList,
+  Star,
+  Clock,
+  MoreVertical,
 } from 'lucide-react';
 import { useRouter } from 'next/router';
 import * as docsEditorApi from '@/lib/docsEditorApi';
-import AppSwitcher from '@/components/shared/AppSwitcher';
+import * as productivityApi from '@/lib/productivityApi';
+import AppSwitcherBar from '@/components/shared/AppSwitcherBar';
+import AppLauncher from '@/components/shared/AppLauncher';
 import FileGrid from '@/components/docs/FileGrid';
 import Breadcrumb from '@/components/docs/Breadcrumb';
 import { UploadModal } from '@/components/docs/UploadArea';
 import CreateFolderModal from '@/components/docs/CreateFolderModal';
 import ShareModal from '@/components/docs/ShareModal';
+import DocsSidebar from '@/components/docs/DocsSidebar';
 import { useDocsStore } from '@/stores/docsStore';
 import { useCredentialsStore } from '@/stores/credentialsStore';
 import { useRequireAuth } from '@/stores/authStore';
@@ -68,6 +78,15 @@ export default function DocsPage() {
   const [showNewDocDropdown, setShowNewDocDropdown] = useState(false);
   const [isCreatingDoc, setIsCreatingDoc] = useState(false);
 
+  // Unified view state
+  const [showUnifiedHome, setShowUnifiedHome] = useState(true);
+  const [quickFilter, setQuickFilter] = useState<'recent' | 'starred' | 'all'>('recent');
+  const [quickAccessFilter, setQuickAccessFilter] = useState<string | null>(null);
+  const [selectedTypes, setSelectedTypes] = useState<string[]>([]);
+  const [unifiedDocs, setUnifiedDocs] = useState<productivityApi.UnifiedDocument[]>([]);
+  const [unifiedLoading, setUnifiedLoading] = useState(false);
+  const [stats, setStats] = useState<productivityApi.ProductivityStats | null>(null);
+
   // Create new document
   const handleCreateNewDocument = async () => {
     setIsCreatingDoc(true);
@@ -88,12 +107,61 @@ export default function DocsPage() {
   // V2 API uses JWT auth, doesn't need Nextcloud credentials
   const USE_V2_API = true;
 
+  // Check if we should show unified home based on route
+  useEffect(() => {
+    const { type, folder } = router.query;
+    // Show unified home when on /docs without type or folder query
+    setShowUnifiedHome(!type && !folder && currentPath === '/');
+  }, [router.query, currentPath]);
+
+  // Fetch unified documents for home view
+  const fetchUnifiedDocs = useCallback(async () => {
+    if (!showUnifiedHome && !quickAccessFilter) return;
+
+    setUnifiedLoading(true);
+    try {
+      const typeFilter = selectedTypes.length === 1
+        ? selectedTypes[0] as productivityApi.DocumentTypeFilter
+        : 'all';
+
+      const params: productivityApi.UnifiedDocumentsParams = {
+        type_filter: typeFilter,
+        starred_only: quickAccessFilter === 'starred',
+        shared_only: quickAccessFilter === 'shared',
+        deleted_only: quickAccessFilter === 'trash',
+        limit: 50,
+        sort_by: quickAccessFilter === 'recent' || !quickAccessFilter ? 'updated_at' : 'title',
+        sort_order: 'desc',
+        search: searchQuery || undefined,
+      };
+
+      const response = await productivityApi.getUnifiedDocuments(params);
+      setUnifiedDocs(response.items);
+
+      // Also fetch stats
+      const statsData = await productivityApi.getProductivityStats();
+      setStats(statsData);
+    } catch (error) {
+      console.error('Failed to fetch unified documents:', error);
+    } finally {
+      setUnifiedLoading(false);
+    }
+  }, [showUnifiedHome, quickAccessFilter, selectedTypes, searchQuery]);
+
+  useEffect(() => {
+    if ((showUnifiedHome || quickAccessFilter) && isLoggedIn && !authLoading) {
+      fetchUnifiedDocs();
+    }
+  }, [showUnifiedHome, quickAccessFilter, isLoggedIn, authLoading, fetchUnifiedDocs]);
+
   // Fetch files on mount only (not on every path change - navigation handles that)
   useEffect(() => {
     if (!authLoading && isLoggedIn) {
       if (USE_V2_API) {
         // V2 API uses JWT auth - just fetch files
-        fetchFiles();
+        if (!showUnifiedHome) {
+          fetchFiles();
+        }
       } else if (!isNextcloudAuthenticated) {
         // Legacy API needs Nextcloud credentials
         setShowCredentialsPrompt(true);
@@ -102,7 +170,30 @@ export default function DocsPage() {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, isLoggedIn, isNextcloudAuthenticated]);
+  }, [authLoading, isLoggedIn, isNextcloudAuthenticated, showUnifiedHome]);
+
+  // Handle type filter toggle
+  const handleTypeToggle = (type: string) => {
+    setSelectedTypes((prev) =>
+      prev.includes(type) ? prev.filter((t) => t !== type) : [...prev, type]
+    );
+  };
+
+  // Handle opening unified document
+  const handleUnifiedDocOpen = (doc: productivityApi.UnifiedDocument) => {
+    router.push(productivityApi.getDocumentRoute(doc));
+  };
+
+  // Handle star toggle
+  const handleStarToggle = async (doc: productivityApi.UnifiedDocument, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await productivityApi.toggleStar(doc.type, doc.id);
+      fetchUnifiedDocs();
+    } catch (error) {
+      console.error('Failed to toggle star:', error);
+    }
+  };
 
   // Drag and drop
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -208,26 +299,54 @@ export default function DocsPage() {
           </div>
         )}
 
-        {/* App Switcher */}
-        <AppSwitcher
-          activeApp="docs"
-          collapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-        />
+        {/* App Switcher Bar */}
+        <AppSwitcherBar activeApp="docs" />
+
+        {/* Docs Sidebar */}
+        <div
+          className="fixed left-[60px] top-0 bottom-0 w-[240px] z-40"
+        >
+          <DocsSidebar
+            activeType={showUnifiedHome ? 'home' : 'docs'}
+            activeQuickAccess={quickAccessFilter || undefined}
+            onQuickAccessChange={(id) => {
+              setQuickAccessFilter(id);
+              if (id === 'recent') setQuickFilter('recent');
+              else if (id === 'starred') setQuickFilter('starred');
+              else setQuickFilter('all');
+            }}
+            onCreateNew={openCreateFolderModal}
+            onUpload={() => setShowUploadModal(true)}
+          />
+        </div>
 
         {/* Main Content */}
         <div
-          className="flex-1 transition-all duration-300"
-          style={{ marginLeft: sidebarCollapsed ? 64 : 240 }}
+          className="flex-1 transition-all duration-300 flex flex-col"
+          style={{ marginLeft: 300 }}
         >
-          <div className="max-w-7xl mx-auto px-6 py-8">
+          <div className="flex-1 max-w-6xl mx-auto px-6 py-8 w-full">
             {/* Header */}
             <div className="flex items-center justify-between mb-6">
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">Bheem Docs</h1>
-                <p className="text-gray-500">Manage and collaborate on documents</p>
+                <h1 className="text-2xl font-bold text-gray-900">
+                  {quickAccessFilter === 'recent' ? 'Recent' :
+                   quickAccessFilter === 'starred' ? 'Starred' :
+                   quickAccessFilter === 'shared' ? 'Shared with me' :
+                   quickAccessFilter === 'trash' ? 'Trash' :
+                   showUnifiedHome ? 'Home' : 'Documents'}
+                </h1>
+                <p className="text-gray-500">
+                  {quickAccessFilter === 'recent' ? 'Recently opened documents' :
+                   quickAccessFilter === 'starred' ? 'Your starred documents' :
+                   quickAccessFilter === 'shared' ? 'Documents shared with you' :
+                   quickAccessFilter === 'trash' ? 'Deleted documents' :
+                   showUnifiedHome ? 'All your documents in one place' : 'Manage and collaborate on documents'}
+                </p>
               </div>
               <div className="flex items-center gap-3">
+                {/* App Launcher */}
+                <AppLauncher />
                 {/* New Document Dropdown */}
                 <div className="relative">
                   <button
@@ -409,8 +528,46 @@ export default function DocsPage() {
               </div>
             )}
 
-            {/* Files Grid/List */}
-            <FileGrid onFileOpen={handleFileOpen} />
+            {/* Unified Home View or Files Grid/List */}
+            {(showUnifiedHome || quickAccessFilter) ? (
+              <div className="space-y-6">
+                {/* Unified Documents Grid */}
+                {unifiedLoading ? (
+                  <div className="flex items-center justify-center py-20">
+                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500" />
+                  </div>
+                ) : unifiedDocs.length === 0 ? (
+                  <div className="text-center py-20">
+                    <FileText size={64} className="mx-auto text-gray-300 mb-4" />
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">No documents found</h3>
+                    <p className="text-gray-500">
+                      {quickAccessFilter === 'starred'
+                        ? 'Star some documents to see them here'
+                        : quickAccessFilter === 'shared'
+                        ? 'No documents have been shared with you yet'
+                        : quickAccessFilter === 'trash'
+                        ? 'Your trash is empty'
+                        : 'Create a new document to get started'
+                      }
+                    </p>
+                  </div>
+                ) : (
+                  <div className={`grid gap-4 ${viewMode === 'grid' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : 'grid-cols-1'}`}>
+                    {unifiedDocs.map((doc) => (
+                      <UnifiedDocCard
+                        key={`${doc.type}-${doc.id}`}
+                        doc={doc}
+                        viewMode={viewMode}
+                        onOpen={() => handleUnifiedDocOpen(doc)}
+                        onStar={(e) => handleStarToggle(doc, e)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <FileGrid onFileOpen={handleFileOpen} />
+            )}
           </div>
         </div>
 
@@ -478,6 +635,111 @@ function DeleteConfirmModal({
             Delete
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Unified Document Card Component
+interface UnifiedDocCardProps {
+  doc: productivityApi.UnifiedDocument;
+  viewMode: 'grid' | 'list';
+  onOpen: () => void;
+  onStar: (e: React.MouseEvent) => void;
+}
+
+function UnifiedDocCard({ doc, viewMode, onOpen, onStar }: UnifiedDocCardProps) {
+  const config = productivityApi.typeConfig[doc.type];
+
+  const iconMap: Record<string, React.ReactNode> = {
+    FileText: <FileText size={viewMode === 'grid' ? 40 : 24} />,
+    Table: <Table size={viewMode === 'grid' ? 40 : 24} />,
+    Presentation: <Presentation size={viewMode === 'grid' ? 40 : 24} />,
+    Video: <Video size={viewMode === 'grid' ? 40 : 24} />,
+    ClipboardList: <ClipboardList size={viewMode === 'grid' ? 40 : 24} />,
+  };
+
+  if (viewMode === 'list') {
+    return (
+      <div
+        onClick={onOpen}
+        className="flex items-center gap-4 p-4 bg-white rounded-xl border border-gray-200 hover:shadow-md hover:border-gray-300 cursor-pointer transition-all group"
+      >
+        <div className={`p-2 rounded-lg ${config.bgColor} ${config.color}`}>
+          {iconMap[config.icon]}
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="font-medium text-gray-900 truncate">{doc.title}</h3>
+          <div className="flex items-center gap-2 text-sm text-gray-500">
+            <span className={config.color}>{config.label}</span>
+            <span>•</span>
+            <span>{productivityApi.formatRelativeTime(doc.updated_at)}</span>
+          </div>
+        </div>
+        <button
+          onClick={onStar}
+          className={`p-2 rounded-lg transition-colors ${
+            doc.is_starred
+              ? 'text-yellow-500 hover:bg-yellow-50'
+              : 'text-gray-400 hover:text-yellow-500 hover:bg-gray-50 opacity-0 group-hover:opacity-100'
+          }`}
+        >
+          <Star size={18} fill={doc.is_starred ? 'currentColor' : 'none'} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      onClick={onOpen}
+      className="bg-white rounded-xl border border-gray-200 hover:shadow-lg hover:border-gray-300 cursor-pointer transition-all overflow-hidden group"
+    >
+      {/* Thumbnail/Icon Area */}
+      <div className={`h-32 flex items-center justify-center ${config.bgColor}`}>
+        {doc.thumbnail_url ? (
+          <img src={doc.thumbnail_url} alt={doc.title} className="w-full h-full object-cover" />
+        ) : (
+          <div className={config.color}>{iconMap[config.icon]}</div>
+        )}
+      </div>
+
+      {/* Content */}
+      <div className="p-4">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <h3 className="font-medium text-gray-900 truncate" title={doc.title}>
+              {doc.title}
+            </h3>
+            <div className="flex items-center gap-2 mt-1 text-sm text-gray-500">
+              <span className={config.color}>{config.label}</span>
+              <span>•</span>
+              <span>{productivityApi.formatRelativeTime(doc.updated_at)}</span>
+            </div>
+          </div>
+          <button
+            onClick={onStar}
+            className={`p-1.5 rounded-lg transition-colors ${
+              doc.is_starred
+                ? 'text-yellow-500 hover:bg-yellow-50'
+                : 'text-gray-400 hover:text-yellow-500 hover:bg-gray-50 opacity-0 group-hover:opacity-100'
+            }`}
+          >
+            <Star size={16} fill={doc.is_starred ? 'currentColor' : 'none'} />
+          </button>
+        </div>
+
+        {/* Extra info for specific types */}
+        {doc.extra && (
+          <div className="mt-2 text-xs text-gray-500">
+            {doc.type === 'forms' && doc.extra.response_count !== undefined && (
+              <span>{doc.extra.response_count} responses</span>
+            )}
+            {doc.type === 'videos' && doc.extra.duration && (
+              <span>{Math.floor(doc.extra.duration / 60)}:{(doc.extra.duration % 60).toString().padStart(2, '0')}</span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

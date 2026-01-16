@@ -13,7 +13,7 @@ import type { Calendar, CalendarEvent, CreateEventData, UpdateEventData } from '
  */
 
 // Event source types
-export type EventSource = 'personal' | 'project';
+export type EventSource = 'personal' | 'project' | 'bheem_meet';
 export type ERPEventType = 'meeting' | 'task' | 'milestone' | 'reminder';
 
 // Project for dropdown

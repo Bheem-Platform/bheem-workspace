@@ -21,6 +21,7 @@ import { useMailStore } from '@/stores/mailStore';
 import { useCredentialsStore, useRequireMailAuth } from '@/stores/credentialsStore';
 import { useRequireAuth } from '@/stores/authStore';
 import { useMailWebSocket } from '@/hooks/useMailWebSocket';
+import * as mailApi from '@/lib/mailApi';
 import type { Email } from '@/types/mail';
 
 export default function MailPage() {
@@ -110,36 +111,54 @@ export default function MailPage() {
   useEffect(() => {
     const verifySession = async () => {
       if (!authLoading && isLoggedIn) {
-        if (!isMailAuthenticated) {
-          setShowLoginOverlay(true);
-          setSessionVerified(true);
-        } else {
-          // Verify session with backend before proceeding
-          try {
-            const isValid = await checkMailSession();
-            if (isValid) {
-              // Session is valid, fetch data
-              fetchFolders();
-              fetchEmails();
-              // Subscribe to INBOX for real-time updates
-              subscribeFolder('INBOX');
-            } else {
-              // Session invalid, show login overlay
-              setShowLoginOverlay(true);
-            }
-          } catch (error) {
-            console.error('Session verification failed:', error);
-            // Clear invalid session and show login
-            destroyMailSession();
+        // Always check backend for active session first (may have been created during login)
+        try {
+          const status = await mailApi.getMailSessionStatus();
+
+          if (status.active && status.email && status.session_id) {
+            // Backend has active session - sync with frontend store
+            console.log('[Mail] Found active backend session for:', status.email);
+
+            // Update the credentials store with the session info
+            const expiresAt = new Date(
+              Date.now() + (status.expires_in_seconds || 86400) * 1000
+            ).toISOString();
+
+            // Manually update the store state (since we're not going through createMailSession)
+            useCredentialsStore.setState({
+              mailSession: {
+                email: status.email,
+                sessionId: status.session_id,
+                expiresAt,
+                active: true,
+              },
+              isMailAuthenticated: true,
+              error: null,
+            });
+
+            // Session is valid, fetch data
+            fetchFolders();
+            fetchEmails();
+            // Subscribe to INBOX for real-time updates
+            subscribeFolder('INBOX');
+            setShowLoginOverlay(false);
+          } else {
+            // No active backend session
+            console.log('[Mail] No active backend session, showing login');
             setShowLoginOverlay(true);
           }
-          setSessionVerified(true);
+        } catch (error) {
+          console.error('[Mail] Session check failed:', error);
+          // Clear any stale frontend session and show login
+          destroyMailSession();
+          setShowLoginOverlay(true);
         }
+        setSessionVerified(true);
       }
     };
 
     verifySession();
-  }, [authLoading, isLoggedIn, isMailAuthenticated]);
+  }, [authLoading, isLoggedIn]);
 
   // Keyboard shortcuts
   useHotkeys('c', () => openCompose(), { enabled: !isComposeOpen });
@@ -209,8 +228,8 @@ export default function MailPage() {
     );
   }
 
-  // Show login overlay if not mail-authenticated
-  if (showLoginOverlay || !isMailAuthenticated) {
+  // Show login overlay if session verification determined we need login
+  if (showLoginOverlay) {
     return <MailLoginOverlay onSuccess={handleLoginSuccess} />;
   }
 

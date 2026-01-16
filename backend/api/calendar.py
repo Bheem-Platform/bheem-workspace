@@ -8,6 +8,7 @@ from typing import Optional, List, Literal
 from datetime import datetime, timedelta
 from enum import Enum
 
+from sqlalchemy import text
 from core.security import get_current_user
 from services.caldav_service import (
     caldav_service,
@@ -380,6 +381,53 @@ async def get_events(
             logger.warning(f"ERP calendar fetch failed: {e}")
             errors.append(f"ERP calendar unavailable")
 
+    # Fetch Bheem Meet events from workspace.calendar_events (if not filtered to project only)
+    if source != "project":
+        try:
+            from core.database import async_session_maker
+            user_id = current_user.get("id") or current_user.get("sub")
+
+            async with async_session_maker() as db:
+                result = await db.execute(
+                    text("""
+                        SELECT id, uid, summary, description, location, start_time, end_time,
+                               conference_type, conference_url, conference_data, all_day
+                        FROM workspace.calendar_events
+                        WHERE user_id = CAST(:user_id AS uuid)
+                        AND start_time >= :start_time
+                        AND start_time <= :end_time
+                        ORDER BY start_time
+                    """),
+                    {
+                        "user_id": user_id,
+                        "start_time": start,
+                        "end_time": end
+                    }
+                )
+                meet_events = result.fetchall()
+
+                for event in meet_events:
+                    transformed = {
+                        "uid": str(event.uid),
+                        "id": str(event.id),
+                        "title": event.summary,
+                        "start": event.start_time.isoformat() if event.start_time else None,
+                        "end": event.end_time.isoformat() if event.end_time else None,
+                        "location": event.location or "",
+                        "description": event.description or "",
+                        "all_day": event.all_day or False,
+                        "event_source": "bheem_meet",
+                        "source_color": "#10B981",  # Emerald for Bheem Meet
+                        "source_label": "Bheem Meet",
+                        "conference_type": event.conference_type,
+                        "conference_url": event.conference_url,
+                    }
+                    all_events.append(transformed)
+
+        except Exception as e:
+            logger.warning(f"Bheem Meet calendar fetch failed: {e}")
+            # Don't add to errors - this is optional
+
     # Sort all events by start time
     all_events.sort(key=lambda e: e.get("start", ""))
 
@@ -391,7 +439,8 @@ async def get_events(
         "events": all_events,
         "sources": {
             "personal": source != "project",
-            "project": source != "personal"
+            "project": source != "personal",
+            "bheem_meet": source != "project"
         },
         "errors": errors if errors else None
     }
@@ -566,8 +615,10 @@ async def delete_event(
     # Auto-detect source from event_uid if not provided
     # ERP events typically have UUID format, Nextcloud events have .ics suffix
     if not event_source:
-        # Check if it looks like a UUID (ERP) or has .ics suffix (Nextcloud)
-        if ".ics" in event_uid or "@" in event_uid:
+        # Check for Bheem Meet events first (have @bheem.cloud or start with meet-)
+        if "@bheem.cloud" in event_uid or event_uid.startswith("meet-"):
+            event_source = "bheem_meet"
+        elif ".ics" in event_uid or "@" in event_uid:
             event_source = "personal"
         else:
             # Try ERP first, fall back to Nextcloud
@@ -579,6 +630,13 @@ async def delete_event(
                     event_source = "personal"
             except:
                 event_source = "personal"
+
+    # Bheem Meet events should be deleted from Bheem Meet, not Calendar
+    if event_source == "bheem_meet":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Bheem Meet events cannot be deleted from Calendar. Please use Bheem Meet to cancel this meeting."
+        )
 
     if event_source == "project":
         # Delete from ERP Project Management
@@ -648,7 +706,10 @@ async def update_event(
 
     # Auto-detect source if not provided
     if not event_source:
-        if ".ics" in event_uid or "@" in event_uid:
+        # Check for Bheem Meet events first (have @bheem.cloud or start with meet-)
+        if "@bheem.cloud" in event_uid or event_uid.startswith("meet-"):
+            event_source = "bheem_meet"
+        elif ".ics" in event_uid or "@" in event_uid:
             event_source = "personal"
         else:
             try:
@@ -659,6 +720,13 @@ async def update_event(
                     event_source = "personal"
             except:
                 event_source = "personal"
+
+    # Bheem Meet events are read-only from the unified calendar view
+    if event_source == "bheem_meet":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Bheem Meet events cannot be edited from Calendar. Please use Bheem Meet to manage this event."
+        )
 
     if event_source == "project":
         # Update in ERP Project Management

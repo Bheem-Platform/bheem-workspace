@@ -401,6 +401,7 @@ async def get_user_tenant_role(user_id: str, db: AsyncSession) -> Optional[Dict[
     """
     query = text("""
         SELECT
+            tu.id as tenant_user_id,
             tu.tenant_id,
             tu.role,
             tu.email,
@@ -417,6 +418,7 @@ async def get_user_tenant_role(user_id: str, db: AsyncSession) -> Optional[Dict[
 
     if row:
         return {
+            "tenant_user_id": str(row.tenant_user_id),
             "tenant_id": str(row.tenant_id),
             "tenant_role": row.role,
             "email": row.email,
@@ -508,6 +510,7 @@ def require_tenant_member():
             )
 
         # Add tenant info to user context
+        current_user["tenant_user_id"] = tenant_info.get("tenant_user_id")
         current_user["tenant_id"] = tenant_info.get("tenant_id")
         current_user["tenant_role"] = tenant_info.get("tenant_role")
         current_user["tenant_name"] = tenant_info.get("tenant_name")

@@ -305,6 +305,13 @@ except Exception as e:
     print(f"Could not load calendar router: {e}")
 
 try:
+    from api.calendar_tasks import router as calendar_tasks_router
+    app.include_router(calendar_tasks_router, prefix="/api/v1", tags=["Calendar Tasks"])
+    logger.info("Calendar Tasks API loaded")
+except Exception as e:
+    print(f"Could not load calendar tasks router: {e}")
+
+try:
     from api.sso import router as sso_router
     app.include_router(sso_router, prefix="/api/v1")
 except Exception as e:
@@ -657,14 +664,46 @@ try:
 except Exception as e:
     print(f"Could not load search router: {e}")
 
-# Frontend routes
-@app.get("/", response_class=HTMLResponse)
-async def homepage():
-    path = os.path.join(FRONTEND_PATH, "index.html")
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>Bheem Workspace</h1>")
+# =============================================
+# Phase 5: Unified Productivity & Videos
+# =============================================
+
+# Bheem Videos API
+try:
+    from api.videos import router as videos_router
+    app.include_router(videos_router, prefix="/api/v1", tags=["Bheem Videos"])
+    logger.info("Bheem Videos API loaded", action="videos_loaded")
+except Exception as e:
+    print(f"Could not load videos router: {e}")
+
+# Unified Productivity API (Home view for all doc types)
+try:
+    from api.productivity_unified import router as productivity_unified_router
+    app.include_router(productivity_unified_router, prefix="/api/v1", tags=["Unified Productivity"])
+    logger.info("Unified Productivity API loaded", action="productivity_unified_loaded")
+except Exception as e:
+    print(f"Could not load productivity_unified router: {e}")
+
+# Frontend routes - Proxy homepage to Next.js server
+@app.api_route("/", methods=["GET"])
+async def homepage(request: Request):
+    """Proxy homepage to Next.js server"""
+    target_url = NEXTJS_URL
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Service unavailable</h1><p>{str(e)}</p>", status_code=503)
 
 @app.api_route("/login", methods=["GET", "POST"])
 async def login_proxy(request: Request):
@@ -981,6 +1020,116 @@ async def drive_proxy(request: Request, path: str = ""):
             )
         except httpx.RequestError as e:
             return HTMLResponse(content=f"<h1>Drive service unavailable</h1><p>{str(e)}</p>", status_code=503)
+
+# Bheem Sheets - Proxy to Next.js server
+@app.api_route("/sheets/{path:path}", methods=["GET"])
+@app.api_route("/sheets", methods=["GET"])
+async def sheets_proxy(request: Request, path: str = ""):
+    """Proxy sheets routes to Next.js server"""
+    target_url = f"{NEXTJS_URL}/sheets/{path}" if path else f"{NEXTJS_URL}/sheets"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Sheets service unavailable</h1><p>{str(e)}</p>", status_code=503)
+
+# Bheem Slides - Proxy to Next.js server
+@app.api_route("/slides/{path:path}", methods=["GET"])
+@app.api_route("/slides", methods=["GET"])
+async def slides_proxy(request: Request, path: str = ""):
+    """Proxy slides routes to Next.js server"""
+    target_url = f"{NEXTJS_URL}/slides/{path}" if path else f"{NEXTJS_URL}/slides"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Slides service unavailable</h1><p>{str(e)}</p>", status_code=503)
+
+# Bheem Forms - Proxy to Next.js server
+@app.api_route("/forms/{path:path}", methods=["GET"])
+@app.api_route("/forms", methods=["GET"])
+async def forms_proxy(request: Request, path: str = ""):
+    """Proxy forms routes to Next.js server"""
+    target_url = f"{NEXTJS_URL}/forms/{path}" if path else f"{NEXTJS_URL}/forms"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Forms service unavailable</h1><p>{str(e)}</p>", status_code=503)
+
+# Bheem Videos - Proxy to Next.js server
+@app.api_route("/videos/{path:path}", methods=["GET"])
+@app.api_route("/videos", methods=["GET"])
+async def videos_proxy(request: Request, path: str = ""):
+    """Proxy videos routes to Next.js server"""
+    target_url = f"{NEXTJS_URL}/videos/{path}" if path else f"{NEXTJS_URL}/videos"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Videos service unavailable</h1><p>{str(e)}</p>", status_code=503)
+
+# Bheem Booking Pages - Proxy to Next.js server
+@app.api_route("/book/{path:path}", methods=["GET"])
+@app.api_route("/book", methods=["GET"])
+async def book_proxy(request: Request, path: str = ""):
+    """Proxy booking pages to Next.js server"""
+    target_url = f"{NEXTJS_URL}/book/{path}" if path else f"{NEXTJS_URL}/book"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Booking service unavailable</h1><p>{str(e)}</p>", status_code=503)
 
 if __name__ == "__main__":
     import uvicorn

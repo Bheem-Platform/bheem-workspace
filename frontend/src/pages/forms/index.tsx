@@ -29,6 +29,9 @@ import {
 } from 'lucide-react';
 import { useRequireAuth } from '@/stores/authStore';
 import { api } from '@/lib/api';
+import AppSwitcherBar from '@/components/shared/AppSwitcherBar';
+import AppLauncher from '@/components/shared/AppLauncher';
+import DocsSidebar from '@/components/docs/DocsSidebar';
 
 interface FormItem {
   id: string;
@@ -174,47 +177,56 @@ export default function FormsPage() {
         <title>Bheem Forms - Surveys & Data Collection</title>
       </Head>
 
-      <div className="min-h-screen bg-gray-50">
-        {/* Header */}
-        <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="flex items-center justify-between h-16">
-              <div className="flex items-center space-x-4">
-                <Link href="/dashboard" className="flex items-center space-x-2">
-                  <FileQuestion className="h-8 w-8 text-purple-600" />
-                  <span className="text-xl font-semibold text-gray-900">Bheem Forms</span>
-                </Link>
-              </div>
+      <div className="min-h-screen bg-gray-50 flex">
+        {/* App Switcher Bar */}
+        <AppSwitcherBar activeApp="docs" />
 
-              {/* Search */}
-              <div className="flex-1 max-w-2xl mx-8">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
-                  <input
-                    type="text"
-                    placeholder="Search forms..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 bg-gray-100 border border-transparent rounded-lg focus:bg-white focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
-                  />
+        {/* Docs Sidebar */}
+        <div className="fixed left-[60px] top-0 bottom-0 w-[240px] z-40">
+          <DocsSidebar activeType="forms" />
+        </div>
+
+        {/* Main Content */}
+        <div className="flex-1 ml-[300px]">
+          {/* Header */}
+          <header className="bg-white border-b border-gray-200 sticky top-0 z-30">
+            <div className="px-6">
+              <div className="flex items-center justify-between h-16">
+                <div className="flex items-center space-x-4">
+                  <FileQuestion className="h-8 w-8 text-purple-600" />
+                  <span className="text-xl font-semibold text-gray-900">Forms</span>
+                </div>
+
+                {/* Search */}
+                <div className="flex-1 max-w-xl mx-8">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" size={20} />
+                    <input
+                      type="text"
+                      placeholder="Search forms..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 bg-gray-100 border border-transparent rounded-lg focus:bg-white focus:border-purple-500 focus:ring-1 focus:ring-purple-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
+                    className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
+                    title={viewMode === 'grid' ? 'List view' : 'Grid view'}
+                  >
+                    {viewMode === 'grid' ? <List size={20} /> : <Grid size={20} />}
+                  </button>
+                  <AppLauncher />
                 </div>
               </div>
-
-              {/* Actions */}
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => setViewMode(viewMode === 'grid' ? 'list' : 'grid')}
-                  className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
-                  title={viewMode === 'grid' ? 'List view' : 'Grid view'}
-                >
-                  {viewMode === 'grid' ? <List size={20} /> : <Grid size={20} />}
-                </button>
-              </div>
             </div>
-          </div>
-        </header>
+          </header>
 
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <main className="px-6 py-8">
           {/* Create New Section */}
           <section className="mb-8">
             <h2 className="text-sm font-medium text-gray-500 mb-4">Start a new form</h2>
@@ -493,44 +505,45 @@ export default function FormsPage() {
               </table>
             </div>
           )}
-        </main>
+          </main>
 
-        {/* Context Menu */}
-        {contextMenu && (
-          <>
-            <div
-              className="fixed inset-0 z-50"
-              onClick={() => setContextMenu(null)}
-            />
-            <div
-              className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-48"
-              style={{ left: contextMenu.x, top: contextMenu.y }}
-            >
-              <button
-                onClick={() => duplicateForm(contextMenu.id)}
-                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
-              >
-                <Copy size={16} />
-                <span>Make a copy</span>
-              </button>
-              <button
+          {/* Context Menu */}
+          {contextMenu && (
+            <>
+              <div
+                className="fixed inset-0 z-50"
                 onClick={() => setContextMenu(null)}
-                className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+              />
+              <div
+                className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-48"
+                style={{ left: contextMenu.x, top: contextMenu.y }}
               >
-                <Share2 size={16} />
-                <span>Share</span>
-              </button>
-              <hr className="my-1" />
-              <button
-                onClick={() => deleteForm(contextMenu.id)}
-                className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center space-x-2"
-              >
-                <Trash2 size={16} />
-                <span>Remove</span>
-              </button>
-            </div>
-          </>
-        )}
+                <button
+                  onClick={() => duplicateForm(contextMenu.id)}
+                  className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+                >
+                  <Copy size={16} />
+                  <span>Make a copy</span>
+                </button>
+                <button
+                  onClick={() => setContextMenu(null)}
+                  className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+                >
+                  <Share2 size={16} />
+                  <span>Share</span>
+                </button>
+                <hr className="my-1" />
+                <button
+                  onClick={() => deleteForm(contextMenu.id)}
+                  className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50 flex items-center space-x-2"
+                >
+                  <Trash2 size={16} />
+                  <span>Remove</span>
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </>
   );
