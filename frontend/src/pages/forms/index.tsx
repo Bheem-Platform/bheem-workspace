@@ -26,6 +26,10 @@ import {
   Send,
   Eye,
   Settings,
+  Download,
+  Cloud,
+  HardDrive,
+  FileSpreadsheet,
 } from 'lucide-react';
 import { useRequireAuth } from '@/stores/authStore';
 import { api } from '@/lib/api';
@@ -120,6 +124,33 @@ export default function FormsPage() {
       setContextMenu(null);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to duplicate form');
+    }
+  };
+
+  const exportToNextcloud = async (id: string) => {
+    try {
+      const response = await api.post(`/forms/${id}/export-to-nextcloud`);
+      if (response.data.success) {
+        alert(`Exported to Nextcloud!\nFile: ${response.data.file_name}\n${response.data.response_count} responses exported.`);
+        if (response.data.share_url) {
+          window.open(response.data.share_url, '_blank');
+        }
+      }
+      setContextMenu(null);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to export to Nextcloud');
+    }
+  };
+
+  const syncToDrive = async (id: string) => {
+    try {
+      const response = await api.post(`/forms/${id}/sync-to-drive`);
+      if (response.data.success) {
+        alert(response.data.message || 'Form synced to Drive!');
+      }
+      setContextMenu(null);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to sync to Drive');
     }
   };
 
@@ -515,7 +546,7 @@ export default function FormsPage() {
                 onClick={() => setContextMenu(null)}
               />
               <div
-                className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-48"
+                className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-56"
                 style={{ left: contextMenu.x, top: contextMenu.y }}
               >
                 <button
@@ -531,6 +562,21 @@ export default function FormsPage() {
                 >
                   <Share2 size={16} />
                   <span>Share</span>
+                </button>
+                <hr className="my-1" />
+                <button
+                  onClick={() => exportToNextcloud(contextMenu.id)}
+                  className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+                >
+                  <FileSpreadsheet size={16} />
+                  <span>Export to Nextcloud</span>
+                </button>
+                <button
+                  onClick={() => syncToDrive(contextMenu.id)}
+                  className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
+                >
+                  <HardDrive size={16} />
+                  <span>Add to Drive</span>
                 </button>
                 <hr className="my-1" />
                 <button

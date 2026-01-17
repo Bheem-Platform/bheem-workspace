@@ -2,7 +2,7 @@
 Bheem Workspace - Productivity Suite Database Models
 Sheets, Slides, Forms, and related entities
 """
-from sqlalchemy import Column, String, Boolean, Integer, Text, DateTime, ForeignKey, Index, Enum as SQLEnum
+from sqlalchemy import Column, String, Boolean, Integer, BigInteger, Text, DateTime, ForeignKey, Index, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID, JSONB, INET
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -52,6 +52,10 @@ class Spreadsheet(Base):
         Index('idx_spreadsheets_tenant', 'tenant_id'),
         Index('idx_spreadsheets_owner', 'created_by'),
         Index('idx_spreadsheets_folder', 'folder_id'),
+        Index('idx_spreadsheets_storage_path', 'storage_path'),
+        Index('idx_spreadsheets_storage_mode', 'storage_mode'),
+        Index('idx_spreadsheets_linked_entity', 'linked_entity_type', 'linked_entity_id'),
+        Index('idx_spreadsheets_document_key', 'document_key'),
         {"schema": "workspace"}
     )
 
@@ -66,6 +70,26 @@ class Spreadsheet(Base):
     is_deleted = Column(Boolean, default=False)
     deleted_at = Column(DateTime)
 
+    # Storage fields (OnlyOffice integration)
+    storage_path = Column(String(500))  # S3 path to XLSX file
+    storage_bucket = Column(String(100))
+    file_size = Column(BigInteger, default=0)
+    checksum = Column(String(64))
+    nextcloud_path = Column(String(500))
+    version = Column(Integer, default=1)
+    document_key = Column(String(100))  # OnlyOffice document key for collaboration
+
+    # Mode: 'internal' (ERP) or 'external' (SaaS)
+    storage_mode = Column(String(20), default='external')
+
+    # ERP entity linking for internal mode
+    linked_entity_type = Column(String(50))  # SALES_INVOICE, PURCHASE_ORDER, etc.
+    linked_entity_id = Column(UUID(as_uuid=True))
+
+    # Edit tracking
+    last_edited_by = Column(UUID(as_uuid=True), ForeignKey("workspace.tenant_users.id"))
+    last_edited_at = Column(DateTime)
+
     # Metadata
     created_by = Column(UUID(as_uuid=True), ForeignKey("workspace.tenant_users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -74,6 +98,8 @@ class Spreadsheet(Base):
     # Relationships
     worksheets = relationship("Worksheet", back_populates="spreadsheet", cascade="all, delete-orphan")
     shares = relationship("SpreadsheetShare", back_populates="spreadsheet", cascade="all, delete-orphan")
+    versions = relationship("SpreadsheetVersion", back_populates="spreadsheet", cascade="all, delete-orphan")
+    edit_sessions = relationship("SpreadsheetEditSession", back_populates="spreadsheet", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Spreadsheet(id={self.id}, title={self.title})>"
@@ -139,6 +165,56 @@ class SpreadsheetShare(Base):
     spreadsheet = relationship("Spreadsheet", back_populates="shares")
 
 
+class SpreadsheetVersion(Base):
+    """Version history for spreadsheets"""
+    __tablename__ = "spreadsheet_versions"
+    __table_args__ = (
+        Index('idx_spreadsheet_versions_spreadsheet', 'spreadsheet_id'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    spreadsheet_id = Column(UUID(as_uuid=True), ForeignKey("workspace.spreadsheets.id", ondelete="CASCADE"), nullable=False)
+    version_number = Column(Integer, nullable=False)
+    storage_path = Column(String(500), nullable=False)
+    file_size = Column(BigInteger, default=0)
+    checksum = Column(String(64))
+    created_by = Column(UUID(as_uuid=True), ForeignKey("workspace.tenant_users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    comment = Column(Text)
+    is_current = Column(Boolean, default=False)
+
+    # Relationships
+    spreadsheet = relationship("Spreadsheet", back_populates="versions")
+
+    def __repr__(self):
+        return f"<SpreadsheetVersion(spreadsheet_id={self.spreadsheet_id}, version={self.version_number})>"
+
+
+class SpreadsheetEditSession(Base):
+    """OnlyOffice edit session tracking"""
+    __tablename__ = "spreadsheet_edit_sessions"
+    __table_args__ = (
+        Index('idx_spreadsheet_sessions_spreadsheet', 'spreadsheet_id'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    spreadsheet_id = Column(UUID(as_uuid=True), ForeignKey("workspace.spreadsheets.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tenant_users.id"), nullable=False)
+    document_key = Column(String(100), nullable=False)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    last_activity_at = Column(DateTime, default=datetime.utcnow)
+    ended_at = Column(DateTime)
+    status = Column(String(20), default='active')  # active, closed, error
+
+    # Relationships
+    spreadsheet = relationship("Spreadsheet", back_populates="edit_sessions")
+
+    def __repr__(self):
+        return f"<SpreadsheetEditSession(spreadsheet_id={self.spreadsheet_id}, status={self.status})>"
+
+
 # =============================================
 # Bheem Slides Models
 # =============================================
@@ -149,19 +225,21 @@ class Presentation(Base):
     __table_args__ = (
         Index('idx_presentations_tenant', 'tenant_id'),
         Index('idx_presentations_owner', 'created_by'),
+        Index('idx_presentations_storage_mode', 'storage_mode'),
+        Index('idx_presentations_entity', 'linked_entity_type', 'linked_entity_id'),
         {"schema": "workspace"}
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tenants.id", ondelete="CASCADE"), nullable=False)
-    title = Column(String(255), nullable=False)  
+    title = Column(String(255), nullable=False)
     description = Column(Text)
     folder_id = Column(UUID(as_uuid=True))
 
     # Theme settings
     theme = Column(JSONB, default={
         "font_heading": "Arial",
-        "font_body": "Arial",  
+        "font_body": "Arial",
         "color_primary": "#1a73e8",
         "color_secondary": "#34a853",
         "color_background": "#ffffff"
@@ -172,6 +250,26 @@ class Presentation(Base):
     is_deleted = Column(Boolean, default=False)
     deleted_at = Column(DateTime)
 
+    # Storage fields (OnlyOffice integration)
+    storage_path = Column(Text)  # S3/Nextcloud path to PPTX file
+    storage_bucket = Column(String(255))
+    file_size = Column(BigInteger)
+    checksum = Column(String(64))
+    nextcloud_path = Column(Text)
+    version = Column(Integer, default=1)
+    document_key = Column(String(255))  # OnlyOffice document key for collaboration
+
+    # Mode: 'internal' (ERP) or 'external' (SaaS)
+    storage_mode = Column(String(20), default='external')
+
+    # ERP entity linking for internal mode
+    linked_entity_type = Column(String(50))
+    linked_entity_id = Column(UUID(as_uuid=True))
+
+    # Edit tracking
+    last_edited_by = Column(UUID(as_uuid=True))
+    last_edited_at = Column(DateTime)
+
     # Metadata
     created_by = Column(UUID(as_uuid=True), ForeignKey("workspace.tenant_users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -180,6 +278,8 @@ class Presentation(Base):
     # Relationships
     slides = relationship("Slide", back_populates="presentation", cascade="all, delete-orphan", order_by="Slide.slide_index")
     shares = relationship("PresentationShare", back_populates="presentation", cascade="all, delete-orphan")
+    versions = relationship("PresentationVersion", back_populates="presentation", cascade="all, delete-orphan")
+    edit_sessions = relationship("PresentationEditSession", back_populates="presentation", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<Presentation(id={self.id}, title={self.title})>"
@@ -244,6 +344,57 @@ class PresentationShare(Base):
 
     # Relationships
     presentation = relationship("Presentation", back_populates="shares")
+
+
+class PresentationVersion(Base):
+    """Version history for presentations"""
+    __tablename__ = "presentation_versions"
+    __table_args__ = (
+        Index('idx_presentation_versions_presentation', 'presentation_id'),
+        Index('idx_presentation_versions_number', 'presentation_id', 'version_number'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    presentation_id = Column(UUID(as_uuid=True), ForeignKey("workspace.presentations.id", ondelete="CASCADE"), nullable=False)
+    version_number = Column(Integer, nullable=False)
+    storage_path = Column(Text, nullable=False)
+    file_size = Column(BigInteger)
+    checksum = Column(String(64))
+    created_by = Column(UUID(as_uuid=True), ForeignKey("workspace.tenant_users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    comment = Column(Text)
+
+    # Relationships
+    presentation = relationship("Presentation", back_populates="versions")
+
+    def __repr__(self):
+        return f"<PresentationVersion(presentation_id={self.presentation_id}, version={self.version_number})>"
+
+
+class PresentationEditSession(Base):
+    """OnlyOffice edit session tracking for presentations"""
+    __tablename__ = "presentation_edit_sessions"
+    __table_args__ = (
+        Index('idx_presentation_edit_sessions_presentation', 'presentation_id'),
+        Index('idx_presentation_edit_sessions_user', 'user_id'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    presentation_id = Column(UUID(as_uuid=True), ForeignKey("workspace.presentations.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tenant_users.id", ondelete="CASCADE"), nullable=False)
+    session_key = Column(String(255), nullable=False)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    last_activity = Column(DateTime, default=datetime.utcnow)
+    ended_at = Column(DateTime)
+    is_active = Column(Boolean, default=True)
+
+    # Relationships
+    presentation = relationship("Presentation", back_populates="edit_sessions")
+
+    def __repr__(self):
+        return f"<PresentationEditSession(presentation_id={self.presentation_id}, active={self.is_active})>"
 
 
 # =============================================
@@ -567,3 +718,40 @@ class ProductivityTemplate(Base):
     created_by = Column(UUID(as_uuid=True))
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# =============================================
+# Drive Items (unified Drive view)
+# =============================================
+
+class DriveItem(Base):
+    """Drive item - links forms, sheets, slides, etc. to Drive view"""
+    __tablename__ = "drive_items"
+    __table_args__ = (
+        Index('idx_drive_items_tenant', 'tenant_id'),
+        Index('idx_drive_items_type', 'item_type'),
+        Index('idx_drive_items_linked', 'linked_item_id'),
+        Index('idx_drive_items_parent', 'parent_folder_id'),
+        Index('idx_drive_items_owner', 'created_by'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("workspace.tenants.id", ondelete="CASCADE"), nullable=False)
+    name = Column(String(255), nullable=False)
+    item_type = Column(String(50), nullable=False)  # form, sheet, slide, video, doc, folder
+    linked_item_id = Column(UUID(as_uuid=True))  # Reference to the actual item
+    parent_folder_id = Column(UUID(as_uuid=True))  # For folder hierarchy
+
+    # Status
+    is_starred = Column(Boolean, default=False)
+    is_trashed = Column(Boolean, default=False)
+    trashed_at = Column(DateTime)
+
+    # Metadata
+    created_by = Column(UUID(as_uuid=True), ForeignKey("workspace.tenant_users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<DriveItem(id={self.id}, name={self.name}, type={self.item_type})>"

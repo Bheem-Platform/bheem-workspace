@@ -158,10 +158,8 @@ export default function DocsPage() {
   useEffect(() => {
     if (!authLoading && isLoggedIn) {
       if (USE_V2_API) {
-        // V2 API uses JWT auth - just fetch files
-        if (!showUnifiedHome) {
-          fetchFiles();
-        }
+        // V2 API uses JWT auth - always fetch files (for both Home and Documents views)
+        fetchFiles();
       } else if (!isNextcloudAuthenticated) {
         // Legacy API needs Nextcloud credentials
         setShowCredentialsPrompt(true);
@@ -528,41 +526,64 @@ export default function DocsPage() {
               </div>
             )}
 
-            {/* Unified Home View or Files Grid/List */}
+            {/* Home View shows both folders/files and unified documents */}
             {(showUnifiedHome || quickAccessFilter) ? (
               <div className="space-y-6">
-                {/* Unified Documents Grid */}
-                {unifiedLoading ? (
-                  <div className="flex items-center justify-center py-20">
-                    <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500" />
-                  </div>
-                ) : unifiedDocs.length === 0 ? (
-                  <div className="text-center py-20">
-                    <FileText size={64} className="mx-auto text-gray-300 mb-4" />
-                    <h3 className="text-lg font-medium text-gray-900 mb-2">No documents found</h3>
-                    <p className="text-gray-500">
-                      {quickAccessFilter === 'starred'
-                        ? 'Star some documents to see them here'
-                        : quickAccessFilter === 'shared'
-                        ? 'No documents have been shared with you yet'
-                        : quickAccessFilter === 'trash'
-                        ? 'Your trash is empty'
-                        : 'Create a new document to get started'
-                      }
-                    </p>
+                {/* Show folders and files from the file system */}
+                {loading.files ? (
+                  <div className="flex items-center justify-center py-10">
+                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-purple-500" />
                   </div>
                 ) : (
-                  <div className={`grid gap-4 ${viewMode === 'grid' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : 'grid-cols-1'}`}>
-                    {unifiedDocs.map((doc) => (
-                      <UnifiedDocCard
-                        key={`${doc.type}-${doc.id}`}
-                        doc={doc}
-                        viewMode={viewMode}
-                        onOpen={() => handleUnifiedDocOpen(doc)}
-                        onStar={(e) => handleStarToggle(doc, e)}
-                      />
-                    ))}
-                  </div>
+                  <>
+                    {/* Files Grid - shows folders and documents */}
+                    {filteredFiles.length > 0 && (
+                      <div className="mb-8">
+                        <h2 className="text-lg font-semibold text-gray-900 mb-4">Your Files</h2>
+                        <FileGrid onFileOpen={handleFileOpen} />
+                      </div>
+                    )}
+
+                    {/* Unified Documents from productivity API */}
+                    {unifiedLoading ? (
+                      <div className="flex items-center justify-center py-10">
+                        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-purple-500" />
+                      </div>
+                    ) : unifiedDocs.length > 0 ? (
+                      <div>
+                        <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent Documents</h2>
+                        <div className={`grid gap-4 ${viewMode === 'grid' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : 'grid-cols-1'}`}>
+                          {unifiedDocs.map((doc) => (
+                            <UnifiedDocCard
+                              key={`${doc.type}-${doc.id}`}
+                              doc={doc}
+                              viewMode={viewMode}
+                              onOpen={() => handleUnifiedDocOpen(doc)}
+                              onStar={(e) => handleStarToggle(doc, e)}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+
+                    {/* Empty state when nothing is found */}
+                    {filteredFiles.length === 0 && unifiedDocs.length === 0 && !unifiedLoading && (
+                      <div className="text-center py-20">
+                        <FileText size={64} className="mx-auto text-gray-300 mb-4" />
+                        <h3 className="text-lg font-medium text-gray-900 mb-2">No documents found</h3>
+                        <p className="text-gray-500">
+                          {quickAccessFilter === 'starred'
+                            ? 'Star some documents to see them here'
+                            : quickAccessFilter === 'shared'
+                            ? 'No documents have been shared with you yet'
+                            : quickAccessFilter === 'trash'
+                            ? 'Your trash is empty'
+                            : 'Create a new document or folder to get started'
+                          }
+                        </p>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
             ) : (

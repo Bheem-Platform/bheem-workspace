@@ -1,8 +1,15 @@
 """
 Bheem Sheets - Spreadsheet API
-Google Sheets-like spreadsheet functionality
+Google Sheets-like spreadsheet functionality with OnlyOffice integration
+
+Features:
+- XLSX file-based storage (S3)
+- OnlyOffice Document Server for real-time editing
+- Version control
+- ERP entity linking (internal mode)
+- Sharing and collaboration
 """
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, Request
 from pydantic import BaseModel, validator
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -13,10 +20,106 @@ import json
 
 from core.database import get_db
 from core.security import get_current_user, require_tenant_admin
+from core.config import settings
+from services.spreadsheet_service import SpreadsheetService, SpreadsheetMode, get_spreadsheet_service
 import logging
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sheets", tags=["Bheem Sheets"])
+
+
+async def ensure_tenant_and_user_exist(db: AsyncSession, tenant_id: str, user_id: str, company_code: str = None, user_email: str = None, user_name: str = None) -> None:
+    """Ensure tenant and user records exist for ERP users.
+
+    ERP users have company_id/user_id but no workspace.tenants or tenant_users records.
+    This function creates them if needed.
+    """
+    # Ensure tenant exists
+    try:
+        result = await db.execute(text("""
+            SELECT id FROM workspace.tenants WHERE id = CAST(:tenant_id AS uuid)
+        """), {"tenant_id": tenant_id})
+        if not result.fetchone():
+            # Create tenant for ERP company
+            org_name = f"Organization {company_code or 'ERP'}"
+            base_slug = (company_code or "erp").lower().replace(" ", "-")
+            slug = f"{base_slug}-{tenant_id[:8]}"
+            owner_email = user_email or f"admin@{base_slug}.local"
+            await db.execute(text("""
+                INSERT INTO workspace.tenants (id, name, slug, owner_email, created_at, updated_at)
+                VALUES (CAST(:id AS uuid), :name, :slug, :owner_email, NOW(), NOW())
+                ON CONFLICT (id) DO NOTHING
+            """), {"id": tenant_id, "name": org_name, "slug": slug, "owner_email": owner_email})
+            await db.commit()
+            logger.info(f"Created tenant {tenant_id} for ERP company {company_code}")
+    except Exception as e:
+        logger.warning(f"Could not create/check tenant: {e}")
+        try:
+            await db.rollback()
+        except:
+            pass
+
+    # Ensure user exists in tenant_users
+    try:
+        result = await db.execute(text("""
+            SELECT id FROM workspace.tenant_users WHERE id = CAST(:user_id AS uuid)
+        """), {"user_id": user_id})
+        if not result.fetchone():
+            # Create user record - tenant_users has both id and user_id columns
+            display_name = user_name or user_email or "ERP User"
+            await db.execute(text("""
+                INSERT INTO workspace.tenant_users (id, user_id, tenant_id, email, name, role, created_at, updated_at)
+                VALUES (CAST(:user_id AS uuid), CAST(:user_id AS uuid), CAST(:tenant_id AS uuid), :email, :name, 'admin', NOW(), NOW())
+                ON CONFLICT (id) DO NOTHING
+            """), {"user_id": user_id, "tenant_id": tenant_id, "email": user_email, "name": display_name})
+            await db.commit()
+            logger.info(f"Created tenant_user {user_id} for tenant {tenant_id}")
+    except Exception as e:
+        logger.warning(f"Could not create/check user: {e}")
+        try:
+            await db.rollback()
+        except:
+            pass
+
+
+def get_user_ids(current_user: dict) -> tuple:
+    """Extract tenant_id and user_id from current user context.
+
+    tenant_id can come from:
+    - company_id (ERP users)
+    - erp_company_id (external users)
+    - tenant_id (workspace users)
+    """
+    tenant_id = current_user.get("tenant_id") or current_user.get("company_id") or current_user.get("erp_company_id")
+    user_id = current_user.get("id") or current_user.get("user_id")
+
+    if not tenant_id or not user_id:
+        raise HTTPException(
+            status_code=400,
+            detail="User context incomplete - missing tenant_id or user_id"
+        )
+
+    # Convert to string for SQL queries
+    if isinstance(tenant_id, UUID):
+        tenant_id = str(tenant_id)
+    if isinstance(user_id, UUID):
+        user_id = str(user_id)
+
+    return tenant_id, user_id
+
+
+async def get_user_ids_with_tenant(current_user: dict, db: AsyncSession) -> tuple:
+    """Extract user IDs and ensure tenant and user exist for ERP users."""
+    tenant_id, user_id = get_user_ids(current_user)
+    company_code = current_user.get("company_code")
+    user_email = current_user.get("username") or current_user.get("email")
+    user_name = current_user.get("name") or current_user.get("full_name")
+
+    # Ensure tenant and user exist (creates for ERP users if needed)
+    await ensure_tenant_and_user_exist(db, tenant_id, user_id, company_code, user_email, user_name)
+
+    return tenant_id, user_id
 
 
 # =============================================
@@ -82,6 +185,7 @@ class ShareRequest(BaseModel):
 @router.get("")
 async def list_sheets(
     folder_id: Optional[str] = Query(None),
+    starred: bool = Query(False, alias="starred"),
     starred_only: bool = Query(False),
     search: Optional[str] = Query(None),
     limit: int = Query(50, le=100),
@@ -90,8 +194,9 @@ async def list_sheets(
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """List spreadsheets accessible by the user"""
-    user_id = current_user.get("id") or current_user.get("user_id")
-    tenant_id = current_user.get("tenant_id")
+    tenant_id, user_id = get_user_ids(current_user)
+    # Support both 'starred' and 'starred_only' parameters
+    filter_starred = starred or starred_only
 
     query = """
         SELECT
@@ -112,7 +217,7 @@ async def list_sheets(
         query += " AND s.folder_id = CAST(:folder_id AS uuid)"
         params["folder_id"] = folder_id
 
-    if starred_only:
+    if filter_starred:
         query += " AND s.is_starred = TRUE"
 
     if search:
@@ -153,8 +258,7 @@ async def create_sheet(
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Create a new spreadsheet"""
-    user_id = current_user.get("id") or current_user.get("user_id")
-    tenant_id = current_user.get("tenant_id")
+    tenant_id, user_id = await get_user_ids_with_tenant(current_user, db)
     sheet_id = str(uuid.uuid4())
 
     # Create spreadsheet
@@ -217,6 +321,77 @@ async def create_sheet(
     }
 
 
+# =============================================
+# OnlyOffice V2 Endpoints (must be before /{sheet_id} routes)
+# =============================================
+
+class CreateSpreadsheetV2(BaseModel):
+    """Enhanced spreadsheet creation with OnlyOffice support"""
+    title: str
+    description: Optional[str] = None
+    folder_id: Optional[str] = None
+    template_id: Optional[str] = None
+    linked_entity_type: Optional[str] = None  # For ERP linking (internal mode)
+    linked_entity_id: Optional[str] = None
+
+    @validator('title')
+    def validate_title_v2(cls, v):
+        if not v or len(v.strip()) < 1:
+            raise ValueError('Title is required')
+        if len(v) > 255:
+            raise ValueError('Title too long')
+        return v.strip()
+
+
+@router.post("/v2", response_model=Dict[str, Any])
+async def create_spreadsheet_v2(
+    data: CreateSpreadsheetV2,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Create a new spreadsheet with OnlyOffice support.
+
+    This endpoint creates an XLSX file in S3 storage and returns
+    the configuration needed for OnlyOffice editing.
+
+    For internal mode (ERP users), you can optionally link the
+    spreadsheet to an ERP entity like an invoice or purchase order.
+    """
+    tenant_id, user_id = await get_user_ids_with_tenant(current_user, db)
+
+    # Determine mode from user context
+    tenant_mode = current_user.get("tenant_mode", "external")
+    mode = SpreadsheetMode.INTERNAL if tenant_mode == "internal" else SpreadsheetMode.EXTERNAL
+
+    # Get company_id for internal mode
+    company_id = current_user.get("company_id") if mode == SpreadsheetMode.INTERNAL else None
+
+    service = get_spreadsheet_service(db)
+
+    try:
+        result = await service.create_spreadsheet(
+            title=data.title,
+            mode=mode,
+            tenant_id=UUID(tenant_id),
+            user_id=UUID(user_id),
+            company_id=UUID(company_id) if company_id else None,
+            description=data.description,
+            folder_id=UUID(data.folder_id) if data.folder_id else None,
+            template_id=data.template_id,
+            linked_entity_type=data.linked_entity_type,
+            linked_entity_id=UUID(data.linked_entity_id) if data.linked_entity_id else None,
+        )
+
+        return result
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to create spreadsheet: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create spreadsheet")
+
+
 @router.get("/{sheet_id}")
 async def get_sheet(
     sheet_id: str,
@@ -224,8 +399,7 @@ async def get_sheet(
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get spreadsheet details with worksheets"""
-    user_id = current_user.get("id") or current_user.get("user_id")
-    tenant_id = current_user.get("tenant_id")
+    tenant_id, user_id = get_user_ids(current_user)
 
     # Get spreadsheet
     result = await db.execute(text("""
@@ -293,8 +467,7 @@ async def update_sheet(
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Update spreadsheet metadata"""
-    user_id = current_user.get("id") or current_user.get("user_id")
-    tenant_id = current_user.get("tenant_id")
+    tenant_id, user_id = get_user_ids(current_user)
 
     # Verify access
     existing = await db.execute(text("""
@@ -340,8 +513,7 @@ async def delete_sheet(
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Delete a spreadsheet (soft delete by default)"""
-    user_id = current_user.get("id") or current_user.get("user_id")
-    tenant_id = current_user.get("tenant_id")
+    tenant_id, user_id = get_user_ids(current_user)
 
     # Verify ownership
     existing = await db.execute(text("""
@@ -378,6 +550,119 @@ async def delete_sheet(
     await db.commit()
 
     return {"message": f"Spreadsheet '{sheet.title}' deleted successfully"}
+
+
+@router.post("/{sheet_id}/star")
+async def toggle_star(
+    sheet_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """Toggle star status of a spreadsheet"""
+    tenant_id, user_id = get_user_ids(current_user)
+
+    # Get current star status
+    result = await db.execute(text("""
+        SELECT id, is_starred FROM workspace.spreadsheets
+        WHERE id = CAST(:id AS uuid) AND tenant_id = CAST(:tenant_id AS uuid)
+        AND (created_by = CAST(:user_id AS uuid) OR EXISTS (
+            SELECT 1 FROM workspace.spreadsheet_shares
+            WHERE spreadsheet_id = CAST(:id AS uuid) AND user_id = CAST(:user_id AS uuid)
+        ))
+    """), {"id": sheet_id, "user_id": user_id, "tenant_id": tenant_id})
+
+    sheet = result.fetchone()
+    if not sheet:
+        raise HTTPException(status_code=404, detail="Spreadsheet not found")
+
+    new_status = not sheet.is_starred
+
+    await db.execute(text("""
+        UPDATE workspace.spreadsheets
+        SET is_starred = :starred, updated_at = NOW()
+        WHERE id = CAST(:id AS uuid)
+    """), {"id": sheet_id, "starred": new_status})
+
+    await db.commit()
+
+    return {"id": sheet_id, "is_starred": new_status}
+
+
+@router.post("/{sheet_id}/duplicate")
+async def duplicate_spreadsheet(
+    sheet_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """Duplicate a spreadsheet"""
+    tenant_id, user_id = get_user_ids(current_user)
+
+    # Get original spreadsheet
+    result = await db.execute(text("""
+        SELECT id, title, description FROM workspace.spreadsheets
+        WHERE id = CAST(:id AS uuid) AND tenant_id = CAST(:tenant_id AS uuid)
+        AND (created_by = CAST(:user_id AS uuid) OR EXISTS (
+            SELECT 1 FROM workspace.spreadsheet_shares
+            WHERE spreadsheet_id = CAST(:id AS uuid) AND user_id = CAST(:user_id AS uuid)
+        ))
+    """), {"id": sheet_id, "user_id": user_id, "tenant_id": tenant_id})
+
+    original = result.fetchone()
+    if not original:
+        raise HTTPException(status_code=404, detail="Spreadsheet not found")
+
+    import uuid as uuid_module
+    new_id = str(uuid_module.uuid4())
+    new_title = f"Copy of {original.title}"
+
+    # Create copy
+    await db.execute(text("""
+        INSERT INTO workspace.spreadsheets
+        (id, tenant_id, title, description, created_by, created_at, updated_at)
+        VALUES (
+            CAST(:id AS uuid), CAST(:tenant_id AS uuid), :title, :description,
+            CAST(:user_id AS uuid), NOW(), NOW()
+        )
+    """), {
+        "id": new_id,
+        "tenant_id": tenant_id,
+        "title": new_title,
+        "description": original.description,
+        "user_id": user_id
+    })
+
+    # Copy worksheets
+    worksheets = await db.execute(text("""
+        SELECT id, name, sheet_index, data FROM workspace.worksheets
+        WHERE spreadsheet_id = CAST(:id AS uuid)
+    """), {"id": sheet_id})
+
+    for ws in worksheets.fetchall():
+        ws_new_id = str(uuid_module.uuid4())
+        await db.execute(text("""
+            INSERT INTO workspace.worksheets
+            (id, spreadsheet_id, name, sheet_index, data, created_at, updated_at)
+            VALUES (
+                CAST(:id AS uuid), CAST(:spreadsheet_id AS uuid), :name, :index, :data, NOW(), NOW()
+            )
+        """), {
+            "id": ws_new_id,
+            "spreadsheet_id": new_id,
+            "name": ws.name,
+            "index": ws.sheet_index,
+            "data": ws.data
+        })
+
+    await db.commit()
+
+    return {
+        "spreadsheet": {
+            "id": new_id,
+            "title": new_title,
+            "description": original.description
+        },
+        "message": "Spreadsheet duplicated successfully"
+    }
 
 
 # =============================================
@@ -632,8 +917,7 @@ async def share_sheet(
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Share a spreadsheet with another user"""
-    user_id = current_user.get("id") or current_user.get("user_id")
-    tenant_id = current_user.get("tenant_id")
+    tenant_id, user_id = get_user_ids(current_user)
 
     # Verify ownership
     sheet = await db.execute(text("""
@@ -721,3 +1005,335 @@ async def _verify_sheet_access(
             return sheet
 
     return None
+
+
+# =============================================
+# OnlyOffice Integration Endpoints (additional)
+# =============================================
+
+class EntityLinkRequest(BaseModel):
+    """Request to link spreadsheet to ERP entity"""
+    entity_type: str  # SALES_INVOICE, PURCHASE_ORDER, etc.
+    entity_id: str
+
+
+class RestoreVersionRequest(BaseModel):
+    """Request to restore a version"""
+    version_number: int
+
+
+@router.get("/{sheet_id}/editor-config")
+async def get_editor_config(
+    sheet_id: str,
+    mode: str = Query("edit", description="Editor mode: edit, view, or review"),
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Get OnlyOffice Document Editor configuration.
+
+    Returns the configuration object needed to initialize the
+    OnlyOffice editor in the frontend.
+
+    The config includes:
+    - document: File info (URL, key, permissions)
+    - editorConfig: Editor settings (callback URL, user info, customization)
+    - token: JWT for OnlyOffice authentication (if enabled)
+
+    Example usage in frontend:
+    ```javascript
+    const docEditor = new DocsAPI.DocEditor("editor-container", config);
+    ```
+    """
+    tenant_id, user_id = get_user_ids(current_user)
+
+    # Get user info for collaboration
+    user_name = current_user.get("name") or current_user.get("username") or "User"
+    user_email = current_user.get("email", "")
+
+    service = get_spreadsheet_service(db)
+
+    try:
+        result = await service.get_editor_config(
+            spreadsheet_id=UUID(sheet_id),
+            tenant_id=UUID(tenant_id),
+            user_id=UUID(user_id),
+            user_name=user_name,
+            user_email=user_email,
+            mode=mode,
+        )
+
+        return result
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to get editor config: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get editor configuration")
+
+
+@router.post("/{sheet_id}/onlyoffice-callback")
+async def onlyoffice_callback(
+    sheet_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, int]:
+    """
+    Handle OnlyOffice Document Server callback.
+
+    This endpoint is called by OnlyOffice when:
+    - Users are editing (status=1)
+    - Document is ready for saving (status=2)
+    - Document saving error (status=3)
+    - Document closed without changes (status=4)
+    - Force save requested (status=6)
+
+    The endpoint downloads the edited document from OnlyOffice,
+    uploads the new version to S3, and updates the database.
+
+    Note: This endpoint should be accessible by the OnlyOffice server.
+    JWT validation is handled if ONLYOFFICE_JWT_ENABLED is true.
+    """
+    try:
+        callback_data = await request.json()
+        logger.info(f"OnlyOffice callback for {sheet_id}: {callback_data.get('status')}")
+
+        service = get_spreadsheet_service(db)
+        result = await service.handle_onlyoffice_callback(
+            spreadsheet_id=UUID(sheet_id),
+            callback_data=callback_data,
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"OnlyOffice callback error: {e}")
+        return {"error": 1}
+
+
+@router.get("/{sheet_id}/versions")
+async def get_versions(
+    sheet_id: str,
+    limit: int = Query(20, le=100),
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Get version history for a spreadsheet.
+
+    Returns a list of all versions with metadata including:
+    - version_number
+    - file_size
+    - checksum
+    - creator info
+    - timestamp
+    - comment (auto-generated or from restore)
+    """
+    tenant_id, user_id = get_user_ids(current_user)
+
+    service = get_spreadsheet_service(db)
+
+    try:
+        versions = await service.get_versions(
+            spreadsheet_id=UUID(sheet_id),
+            tenant_id=UUID(tenant_id),
+            limit=limit,
+        )
+
+        return {
+            "spreadsheet_id": sheet_id,
+            "versions": versions,
+            "count": len(versions),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get versions: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get version history")
+
+
+@router.post("/{sheet_id}/restore-version")
+async def restore_version(
+    sheet_id: str,
+    data: RestoreVersionRequest,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Restore a previous version of the spreadsheet.
+
+    This creates a new version that points to the restored
+    content, preserving the full version history.
+    """
+    tenant_id, user_id = get_user_ids(current_user)
+
+    service = get_spreadsheet_service(db)
+
+    try:
+        result = await service.restore_version(
+            spreadsheet_id=UUID(sheet_id),
+            version_number=data.version_number,
+            tenant_id=UUID(tenant_id),
+            user_id=UUID(user_id),
+        )
+
+        return result
+
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to restore version: {e}")
+        raise HTTPException(status_code=500, detail="Failed to restore version")
+
+
+@router.post("/{sheet_id}/link-entity")
+async def link_to_entity(
+    sheet_id: str,
+    data: EntityLinkRequest,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Link spreadsheet to an ERP entity (internal mode only).
+
+    Supported entity types:
+    - SALES_INVOICE, SALES_ORDER, SALES_QUOTE
+    - PURCHASE_ORDER, PURCHASE_BILL, PURCHASE_REQUEST
+    - CUSTOMER, VENDOR
+    - PROJECT, TASK
+    - EMPLOYEE
+    - EXPENSE, ASSET
+
+    This allows spreadsheets to be associated with business
+    documents in the ERP system, similar to document attachments.
+    """
+    tenant_id, user_id = get_user_ids(current_user)
+
+    # Check if user is in internal mode
+    tenant_mode = current_user.get("tenant_mode", "external")
+    if tenant_mode != "internal":
+        raise HTTPException(
+            status_code=400,
+            detail="Entity linking is only available for internal (ERP) users"
+        )
+
+    service = get_spreadsheet_service(db)
+
+    try:
+        result = await service.link_to_entity(
+            spreadsheet_id=UUID(sheet_id),
+            entity_type=data.entity_type,
+            entity_id=UUID(data.entity_id),
+            tenant_id=UUID(tenant_id),
+            user_id=UUID(user_id),
+        )
+
+        return result
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to link entity: {e}")
+        raise HTTPException(status_code=500, detail="Failed to link entity")
+
+
+@router.get("/{sheet_id}/download")
+async def download_spreadsheet(
+    sheet_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get a presigned URL to download the spreadsheet as XLSX.
+
+    The URL is valid for 1 hour and can be used directly
+    by the browser or any HTTP client.
+    """
+    from fastapi.responses import RedirectResponse
+    from services.docs_storage_service import get_docs_storage_service
+
+    tenant_id, user_id = get_user_ids(current_user)
+
+    # Verify access
+    sheet = await _verify_sheet_access(db, sheet_id, user_id, "view")
+    if not sheet:
+        raise HTTPException(status_code=404, detail="Spreadsheet not found")
+
+    # Get storage path
+    result = await db.execute(
+        text("SELECT storage_path, title FROM workspace.spreadsheets WHERE id = CAST(:id AS uuid)"),
+        {"id": sheet_id}
+    )
+    row = result.fetchone()
+
+    if not row or not row.storage_path:
+        raise HTTPException(status_code=404, detail="Spreadsheet file not found")
+
+    # Generate presigned URL
+    storage = get_docs_storage_service()
+    download_url = await storage.generate_presigned_url(
+        storage_path=row.storage_path,
+        expires_in=3600,
+        operation="get_object"
+    )
+
+    return {
+        "download_url": download_url,
+        "filename": f"{row.title}.xlsx",
+        "expires_in": 3600,
+    }
+
+
+@router.get("/{sheet_id}/content")
+async def get_spreadsheet_content(
+    sheet_id: str,
+    token: str = Query(..., description="Access token for document"),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get spreadsheet file content for OnlyOffice.
+
+    This endpoint is used by OnlyOffice Document Server to fetch the document.
+    It uses a signed token to verify access without requiring user authentication.
+    """
+    from fastapi.responses import StreamingResponse
+    from services.docs_storage_service import get_docs_storage_service
+    import jwt
+    import io
+
+    # Verify token
+    try:
+        payload = jwt.decode(token, settings.ONLYOFFICE_JWT_SECRET, algorithms=["HS256"])
+        if payload.get("sheet_id") != sheet_id:
+            raise HTTPException(status_code=403, detail="Invalid token")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=403, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=403, detail="Invalid token")
+
+    # Get storage path
+    result = await db.execute(
+        text("SELECT storage_path, title FROM workspace.spreadsheets WHERE id = CAST(:id AS uuid)"),
+        {"id": sheet_id}
+    )
+    row = result.fetchone()
+
+    if not row or not row.storage_path:
+        raise HTTPException(status_code=404, detail="Spreadsheet not found")
+
+    # Get file from S3
+    storage = get_docs_storage_service()
+    try:
+        file_content, metadata = await storage.download_file(row.storage_path)
+        content = file_content.read()
+    except Exception as e:
+        logger.error(f"Failed to download spreadsheet: {e}")
+        raise HTTPException(status_code=500, detail="Failed to download file")
+
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{row.title}.xlsx"',
+            "Content-Length": str(len(content)),
+        }
+    )

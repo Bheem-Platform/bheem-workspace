@@ -1,8 +1,10 @@
 """
 Bheem Forms API
 Google Forms-like functionality for surveys, quizzes, and data collection
+With Nextcloud integration for file uploads and exports
 """
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Depends, Query, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict, Any
 from datetime import datetime
@@ -10,13 +12,110 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 import uuid
 import json
+import csv
+import io
 
 from core.database import get_db
 from core.security import get_current_user
+from core.config import settings
+from services.nextcloud_service import nextcloud_service
 import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/forms", tags=["Bheem Forms"])
+
+
+async def ensure_tenant_and_user_exist(
+    db: AsyncSession,
+    tenant_id: str,
+    user_id: str,
+    company_code: str = None,
+    user_email: str = None,
+    user_name: str = None
+):
+    """Ensure tenant and user records exist for ERP users."""
+    # Ensure tenant exists
+    try:
+        result = await db.execute(text("""
+            SELECT id FROM workspace.tenants WHERE id = CAST(:tenant_id AS uuid)
+        """), {"tenant_id": tenant_id})
+        if not result.fetchone():
+            org_name = f"Organization {company_code or 'ERP'}"
+            await db.execute(text("""
+                INSERT INTO workspace.tenants (id, name, domain, settings, created_at, updated_at)
+                VALUES (
+                    CAST(:tenant_id AS uuid),
+                    :name,
+                    :domain,
+                    '{}'::jsonb,
+                    NOW(),
+                    NOW()
+                )
+                ON CONFLICT (id) DO NOTHING
+            """), {
+                "tenant_id": tenant_id,
+                "name": org_name,
+                "domain": f"{(company_code or 'erp').lower()}.bheem.workspace"
+            })
+            await db.commit()
+            logger.info(f"Created tenant {tenant_id} for ERP company {company_code}")
+    except Exception as e:
+        logger.error(f"Error ensuring tenant exists: {e}")
+        await db.rollback()
+
+    # Ensure user exists in tenant_users
+    try:
+        result = await db.execute(text("""
+            SELECT id FROM workspace.tenant_users WHERE id = CAST(:user_id AS uuid)
+        """), {"user_id": user_id})
+        if not result.fetchone():
+            await db.execute(text("""
+                INSERT INTO workspace.tenant_users (id, tenant_id, email, name, role, created_at, updated_at)
+                VALUES (
+                    CAST(:user_id AS uuid),
+                    CAST(:tenant_id AS uuid),
+                    :email,
+                    :name,
+                    'user',
+                    NOW(),
+                    NOW()
+                )
+                ON CONFLICT (id) DO NOTHING
+            """), {
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "email": user_email or f"user_{user_id[:8]}@bheem.workspace",
+                "name": user_name or f"User {user_id[:8]}"
+            })
+            await db.commit()
+            logger.info(f"Created tenant_user {user_id} for tenant {tenant_id}")
+    except Exception as e:
+        logger.error(f"Error ensuring user exists: {e}")
+        await db.rollback()
+
+
+def get_user_ids(current_user: dict) -> tuple:
+    """Extract tenant_id and user_id from current user context."""
+    tenant_id = current_user.get("tenant_id") or current_user.get("company_id") or current_user.get("erp_company_id")
+    user_id = current_user.get("id") or current_user.get("user_id")
+    return tenant_id, user_id
+
+
+async def get_user_ids_with_tenant(current_user: dict, db: AsyncSession) -> tuple:
+    """Extract user IDs and ensure tenant and user exist for ERP users."""
+    tenant_id, user_id = get_user_ids(current_user)
+    if not tenant_id or not user_id:
+        raise HTTPException(status_code=400, detail="User context incomplete")
+
+    company_code = current_user.get("company_code")
+    user_email = current_user.get("username") or current_user.get("email")
+    user_name = current_user.get("name") or current_user.get("full_name")
+
+    await ensure_tenant_and_user_exist(
+        db, str(tenant_id), str(user_id), company_code, user_email, user_name
+    )
+
+    return tenant_id, user_id
 
 
 # =============================================
@@ -132,8 +231,8 @@ async def create_form(
     db: AsyncSession = Depends(get_db)
 ):
     """Create a new form"""
-    user_id = current_user.get("id") or current_user.get("user_id")
-    tenant_id = current_user.get("tenant_id")
+    # Ensure tenant and user exist (for ERP users)
+    tenant_id, user_id = await get_user_ids_with_tenant(current_user, db)
     form_id = str(uuid.uuid4())
 
     settings = (data.settings or FormSettings()).model_dump()
@@ -196,8 +295,7 @@ async def list_forms(
     db: AsyncSession = Depends(get_db)
 ):
     """List all forms"""
-    user_id = current_user.get("id") or current_user.get("user_id")
-    tenant_id = current_user.get("tenant_id")
+    tenant_id, user_id = get_user_ids(current_user)
 
     query = """
         SELECT
@@ -271,8 +369,7 @@ async def get_form(
     db: AsyncSession = Depends(get_db)
 ):
     """Get a form by ID"""
-    user_id = current_user.get("id") or current_user.get("user_id")
-    tenant_id = current_user.get("tenant_id")
+    tenant_id, user_id = get_user_ids(current_user)
 
     result = await db.execute(text("""
         SELECT
@@ -351,8 +448,7 @@ async def update_form(
     db: AsyncSession = Depends(get_db)
 ):
     """Update a form"""
-    user_id = current_user.get("id") or current_user.get("user_id")
-    tenant_id = current_user.get("tenant_id")
+    tenant_id, user_id = get_user_ids(current_user)
 
     # Verify access
     existing = await db.execute(text("""
@@ -406,8 +502,7 @@ async def delete_form(
     db: AsyncSession = Depends(get_db)
 ):
     """Delete a form (soft delete by default)"""
-    user_id = current_user.get("id") or current_user.get("user_id")
-    tenant_id = current_user.get("tenant_id")
+    tenant_id, user_id = get_user_ids(current_user)
 
     # Verify ownership
     existing = await db.execute(text("""
@@ -449,8 +544,7 @@ async def restore_form(
     db: AsyncSession = Depends(get_db)
 ):
     """Restore a deleted form"""
-    user_id = current_user.get("id") or current_user.get("user_id")
-    tenant_id = current_user.get("tenant_id")
+    tenant_id, user_id = get_user_ids(current_user)
 
     result = await db.execute(text("""
         UPDATE workspace.forms
@@ -476,8 +570,7 @@ async def toggle_star(
     db: AsyncSession = Depends(get_db)
 ):
     """Toggle starred status"""
-    user_id = current_user.get("id") or current_user.get("user_id")
-    tenant_id = current_user.get("tenant_id")
+    tenant_id, user_id = get_user_ids(current_user)
 
     # Get current star status
     result = await db.execute(text("""
@@ -514,8 +607,8 @@ async def duplicate_form(
     db: AsyncSession = Depends(get_db)
 ):
     """Duplicate a form"""
-    user_id = current_user.get("id") or current_user.get("user_id")
-    tenant_id = current_user.get("tenant_id")
+    # Ensure tenant and user exist since this creates a new form
+    tenant_id, user_id = await get_user_ids_with_tenant(current_user, db)
 
     # Get original form
     result = await db.execute(text("""
@@ -628,8 +721,7 @@ async def publish_form(
     db: AsyncSession = Depends(get_db)
 ):
     """Publish a form to accept responses"""
-    user_id = current_user.get("id") or current_user.get("user_id")
-    tenant_id = current_user.get("tenant_id")
+    tenant_id, user_id = get_user_ids(current_user)
 
     # Verify ownership and get form
     result = await db.execute(text("""
@@ -675,8 +767,7 @@ async def close_form(
     db: AsyncSession = Depends(get_db)
 ):
     """Close a form to stop accepting responses"""
-    user_id = current_user.get("id") or current_user.get("user_id")
-    tenant_id = current_user.get("tenant_id")
+    tenant_id, user_id = get_user_ids(current_user)
 
     result = await db.execute(text("""
         UPDATE workspace.forms
@@ -704,8 +795,7 @@ async def reopen_form(
     db: AsyncSession = Depends(get_db)
 ):
     """Reopen a closed form"""
-    user_id = current_user.get("id") or current_user.get("user_id")
-    tenant_id = current_user.get("tenant_id")
+    tenant_id, user_id = get_user_ids(current_user)
 
     result = await db.execute(text("""
         UPDATE workspace.forms
@@ -738,7 +828,7 @@ async def add_question(
     db: AsyncSession = Depends(get_db)
 ):
     """Add a question to a form"""
-    user_id = current_user.get("id") or current_user.get("user_id")
+    _, user_id = get_user_ids(current_user)
 
     # Verify access
     form = await _verify_form_access(db, form_id, user_id, "edit")
@@ -807,7 +897,7 @@ async def get_questions(
     db: AsyncSession = Depends(get_db)
 ):
     """Get all questions for a form"""
-    user_id = current_user.get("id") or current_user.get("user_id")
+    _, user_id = get_user_ids(current_user)
 
     form = await _verify_form_access(db, form_id, user_id, "view")
     if not form:
@@ -849,7 +939,7 @@ async def update_question(
     db: AsyncSession = Depends(get_db)
 ):
     """Update a question"""
-    user_id = current_user.get("id") or current_user.get("user_id")
+    _, user_id = get_user_ids(current_user)
 
     form = await _verify_form_access(db, form_id, user_id, "edit")
     if not form:
@@ -914,7 +1004,7 @@ async def delete_question(
     db: AsyncSession = Depends(get_db)
 ):
     """Delete a question"""
-    user_id = current_user.get("id") or current_user.get("user_id")
+    _, user_id = get_user_ids(current_user)
 
     form = await _verify_form_access(db, form_id, user_id, "edit")
     if not form:
@@ -958,7 +1048,7 @@ async def reorder_questions(
     db: AsyncSession = Depends(get_db)
 ):
     """Reorder questions in a form"""
-    user_id = current_user.get("id") or current_user.get("user_id")
+    _, user_id = get_user_ids(current_user)
 
     form = await _verify_form_access(db, form_id, user_id, "edit")
     if not form:
@@ -1072,7 +1162,7 @@ async def get_responses(
     db: AsyncSession = Depends(get_db)
 ):
     """Get all responses for a form"""
-    user_id = current_user.get("id") or current_user.get("user_id")
+    _, user_id = get_user_ids(current_user)
 
     form = await _verify_form_access(db, form_id, user_id, "view")
     if not form:
@@ -1143,7 +1233,7 @@ async def get_response(
     db: AsyncSession = Depends(get_db)
 ):
     """Get a specific response"""
-    user_id = current_user.get("id") or current_user.get("user_id")
+    _, user_id = get_user_ids(current_user)
 
     form = await _verify_form_access(db, form_id, user_id, "view")
     if not form:
@@ -1199,7 +1289,7 @@ async def delete_response(
     db: AsyncSession = Depends(get_db)
 ):
     """Delete a response"""
-    user_id = current_user.get("id") or current_user.get("user_id")
+    _, user_id = get_user_ids(current_user)
 
     form = await _verify_form_access(db, form_id, user_id, "edit")
     if not form:
@@ -1231,7 +1321,7 @@ async def get_response_summary(
     db: AsyncSession = Depends(get_db)
 ):
     """Get summary statistics for form responses"""
-    user_id = current_user.get("id") or current_user.get("user_id")
+    _, user_id = get_user_ids(current_user)
 
     form = await _verify_form_access(db, form_id, user_id, "view")
     if not form:
@@ -1319,7 +1409,7 @@ async def export_responses(
     db: AsyncSession = Depends(get_db)
 ):
     """Export form responses"""
-    user_id = current_user.get("id") or current_user.get("user_id")
+    _, user_id = get_user_ids(current_user)
 
     form = await _verify_form_access(db, form_id, user_id, "view")
     if not form:
@@ -1395,8 +1485,7 @@ async def share_form(
     db: AsyncSession = Depends(get_db)
 ):
     """Share a form with a user"""
-    user_id = current_user.get("id") or current_user.get("user_id")
-    tenant_id = current_user.get("tenant_id")
+    tenant_id, user_id = get_user_ids(current_user)
 
     # Verify ownership
     result = await db.execute(text("""
@@ -1458,7 +1547,7 @@ async def get_shares(
     db: AsyncSession = Depends(get_db)
 ):
     """Get all shares for a form"""
-    user_id = current_user.get("id") or current_user.get("user_id")
+    _, user_id = get_user_ids(current_user)
 
     form = await _verify_form_access(db, form_id, user_id, "view")
     if not form:
@@ -1501,7 +1590,7 @@ async def update_share(
     db: AsyncSession = Depends(get_db)
 ):
     """Update share permission"""
-    user_id = current_user.get("id") or current_user.get("user_id")
+    _, user_id = get_user_ids(current_user)
 
     # Verify ownership
     form_result = await db.execute(text("""
@@ -1536,7 +1625,7 @@ async def remove_share(
     db: AsyncSession = Depends(get_db)
 ):
     """Remove a share"""
-    user_id = current_user.get("id") or current_user.get("user_id")
+    _, user_id = get_user_ids(current_user)
 
     # Verify ownership
     form_result = await db.execute(text("""
@@ -1714,3 +1803,400 @@ async def _verify_form_access(
             return form
 
     return None
+
+
+# =============================================
+# Nextcloud Integration Endpoints
+# =============================================
+
+@router.post("/{form_id}/responses/{response_id}/upload")
+async def upload_response_file(
+    form_id: str,
+    response_id: str,
+    question_id: str = Form(...),
+    file: UploadFile = File(...),
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Upload a file for a form response question to Nextcloud"""
+    _, user_id = get_user_ids(current_user)
+
+    # Verify form exists and is published
+    form_result = await db.execute(text("""
+        SELECT id, title, status FROM workspace.forms
+        WHERE id = CAST(:form_id AS uuid)
+        AND is_deleted = FALSE
+    """), {"form_id": form_id})
+    form = form_result.fetchone()
+
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found")
+
+    # Get form title for folder name
+    form_title = form.title.replace("/", "-").replace("\\", "-")[:50]
+
+    # Read file content
+    content = await file.read()
+    file_size = len(content)
+
+    # Validate file size (max 50MB)
+    if file_size > 50 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large. Maximum size is 50MB")
+
+    # Get file extension
+    original_name = file.filename or "file"
+    ext = original_name.rsplit(".", 1)[-1] if "." in original_name else ""
+
+    # Create folder structure in Nextcloud: /Forms/{form_title}/responses/{response_id}/
+    folder_path = f"/Forms/{form_title}/responses/{response_id}"
+
+    try:
+        # Create folders (Nextcloud will handle nested creation)
+        await nextcloud_service.create_folder(
+            settings.NEXTCLOUD_ADMIN_USER,
+            settings.NEXTCLOUD_ADMIN_PASSWORD,
+            "/Forms"
+        )
+        await nextcloud_service.create_folder(
+            settings.NEXTCLOUD_ADMIN_USER,
+            settings.NEXTCLOUD_ADMIN_PASSWORD,
+            f"/Forms/{form_title}"
+        )
+        await nextcloud_service.create_folder(
+            settings.NEXTCLOUD_ADMIN_USER,
+            settings.NEXTCLOUD_ADMIN_PASSWORD,
+            f"/Forms/{form_title}/responses"
+        )
+        await nextcloud_service.create_folder(
+            settings.NEXTCLOUD_ADMIN_USER,
+            settings.NEXTCLOUD_ADMIN_PASSWORD,
+            folder_path
+        )
+
+        # Generate unique filename
+        file_id = str(uuid.uuid4())[:8]
+        file_name = f"{question_id}_{file_id}.{ext}" if ext else f"{question_id}_{file_id}"
+        file_path = f"{folder_path}/{file_name}"
+
+        # Upload file to Nextcloud
+        upload_success = await nextcloud_service.upload_file(
+            settings.NEXTCLOUD_ADMIN_USER,
+            settings.NEXTCLOUD_ADMIN_PASSWORD,
+            file_path,
+            content
+        )
+
+        if not upload_success:
+            raise HTTPException(status_code=500, detail="Failed to upload file to storage")
+
+        # Create share link for the file
+        share_url = await nextcloud_service.create_share_link(
+            settings.NEXTCLOUD_ADMIN_USER,
+            settings.NEXTCLOUD_ADMIN_PASSWORD,
+            file_path,
+            expires_days=365
+        )
+
+        # Store file info in response answers
+        file_info = {
+            "file_name": original_name,
+            "file_path": file_path,
+            "file_size": file_size,
+            "content_type": file.content_type,
+            "share_url": f"{share_url}/download" if share_url else None,
+            "uploaded_at": datetime.utcnow().isoformat()
+        }
+
+        # Update response answer with file info
+        await db.execute(text("""
+            UPDATE workspace.form_response_answers
+            SET value = :value, updated_at = NOW()
+            WHERE response_id = CAST(:response_id AS uuid)
+            AND question_id = CAST(:question_id AS uuid)
+        """), {
+            "response_id": response_id,
+            "question_id": question_id,
+            "value": json.dumps(file_info)
+        })
+        await db.commit()
+
+        logger.info(f"File uploaded for form {form_id}, response {response_id}: {file_path}")
+
+        return {
+            "success": True,
+            "file_info": file_info
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to upload file: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
+@router.post("/{form_id}/export-to-nextcloud")
+async def export_responses_to_nextcloud(
+    form_id: str,
+    format: str = "csv",
+    folder_path: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Export form responses to Nextcloud as CSV or Excel"""
+    _, user_id = get_user_ids(current_user)
+
+    form = await _verify_form_access(db, form_id, user_id, "view")
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found or access denied")
+
+    # Get form details
+    form_result = await db.execute(text("""
+        SELECT id, title FROM workspace.forms WHERE id = CAST(:form_id AS uuid)
+    """), {"form_id": form_id})
+    form_data = form_result.fetchone()
+    form_title = form_data.title.replace("/", "-").replace("\\", "-")[:50]
+
+    # Get questions
+    questions_result = await db.execute(text("""
+        SELECT id, title, question_type
+        FROM workspace.form_questions
+        WHERE form_id = CAST(:form_id AS uuid)
+        ORDER BY question_index
+    """), {"form_id": form_id})
+    questions = questions_result.fetchall()
+
+    # Get responses with answers
+    responses_result = await db.execute(text("""
+        SELECT r.id, r.respondent_email, r.submitted_at,
+            json_agg(json_build_object(
+                'question_id', a.question_id,
+                'value', a.value
+            )) as answers
+        FROM workspace.form_responses r
+        LEFT JOIN workspace.form_response_answers a ON r.id = a.response_id
+        WHERE r.form_id = CAST(:form_id AS uuid)
+        GROUP BY r.id, r.respondent_email, r.submitted_at
+        ORDER BY r.submitted_at DESC
+    """), {"form_id": form_id})
+    responses = responses_result.fetchall()
+
+    # Build CSV content
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    # Header row
+    header = ["Response ID", "Email", "Submitted At"]
+    for q in questions:
+        header.append(q.title)
+    writer.writerow(header)
+
+    # Data rows
+    for response in responses:
+        row = [str(response.id), response.respondent_email or "", str(response.submitted_at)]
+        answers_dict = {}
+        if response.answers:
+            for answer in response.answers:
+                if answer and answer.get("question_id"):
+                    answers_dict[str(answer["question_id"])] = answer.get("value", "")
+
+        for q in questions:
+            value = answers_dict.get(str(q.id), "")
+            if isinstance(value, dict):
+                # Handle file uploads - show URL
+                value = value.get("share_url", value.get("file_name", str(value)))
+            elif isinstance(value, list):
+                value = ", ".join(str(v) for v in value)
+            row.append(str(value) if value else "")
+        writer.writerow(row)
+
+    csv_content = output.getvalue().encode('utf-8')
+    output.close()
+
+    # Upload to Nextcloud
+    try:
+        # Default folder path
+        if not folder_path:
+            folder_path = f"/Forms/{form_title}/exports"
+
+        # Create export folder
+        await nextcloud_service.create_folder(
+            settings.NEXTCLOUD_ADMIN_USER,
+            settings.NEXTCLOUD_ADMIN_PASSWORD,
+            "/Forms"
+        )
+        await nextcloud_service.create_folder(
+            settings.NEXTCLOUD_ADMIN_USER,
+            settings.NEXTCLOUD_ADMIN_PASSWORD,
+            f"/Forms/{form_title}"
+        )
+        await nextcloud_service.create_folder(
+            settings.NEXTCLOUD_ADMIN_USER,
+            settings.NEXTCLOUD_ADMIN_PASSWORD,
+            folder_path
+        )
+
+        # Generate filename with timestamp
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        file_name = f"{form_title}_responses_{timestamp}.csv"
+        file_path = f"{folder_path}/{file_name}"
+
+        # Upload file
+        upload_success = await nextcloud_service.upload_file(
+            settings.NEXTCLOUD_ADMIN_USER,
+            settings.NEXTCLOUD_ADMIN_PASSWORD,
+            file_path,
+            csv_content
+        )
+
+        if not upload_success:
+            raise HTTPException(status_code=500, detail="Failed to upload export to Nextcloud")
+
+        # Create share link
+        share_url = await nextcloud_service.create_share_link(
+            settings.NEXTCLOUD_ADMIN_USER,
+            settings.NEXTCLOUD_ADMIN_PASSWORD,
+            file_path,
+            expires_days=30
+        )
+
+        logger.info(f"Exported form {form_id} responses to Nextcloud: {file_path}")
+
+        return {
+            "success": True,
+            "file_path": file_path,
+            "file_name": file_name,
+            "share_url": f"{share_url}/download" if share_url else None,
+            "response_count": len(responses)
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to export to Nextcloud: {e}")
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+
+@router.post("/{form_id}/sync-to-drive")
+async def sync_form_to_drive(
+    form_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a link to this form in Bheem Drive (like Google Forms in Drive)"""
+    tenant_id, user_id = get_user_ids(current_user)
+
+    form = await _verify_form_access(db, form_id, user_id, "view")
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found or access denied")
+
+    # Get form details
+    form_result = await db.execute(text("""
+        SELECT id, title, description, status, created_at, updated_at
+        FROM workspace.forms WHERE id = CAST(:form_id AS uuid)
+    """), {"form_id": form_id})
+    form_data = form_result.fetchone()
+
+    # Check if already linked to drive
+    existing = await db.execute(text("""
+        SELECT id FROM workspace.drive_items
+        WHERE linked_item_id = CAST(:form_id AS uuid)
+        AND item_type = 'form'
+        AND tenant_id = CAST(:tenant_id AS uuid)
+    """), {"form_id": form_id, "tenant_id": tenant_id})
+
+    if existing.fetchone():
+        return {"success": True, "message": "Form already linked to Drive"}
+
+    # Create drive item link
+    drive_item_id = str(uuid.uuid4())
+    await db.execute(text("""
+        INSERT INTO workspace.drive_items
+        (id, tenant_id, name, item_type, linked_item_id, created_by, created_at, updated_at)
+        VALUES (
+            CAST(:id AS uuid),
+            CAST(:tenant_id AS uuid),
+            :name,
+            'form',
+            CAST(:linked_item_id AS uuid),
+            CAST(:created_by AS uuid),
+            NOW(),
+            NOW()
+        )
+        ON CONFLICT DO NOTHING
+    """), {
+        "id": drive_item_id,
+        "tenant_id": tenant_id,
+        "name": form_data.title,
+        "linked_item_id": form_id,
+        "created_by": user_id
+    })
+    await db.commit()
+
+    logger.info(f"Form {form_id} synced to Drive as {drive_item_id}")
+
+    return {
+        "success": True,
+        "drive_item_id": drive_item_id,
+        "message": "Form linked to Drive"
+    }
+
+
+@router.get("/{form_id}/files")
+async def list_form_files(
+    form_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """List all files uploaded through this form from Nextcloud"""
+    _, user_id = get_user_ids(current_user)
+
+    form = await _verify_form_access(db, form_id, user_id, "view")
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found or access denied")
+
+    # Get form title for folder path
+    form_result = await db.execute(text("""
+        SELECT title FROM workspace.forms WHERE id = CAST(:form_id AS uuid)
+    """), {"form_id": form_id})
+    form_data = form_result.fetchone()
+    form_title = form_data.title.replace("/", "-").replace("\\", "-")[:50]
+
+    # Get all file answers from responses
+    files_result = await db.execute(text("""
+        SELECT r.id as response_id, r.respondent_email, r.submitted_at,
+            q.title as question_title, a.value as file_info
+        FROM workspace.form_responses r
+        JOIN workspace.form_response_answers a ON r.id = a.response_id
+        JOIN workspace.form_questions q ON a.question_id = q.id
+        WHERE r.form_id = CAST(:form_id AS uuid)
+        AND q.question_type = 'file'
+        AND a.value IS NOT NULL
+        ORDER BY r.submitted_at DESC
+    """), {"form_id": form_id})
+    files = files_result.fetchall()
+
+    file_list = []
+    for f in files:
+        try:
+            file_info = json.loads(f.file_info) if isinstance(f.file_info, str) else f.file_info
+            if file_info and isinstance(file_info, dict) and file_info.get("file_name"):
+                file_list.append({
+                    "response_id": str(f.response_id),
+                    "respondent_email": f.respondent_email,
+                    "submitted_at": str(f.submitted_at),
+                    "question": f.question_title,
+                    "file_name": file_info.get("file_name"),
+                    "file_size": file_info.get("file_size"),
+                    "share_url": file_info.get("share_url"),
+                    "uploaded_at": file_info.get("uploaded_at")
+                })
+        except:
+            continue
+
+    return {
+        "form_id": form_id,
+        "form_title": form_data.title,
+        "folder_path": f"/Forms/{form_title}/responses",
+        "files": file_list,
+        "total_files": len(file_list)
+    }

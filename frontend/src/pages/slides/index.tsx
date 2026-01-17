@@ -60,11 +60,22 @@ export default function SlidesPage() {
     try {
       setLoading(true);
       const params: Record<string, any> = {};
-      if (filter === 'starred') params.starred = true;
+      if (filter === 'starred') params.starred_only = true;
       if (searchQuery) params.search = searchQuery;
 
       const response = await api.get('/slides', { params });
-      setPresentations(response.data.presentations || []);
+      let presentationList = response.data.presentations || [];
+
+      // Client-side filtering for "recent" (last 7 days)
+      if (filter === 'recent') {
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        presentationList = presentationList.filter((p: PresentationItem) =>
+          new Date(p.updated_at) >= sevenDaysAgo
+        );
+      }
+
+      setPresentations(presentationList);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load presentations');
     } finally {
@@ -84,7 +95,9 @@ export default function SlidesPage() {
         title: 'Untitled presentation',
         template_id: templateId,
       });
-      router.push(`/slides/${response.data.presentation.id}`);
+      // The API returns { id, title, default_slide_id, message }
+      const presentationId = response.data.id || response.data.presentation?.id;
+      router.push(`/slides/${presentationId}`);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to create presentation');
     }

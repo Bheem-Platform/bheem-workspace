@@ -159,6 +159,15 @@ class Settings(BaseSettings):
     DOCS_AI_ENABLED: bool = True
     DOCS_OCR_ENABLED: bool = True
 
+    # ============================================
+    # ONLYOFFICE DOCUMENT SERVER CONFIGURATION
+    # ============================================
+    ONLYOFFICE_URL: str = "https://office.bheem.cloud"  # OnlyOffice Document Server URL
+    ONLYOFFICE_JWT_SECRET: Optional[str] = "BheemOffice2024JWT!"  # JWT secret for OnlyOffice
+    ONLYOFFICE_JWT_ENABLED: bool = True  # JWT enabled
+    ONLYOFFICE_JWT_HEADER: str = "Authorization"
+    ONLYOFFICE_CALLBACK_URL: str = "https://workspace.bheem.cloud/api/v1/sheets"  # Callback base URL
+
     class Config:
         env_file = ".env"
         case_sensitive = True

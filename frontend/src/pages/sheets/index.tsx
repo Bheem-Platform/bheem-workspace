@@ -57,11 +57,22 @@ export default function SheetsPage() {
     try {
       setLoading(true);
       const params: Record<string, any> = {};
-      if (filter === 'starred') params.starred = true;
+      if (filter === 'starred') params.starred_only = true;
       if (searchQuery) params.search = searchQuery;
 
       const response = await api.get('/sheets', { params });
-      setSpreadsheets(response.data.spreadsheets || []);
+      let spreadsheetList = response.data.spreadsheets || [];
+
+      // Client-side filtering for "recent" (last 7 days)
+      if (filter === 'recent') {
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        spreadsheetList = spreadsheetList.filter((s: Spreadsheet) =>
+          new Date(s.updated_at) >= sevenDaysAgo
+        );
+      }
+
+      setSpreadsheets(spreadsheetList);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load spreadsheets');
     } finally {
@@ -81,7 +92,9 @@ export default function SheetsPage() {
         title: 'Untitled spreadsheet',
         template_id: templateId,
       });
-      router.push(`/sheets/${response.data.spreadsheet.id}`);
+      // API returns id directly, not nested under spreadsheet
+      const sheetId = response.data.id || response.data.spreadsheet?.id;
+      router.push(`/sheets/${sheetId}`);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to create spreadsheet');
     }
@@ -399,29 +412,48 @@ export default function SheetsPage() {
                       <td className="px-4 py-3 text-sm text-gray-500">
                         {formatDate(spreadsheet.updated_at)}
                       </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="flex items-center justify-end space-x-2">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end space-x-1">
                           <button
-                            onClick={() => toggleStar(spreadsheet.id)}
-                            className="p-1 text-gray-400 hover:text-yellow-500"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              toggleStar(spreadsheet.id);
+                            }}
+                            className="p-2 text-gray-400 hover:text-yellow-500 hover:bg-gray-100 rounded"
+                            title={spreadsheet.is_starred ? 'Remove from starred' : 'Add to starred'}
                           >
                             {spreadsheet.is_starred ? (
-                              <Star size={16} className="text-yellow-500 fill-yellow-500" />
+                              <Star size={18} className="text-yellow-500 fill-yellow-500" />
                             ) : (
-                              <StarOff size={16} />
+                              <Star size={18} />
                             )}
                           </button>
                           <button
                             onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              duplicateSpreadsheet(spreadsheet.id);
+                            }}
+                            className="p-2 text-gray-400 hover:text-green-600 hover:bg-gray-100 rounded"
+                            title="Make a copy"
+                          >
+                            <Copy size={18} />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
                               setContextMenu({
                                 id: spreadsheet.id,
                                 x: e.clientX,
                                 y: e.clientY,
                               });
                             }}
-                            className="p-1 text-gray-400 hover:text-gray-600"
+                            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded"
+                            title="More actions"
                           >
-                            <MoreVertical size={16} />
+                            <MoreVertical size={18} />
                           </button>
                         </div>
                       </td>
@@ -442,7 +474,10 @@ export default function SheetsPage() {
               />
               <div
                 className="fixed z-50 bg-white border border-gray-200 rounded-lg shadow-lg py-1 w-48"
-                style={{ left: contextMenu.x, top: contextMenu.y }}
+                style={{
+                  left: Math.min(contextMenu.x, window.innerWidth - 200),
+                  top: Math.min(contextMenu.y, window.innerHeight - 150)
+                }}
               >
                 <button
                   onClick={() => duplicateSpreadsheet(contextMenu.id)}
