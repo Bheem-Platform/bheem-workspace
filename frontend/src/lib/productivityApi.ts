@@ -52,7 +52,7 @@ export interface UnifiedDocumentsParams {
  * Get unified list of all document types
  */
 export async function getUnifiedDocuments(params: UnifiedDocumentsParams = {}): Promise<UnifiedListResponse> {
-  const response = await api.get('/api/v1/productivity/unified', { params });
+  const response = await api.get('/productivity/unified', { params });
   return response.data;
 }
 
@@ -60,7 +60,7 @@ export async function getUnifiedDocuments(params: UnifiedDocumentsParams = {}): 
  * Get most recent documents across all types
  */
 export async function getRecentDocuments(limit: number = 10): Promise<UnifiedDocument[]> {
-  const response = await api.get('/api/v1/productivity/recent', { params: { limit } });
+  const response = await api.get('/productivity/recent', { params: { limit } });
   return response.data;
 }
 
@@ -68,7 +68,7 @@ export async function getRecentDocuments(limit: number = 10): Promise<UnifiedDoc
  * Get all starred documents across all types
  */
 export async function getStarredDocuments(limit: number = 50): Promise<UnifiedDocument[]> {
-  const response = await api.get('/api/v1/productivity/starred', { params: { limit } });
+  const response = await api.get('/productivity/starred', { params: { limit } });
   return response.data;
 }
 
@@ -76,7 +76,7 @@ export async function getStarredDocuments(limit: number = 50): Promise<UnifiedDo
  * Toggle star status for any document type
  */
 export async function toggleStar(docType: string, docId: string): Promise<{ starred: boolean }> {
-  const response = await api.post(`/api/v1/productivity/${docType}/${docId}/star`);
+  const response = await api.post(`/productivity/${docType}/${docId}/star`);
   return response.data;
 }
 
@@ -84,7 +84,7 @@ export async function toggleStar(docType: string, docId: string): Promise<{ star
  * Get document counts by type
  */
 export async function getProductivityStats(): Promise<ProductivityStats> {
-  const response = await api.get('/api/v1/productivity/stats');
+  const response = await api.get('/productivity/stats');
   return response.data;
 }
 
