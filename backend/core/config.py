@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     BHEEM_JWT_SECRET: Optional[str] = None  # Passport JWT secret for SSO validation
     BHEEM_JWT_ALGORITHM: str = "HS256"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 43200  # 30 days
     
     # LiveKit
     LIVEKIT_API_KEY: str
@@ -163,7 +163,7 @@ class Settings(BaseSettings):
     # ONLYOFFICE DOCUMENT SERVER CONFIGURATION
     # ============================================
     ONLYOFFICE_URL: str = "https://office.bheem.cloud"  # OnlyOffice Document Server URL
-    ONLYOFFICE_JWT_SECRET: Optional[str] = "BheemOffice2024JWT!"  # JWT secret for OnlyOffice
+    ONLYOFFICE_JWT_SECRET: Optional[str] = "BheemOffice2024JWT!"  # JWT secret for OnlyOffice (must match OnlyOffice server)
     ONLYOFFICE_JWT_ENABLED: bool = True  # JWT enabled
     ONLYOFFICE_JWT_HEADER: str = "Authorization"
     ONLYOFFICE_CALLBACK_URL: str = "https://workspace.bheem.cloud/api/v1/sheets"  # Callback base URL

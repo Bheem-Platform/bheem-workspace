@@ -19,9 +19,102 @@ from core.database import get_db
 from core.security import get_current_user
 from core.config import settings
 from services.nextcloud_service import nextcloud_service
+from integrations.notify import notify_client
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+async def send_form_share_email(
+    to_email: str,
+    to_name: str,
+    form_title: str,
+    form_id: str,
+    sharer_name: str,
+    permission: str,
+    is_external: bool = False
+):
+    """Send email notification when a form is shared"""
+    try:
+        # Build the form URL
+        workspace_url = notify_client.workspace_url if notify_client else "https://workspace.bheem.cloud"
+        form_url = f"{workspace_url}/forms/{form_id}"
+
+        permission_text = {
+            "view": "view",
+            "edit": "edit",
+            "view_responses": "view responses of"
+        }.get(permission, permission)
+
+        html_body = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+        </head>
+        <body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8fafc; margin: 0; padding: 20px;">
+            <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                <!-- Header -->
+                <div style="background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%); padding: 30px; text-align: center;">
+                    <h1 style="color: white; margin: 0; font-size: 24px;">📋 Form Shared With You</h1>
+                </div>
+
+                <!-- Content -->
+                <div style="padding: 30px;">
+                    <p style="color: #374151; font-size: 16px; margin-bottom: 20px;">
+                        Hi {to_name},
+                    </p>
+
+                    <p style="color: #374151; font-size: 16px; margin-bottom: 20px;">
+                        <strong>{sharer_name}</strong> has shared a form with you and given you permission to <strong>{permission_text}</strong> it.
+                    </p>
+
+                    <!-- Form Card -->
+                    <div style="background: #f3e8ff; border-radius: 8px; padding: 20px; margin: 20px 0; border-left: 4px solid #7c3aed;">
+                        <h3 style="color: #7c3aed; margin: 0 0 10px 0;">📝 {form_title}</h3>
+                        <p style="color: #6b7280; margin: 0; font-size: 14px;">
+                            Permission: <strong style="color: #7c3aed;">{permission.replace('_', ' ').title()}</strong>
+                        </p>
+                    </div>
+
+                    <!-- CTA Button -->
+                    <div style="text-align: center; margin: 30px 0;">
+                        <a href="{form_url}" style="display: inline-block; background: linear-gradient(135deg, #7c3aed 0%, #a855f7 100%); color: white; text-decoration: none; padding: 14px 40px; border-radius: 8px; font-weight: 600; font-size: 16px;">
+                            Open Form
+                        </a>
+                    </div>
+
+                    <p style="color: #9ca3af; font-size: 14px; text-align: center;">
+                        Or copy this link: <a href="{form_url}" style="color: #7c3aed;">{form_url}</a>
+                    </p>
+                </div>
+
+                <!-- Footer -->
+                <div style="background: #f8fafc; padding: 20px; text-align: center; border-top: 1px solid #e5e7eb;">
+                    <p style="color: #9ca3af; font-size: 12px; margin: 0;">
+                        This email was sent by Bheem Workspace<br>
+                        © 2026 Bheemverse Innovation
+                    </p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        result = await notify_client.send_email(
+            to=to_email,
+            subject=f"{sharer_name} shared a form with you: {form_title}",
+            html_body=html_body,
+            text_body=f"{sharer_name} shared the form '{form_title}' with you. Open it at: {form_url}"
+        )
+
+        logger.info(f"Form share email sent to {to_email} for form {form_id}: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Failed to send form share email to {to_email}: {e}")
+        return {"error": str(e)}
+
+
 router = APIRouter(prefix="/forms", tags=["Bheem Forms"])
 
 
@@ -218,6 +311,7 @@ class ShareRequest(BaseModel):
     email: str
     permission: str = "view"  # view, edit, view_responses
     notify: bool = True
+    name: Optional[str] = None  # Optional name for external users
 
 
 # =============================================
@@ -1225,95 +1319,6 @@ async def get_responses(
     }
 
 
-@router.get("/{form_id}/responses/{response_id}")
-async def get_response(
-    form_id: str,
-    response_id: str,
-    current_user: dict = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """Get a specific response"""
-    _, user_id = get_user_ids(current_user)
-
-    form = await _verify_form_access(db, form_id, user_id, "view")
-    if not form:
-        raise HTTPException(status_code=404, detail="Form not found")
-
-    result = await db.execute(text("""
-        SELECT id, answers, respondent_email, submitted_at, edited_at
-        FROM workspace.form_responses
-        WHERE id = CAST(:id AS uuid) AND form_id = CAST(:form_id AS uuid)
-    """), {"id": response_id, "form_id": form_id})
-
-    response = result.fetchone()
-    if not response:
-        raise HTTPException(status_code=404, detail="Response not found")
-
-    # Get questions
-    questions_result = await db.execute(text("""
-        SELECT id, question_type, title, description, options, question_index
-        FROM workspace.form_questions
-        WHERE form_id = CAST(:form_id AS uuid)
-        ORDER BY question_index
-    """), {"form_id": form_id})
-
-    questions = questions_result.fetchall()
-
-    return {
-        "response": {
-            "id": str(response.id),
-            "answers": response.answers or {},
-            "respondent_email": response.respondent_email,
-            "submitted_at": response.submitted_at.isoformat() if response.submitted_at else None,
-            "edited_at": response.edited_at.isoformat() if response.edited_at else None
-        },
-        "questions": [
-            {
-                "id": str(q.id),
-                "question_type": q.question_type,
-                "title": q.title,
-                "description": q.description,
-                "options": q.options,
-                "question_index": q.question_index
-            }
-            for q in questions
-        ]
-    }
-
-
-@router.delete("/{form_id}/responses/{response_id}")
-async def delete_response(
-    form_id: str,
-    response_id: str,
-    current_user: dict = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """Delete a response"""
-    _, user_id = get_user_ids(current_user)
-
-    form = await _verify_form_access(db, form_id, user_id, "edit")
-    if not form:
-        raise HTTPException(status_code=404, detail="Form not found")
-
-    result = await db.execute(text("""
-        DELETE FROM workspace.form_responses
-        WHERE id = CAST(:id AS uuid) AND form_id = CAST(:form_id AS uuid)
-        RETURNING id
-    """), {"id": response_id, "form_id": form_id})
-
-    if not result.fetchone():
-        raise HTTPException(status_code=404, detail="Response not found")
-
-    # Update response count
-    await db.execute(text("""
-        UPDATE workspace.forms SET response_count = GREATEST(COALESCE(response_count, 1) - 1, 0) WHERE id = CAST(:id AS uuid)
-    """), {"id": form_id})
-
-    await db.commit()
-
-    return {"message": "Response deleted successfully"}
-
-
 @router.get("/{form_id}/responses/summary")
 async def get_response_summary(
     form_id: str,
@@ -1473,6 +1478,95 @@ async def export_responses(
     raise HTTPException(status_code=400, detail="Unsupported format")
 
 
+@router.get("/{form_id}/responses/{response_id}")
+async def get_response(
+    form_id: str,
+    response_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get a specific response"""
+    _, user_id = get_user_ids(current_user)
+
+    form = await _verify_form_access(db, form_id, user_id, "view")
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found")
+
+    result = await db.execute(text("""
+        SELECT id, answers, respondent_email, submitted_at, edited_at
+        FROM workspace.form_responses
+        WHERE id = CAST(:id AS uuid) AND form_id = CAST(:form_id AS uuid)
+    """), {"id": response_id, "form_id": form_id})
+
+    response = result.fetchone()
+    if not response:
+        raise HTTPException(status_code=404, detail="Response not found")
+
+    # Get questions
+    questions_result = await db.execute(text("""
+        SELECT id, question_type, title, description, options, question_index
+        FROM workspace.form_questions
+        WHERE form_id = CAST(:form_id AS uuid)
+        ORDER BY question_index
+    """), {"form_id": form_id})
+
+    questions = questions_result.fetchall()
+
+    return {
+        "response": {
+            "id": str(response.id),
+            "answers": response.answers or {},
+            "respondent_email": response.respondent_email,
+            "submitted_at": response.submitted_at.isoformat() if response.submitted_at else None,
+            "edited_at": response.edited_at.isoformat() if response.edited_at else None
+        },
+        "questions": [
+            {
+                "id": str(q.id),
+                "question_type": q.question_type,
+                "title": q.title,
+                "description": q.description,
+                "options": q.options,
+                "question_index": q.question_index
+            }
+            for q in questions
+        ]
+    }
+
+
+@router.delete("/{form_id}/responses/{response_id}")
+async def delete_response(
+    form_id: str,
+    response_id: str,
+    current_user: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Delete a response"""
+    _, user_id = get_user_ids(current_user)
+
+    form = await _verify_form_access(db, form_id, user_id, "edit")
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found")
+
+    result = await db.execute(text("""
+        DELETE FROM workspace.form_responses
+        WHERE id = CAST(:id AS uuid) AND form_id = CAST(:form_id AS uuid)
+        RETURNING id
+    """), {"id": response_id, "form_id": form_id})
+
+    if not result.fetchone():
+        raise HTTPException(status_code=404, detail="Response not found")
+
+    # Update response count
+    await db.execute(text("""
+        UPDATE workspace.forms SET response_count = GREATEST(COALESCE(response_count, 1) - 1, 0) WHERE id = CAST(:id AS uuid)
+    """), {"id": form_id})
+
+    await db.commit()
+
+    return {"message": "Response deleted successfully"}
+
+
 # =============================================
 # Sharing Endpoints
 # =============================================
@@ -1484,60 +1578,153 @@ async def share_form(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Share a form with a user"""
+    """Share a form with a user (internal or external)"""
+    import secrets
+    import asyncio
     tenant_id, user_id = get_user_ids(current_user)
 
-    # Verify ownership
+    # Verify ownership and get form details
     result = await db.execute(text("""
-        SELECT id FROM workspace.forms
-        WHERE id = CAST(:id AS uuid) AND created_by = CAST(:user_id AS uuid)
+        SELECT f.id, f.title, u.name as owner_name, u.email as owner_email
+        FROM workspace.forms f
+        LEFT JOIN workspace.tenant_users u ON f.created_by = u.id
+        WHERE f.id = CAST(:id AS uuid) AND f.created_by = CAST(:user_id AS uuid)
     """), {"id": form_id, "user_id": user_id})
 
-    if not result.fetchone():
+    form = result.fetchone()
+    if not form:
         raise HTTPException(status_code=403, detail="Only the owner can share this form")
+
+    form_title = form.title or "Untitled Form"
+    sharer_name = form.owner_name or form.owner_email or "Someone"
 
     if share.permission not in ["view", "edit", "view_responses"]:
         raise HTTPException(status_code=400, detail="Invalid permission")
 
-    # Find target user
+    # Try to find internal user first
     target_result = await db.execute(text("""
-        SELECT id, name FROM workspace.tenant_users
+        SELECT id, name, email FROM workspace.tenant_users
         WHERE email = :email AND tenant_id = CAST(:tenant_id AS uuid)
     """), {"email": share.email, "tenant_id": tenant_id})
 
     target = target_result.fetchone()
-    if not target:
-        raise HTTPException(status_code=404, detail="User not found in workspace")
-
-    # Create or update share
     share_id = str(uuid.uuid4())
-    await db.execute(text("""
-        INSERT INTO workspace.form_shares
-        (id, form_id, user_id, permission, created_by, created_at)
-        VALUES (
-            CAST(:id AS uuid),
-            CAST(:form_id AS uuid),
-            CAST(:target_id AS uuid),
-            :permission,
-            CAST(:created_by AS uuid),
-            NOW()
-        )
-        ON CONFLICT (form_id, user_id)
-        DO UPDATE SET permission = :permission
-    """), {
-        "id": share_id,
-        "form_id": form_id,
-        "target_id": str(target.id),
-        "permission": share.permission,
-        "created_by": user_id
-    })
 
-    await db.commit()
+    if target:
+        # Internal user - share with user_id
+        await db.execute(text("""
+            INSERT INTO workspace.form_shares
+            (id, form_id, user_id, permission, created_by, created_at)
+            VALUES (
+                CAST(:id AS uuid),
+                CAST(:form_id AS uuid),
+                CAST(:target_id AS uuid),
+                :permission,
+                CAST(:created_by AS uuid),
+                NOW()
+            )
+            ON CONFLICT (form_id, user_id)
+            DO UPDATE SET permission = :permission
+        """), {
+            "id": share_id,
+            "form_id": form_id,
+            "target_id": str(target.id),
+            "permission": share.permission,
+            "created_by": user_id
+        })
+        await db.commit()
 
-    return {
-        "message": f"Form shared with {target.name}",
-        "permission": share.permission
-    }
+        # Send email notification for internal user
+        if share.notify:
+            asyncio.create_task(send_form_share_email(
+                to_email=target.email,
+                to_name=target.name or target.email.split('@')[0],
+                form_title=form_title,
+                form_id=form_id,
+                sharer_name=sharer_name,
+                permission=share.permission,
+                is_external=False
+            ))
+
+        return {
+            "message": f"Form shared with {target.name}",
+            "permission": share.permission,
+            "is_external": False,
+            "email_sent": share.notify
+        }
+    else:
+        # External user - share with email
+        share_token = secrets.token_urlsafe(32)
+        external_name = share.name or share.email.split('@')[0]
+
+        # Check if already shared with this external email
+        existing = await db.execute(text("""
+            SELECT id FROM workspace.form_shares
+            WHERE form_id = CAST(:form_id AS uuid) AND external_email = :email
+        """), {"form_id": form_id, "email": share.email})
+
+        is_new_share = not existing.fetchone()
+
+        if not is_new_share:
+            # Update existing share
+            await db.execute(text("""
+                UPDATE workspace.form_shares
+                SET permission = :permission, external_name = :name
+                WHERE form_id = CAST(:form_id AS uuid) AND external_email = :email
+            """), {
+                "form_id": form_id,
+                "email": share.email,
+                "permission": share.permission,
+                "name": external_name
+            })
+        else:
+            # Create new external share
+            await db.execute(text("""
+                INSERT INTO workspace.form_shares
+                (id, form_id, external_email, external_name, permission, share_token, created_by, created_at)
+                VALUES (
+                    CAST(:id AS uuid),
+                    CAST(:form_id AS uuid),
+                    :email,
+                    :name,
+                    :permission,
+                    :token,
+                    CAST(:created_by AS uuid),
+                    NOW()
+                )
+            """), {
+                "id": share_id,
+                "form_id": form_id,
+                "email": share.email,
+                "name": external_name,
+                "permission": share.permission,
+                "token": share_token,
+                "created_by": user_id
+            })
+
+        await db.commit()
+
+        # Send email notification for external user
+        if share.notify:
+            asyncio.create_task(send_form_share_email(
+                to_email=share.email,
+                to_name=external_name,
+                form_title=form_title,
+                form_id=form_id,
+                sharer_name=sharer_name,
+                permission=share.permission,
+                is_external=True
+            ))
+
+        logger.info(f"Form {form_id} shared with external user: {share.email}")
+
+        return {
+            "message": f"Form shared with external user {external_name}",
+            "permission": share.permission,
+            "is_external": True,
+            "email": share.email,
+            "email_sent": share.notify
+        }
 
 
 @router.get("/{form_id}/shares")
@@ -1546,39 +1733,66 @@ async def get_shares(
     current_user: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Get all shares for a form"""
+    """Get all shares for a form (internal and external)"""
     _, user_id = get_user_ids(current_user)
 
     form = await _verify_form_access(db, form_id, user_id, "view")
     if not form:
         raise HTTPException(status_code=404, detail="Form not found")
 
-    result = await db.execute(text("""
+    # Get internal shares (users in workspace)
+    internal_result = await db.execute(text("""
         SELECT fs.id, fs.permission, fs.created_at,
-               u.id as user_id, u.email, u.name
+               u.id as user_id, u.email, u.name, FALSE as is_external
         FROM workspace.form_shares fs
         JOIN workspace.tenant_users u ON fs.user_id = u.id
-        WHERE fs.form_id = CAST(:form_id AS uuid)
+        WHERE fs.form_id = CAST(:form_id AS uuid) AND fs.user_id IS NOT NULL
         ORDER BY fs.created_at DESC
     """), {"form_id": form_id})
 
-    shares = result.fetchall()
+    internal_shares = internal_result.fetchall()
 
-    return {
-        "shares": [
-            {
-                "id": str(s.id),
-                "user": {
-                    "id": str(s.user_id),
-                    "email": s.email,
-                    "name": s.name
-                },
-                "permission": s.permission,
-                "created_at": s.created_at.isoformat() if s.created_at else None
-            }
-            for s in shares
-        ]
-    }
+    # Get external shares
+    external_result = await db.execute(text("""
+        SELECT id, permission, created_at, external_email, external_name
+        FROM workspace.form_shares
+        WHERE form_id = CAST(:form_id AS uuid) AND external_email IS NOT NULL
+        ORDER BY created_at DESC
+    """), {"form_id": form_id})
+
+    external_shares = external_result.fetchall()
+
+    shares = []
+
+    # Add internal shares
+    for s in internal_shares:
+        shares.append({
+            "id": str(s.id),
+            "user": {
+                "id": str(s.user_id),
+                "email": s.email,
+                "name": s.name
+            },
+            "permission": s.permission,
+            "is_external": False,
+            "created_at": s.created_at.isoformat() if s.created_at else None
+        })
+
+    # Add external shares
+    for s in external_shares:
+        shares.append({
+            "id": str(s.id),
+            "user": {
+                "id": None,
+                "email": s.external_email,
+                "name": s.external_name or s.external_email.split('@')[0]
+            },
+            "permission": s.permission,
+            "is_external": True,
+            "created_at": s.created_at.isoformat() if s.created_at else None
+        })
+
+    return {"shares": shares}
 
 
 @router.put("/{form_id}/shares/{share_id}")
@@ -1934,6 +2148,146 @@ async def upload_response_file(
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
+@router.post("/{form_id}/responses/{response_id}/upload-public")
+async def upload_response_file_public(
+    form_id: str,
+    response_id: str,
+    question_id: str = Form(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db)
+):
+    """Upload a file for a PUBLIC form response to Nextcloud (no auth required)"""
+
+    # Verify form exists and is PUBLISHED (only published forms can accept public uploads)
+    form_result = await db.execute(text("""
+        SELECT id, title, status FROM workspace.forms
+        WHERE id = CAST(:form_id AS uuid)
+        AND is_deleted = FALSE
+        AND status = 'published'
+    """), {"form_id": form_id})
+    form = form_result.fetchone()
+
+    if not form:
+        raise HTTPException(status_code=404, detail="Form not found or not published")
+
+    # Verify response exists for this form
+    response_result = await db.execute(text("""
+        SELECT id FROM workspace.form_responses
+        WHERE id = CAST(:response_id AS uuid) AND form_id = CAST(:form_id AS uuid)
+    """), {"response_id": response_id, "form_id": form_id})
+
+    if not response_result.fetchone():
+        raise HTTPException(status_code=404, detail="Response not found")
+
+    # Get form title for folder name
+    form_title = form.title.replace("/", "-").replace("\\", "-")[:50]
+
+    # Read file content
+    content = await file.read()
+    file_size = len(content)
+
+    # Validate file size (max 50MB)
+    if file_size > 50 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File too large. Maximum size is 50MB")
+
+    # Get file extension
+    original_name = file.filename or "file"
+    ext = original_name.rsplit(".", 1)[-1] if "." in original_name else ""
+
+    # Create folder structure in Nextcloud: /Forms/{form_title}/responses/{response_id}/
+    folder_path = f"/Forms/{form_title}/responses/{response_id}"
+
+    try:
+        # Create folders
+        await nextcloud_service.create_folder(
+            settings.NEXTCLOUD_ADMIN_USER,
+            settings.NEXTCLOUD_ADMIN_PASSWORD,
+            "/Forms"
+        )
+        await nextcloud_service.create_folder(
+            settings.NEXTCLOUD_ADMIN_USER,
+            settings.NEXTCLOUD_ADMIN_PASSWORD,
+            f"/Forms/{form_title}"
+        )
+        await nextcloud_service.create_folder(
+            settings.NEXTCLOUD_ADMIN_USER,
+            settings.NEXTCLOUD_ADMIN_PASSWORD,
+            f"/Forms/{form_title}/responses"
+        )
+        await nextcloud_service.create_folder(
+            settings.NEXTCLOUD_ADMIN_USER,
+            settings.NEXTCLOUD_ADMIN_PASSWORD,
+            folder_path
+        )
+
+        # Generate unique filename
+        file_id = str(uuid.uuid4())[:8]
+        file_name = f"{question_id}_{file_id}.{ext}" if ext else f"{question_id}_{file_id}"
+        file_path = f"{folder_path}/{file_name}"
+
+        # Upload file to Nextcloud
+        upload_success = await nextcloud_service.upload_file(
+            settings.NEXTCLOUD_ADMIN_USER,
+            settings.NEXTCLOUD_ADMIN_PASSWORD,
+            file_path,
+            content
+        )
+
+        if not upload_success:
+            raise HTTPException(status_code=500, detail="Failed to upload file to storage")
+
+        # Create share link for the file
+        share_url = await nextcloud_service.create_share_link(
+            settings.NEXTCLOUD_ADMIN_USER,
+            settings.NEXTCLOUD_ADMIN_PASSWORD,
+            file_path,
+            expires_days=365
+        )
+
+        # Store file info
+        file_info = {
+            "file_name": original_name,
+            "file_path": file_path,
+            "file_size": file_size,
+            "content_type": file.content_type,
+            "share_url": f"{share_url}/download" if share_url else None,
+            "uploaded_at": datetime.utcnow().isoformat()
+        }
+
+        # Update response answers with file info
+        # First get current answers
+        answers_result = await db.execute(text("""
+            SELECT answers FROM workspace.form_responses
+            WHERE id = CAST(:response_id AS uuid)
+        """), {"response_id": response_id})
+        row = answers_result.fetchone()
+        current_answers = row.answers if row and row.answers else {}
+
+        # Update with file info
+        current_answers[question_id] = file_info
+
+        await db.execute(text("""
+            UPDATE workspace.form_responses
+            SET answers = :answers
+            WHERE id = CAST(:response_id AS uuid)
+        """), {"response_id": response_id, "answers": json.dumps(current_answers)})
+
+        await db.commit()
+
+        logger.info(f"Public file uploaded for form {form_id}, response {response_id}: {file_path}")
+
+        return {
+            "success": True,
+            "file_info": file_info
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to upload public file: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+
 @router.post("/{form_id}/export-to-nextcloud")
 async def export_responses_to_nextcloud(
     form_id: str,
@@ -1965,17 +2319,11 @@ async def export_responses_to_nextcloud(
     """), {"form_id": form_id})
     questions = questions_result.fetchall()
 
-    # Get responses with answers
+    # Get responses with answers (answers stored in form_responses.answers as JSON)
     responses_result = await db.execute(text("""
-        SELECT r.id, r.respondent_email, r.submitted_at,
-            json_agg(json_build_object(
-                'question_id', a.question_id,
-                'value', a.value
-            )) as answers
+        SELECT r.id, r.respondent_email, r.submitted_at, r.answers
         FROM workspace.form_responses r
-        LEFT JOIN workspace.form_response_answers a ON r.id = a.response_id
         WHERE r.form_id = CAST(:form_id AS uuid)
-        GROUP BY r.id, r.respondent_email, r.submitted_at
         ORDER BY r.submitted_at DESC
     """), {"form_id": form_id})
     responses = responses_result.fetchall()
@@ -1993,11 +2341,13 @@ async def export_responses_to_nextcloud(
     # Data rows
     for response in responses:
         row = [str(response.id), response.respondent_email or "", str(response.submitted_at)]
-        answers_dict = {}
-        if response.answers:
-            for answer in response.answers:
-                if answer and answer.get("question_id"):
-                    answers_dict[str(answer["question_id"])] = answer.get("value", "")
+        # answers is stored as JSON dict with question_id as keys
+        answers_dict = response.answers or {}
+        if isinstance(answers_dict, str):
+            try:
+                answers_dict = json.loads(answers_dict)
+            except:
+                answers_dict = {}
 
         for q in questions:
             value = answers_dict.get(str(q.id), "")

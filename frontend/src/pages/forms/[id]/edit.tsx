@@ -800,6 +800,47 @@ export default function FormEditor() {
                 </div>
 
                 <div>
+                  <h3 className="text-lg font-medium text-gray-900 mb-4">Response Limits</h3>
+                  <div className="space-y-4">
+                    <label className="flex items-center justify-between">
+                      <span className="text-gray-700">Limit number of responses</span>
+                      <button
+                        onClick={() => updateForm({
+                          settings: { ...form.settings, limit_responses: !form.settings.limit_responses }
+                        })}
+                        className={`w-10 h-6 rounded-full transition-colors ${
+                          form.settings.limit_responses ? 'bg-purple-600' : 'bg-gray-300'
+                        }`}
+                      >
+                        <div
+                          className={`w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                            form.settings.limit_responses ? 'translate-x-5' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
+                    </label>
+
+                    {form.settings.limit_responses && (
+                      <div className="ml-4 flex items-center space-x-2">
+                        <span className="text-gray-600">Maximum responses:</span>
+                        <input
+                          type="number"
+                          min="1"
+                          value={form.settings.response_limit || ''}
+                          onChange={(e) => setForm({
+                            ...form,
+                            settings: { ...form.settings, response_limit: parseInt(e.target.value) || null }
+                          })}
+                          onBlur={() => updateForm({ settings: form.settings })}
+                          className="w-24 border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                          placeholder="100"
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div>
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Confirmation Message</h3>
                   <textarea
                     value={form.settings.confirmation_message}
@@ -811,6 +852,41 @@ export default function FormEditor() {
                     className="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
                     rows={3}
                   />
+                </div>
+
+                <div>
+                  <h3 className="text-lg font-medium text-gray-900 mb-4">Theme</h3>
+                  <div className="space-y-4">
+                    <div className="flex items-center space-x-4">
+                      <span className="text-gray-700">Primary color:</span>
+                      <input
+                        type="color"
+                        value={form.theme.color_primary}
+                        onChange={(e) => setForm({
+                          ...form,
+                          theme: { ...form.theme, color_primary: e.target.value }
+                        })}
+                        onBlur={() => updateForm({ theme: form.theme })}
+                        className="w-10 h-10 rounded border border-gray-300 cursor-pointer"
+                      />
+                      <span className="text-sm text-gray-500">{form.theme.color_primary}</span>
+                    </div>
+
+                    <div className="flex items-center space-x-4">
+                      <span className="text-gray-700">Background color:</span>
+                      <input
+                        type="color"
+                        value={form.theme.color_background}
+                        onChange={(e) => setForm({
+                          ...form,
+                          theme: { ...form.theme, color_background: e.target.value }
+                        })}
+                        onBlur={() => updateForm({ theme: form.theme })}
+                        className="w-10 h-10 rounded border border-gray-300 cursor-pointer"
+                      />
+                      <span className="text-sm text-gray-500">{form.theme.color_background}</span>
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

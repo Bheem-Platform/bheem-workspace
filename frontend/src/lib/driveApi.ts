@@ -7,7 +7,7 @@ const API_BASE = '/api/v1/drive';
 
 // Get auth token from localStorage
 function getAuthHeaders(): HeadersInit {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('auth_token');
   return {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -145,7 +145,7 @@ export async function createFolder(data: CreateFolderRequest): Promise<DriveFile
 }
 
 export async function uploadFile(request: UploadFileRequest): Promise<DriveFile> {
-  const token = localStorage.getItem('token');
+  const token = localStorage.getItem('auth_token');
   const formData = new FormData();
   formData.append('file', request.file);
   if (request.parent_id) formData.append('parent_id', request.parent_id);
@@ -173,7 +173,7 @@ export async function uploadFile(request: UploadFileRequest): Promise<DriveFile>
       reject(new Error('Upload failed'));
     });
 
-    xhr.open('POST', `${API_BASE}/upload`);
+    xhr.open('POST', `${API_BASE}/files/upload`);
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
     xhr.send(formData);
   });
@@ -284,22 +284,28 @@ export async function unstarFile(fileId: string): Promise<DriveFile> {
   return response.json();
 }
 
-export async function getDownloadUrl(fileId: string): Promise<string> {
-  const response = await fetch(`${API_BASE}/files/${fileId}/download`, {
-    headers: getAuthHeaders(),
-  });
-
-  if (!response.ok) {
-    throw new Error('Failed to get download URL');
-  }
-
-  const data = await response.json();
-  return data.download_url;
+/**
+ * Get a direct download URL with token (for opening in new tab or direct link)
+ */
+export function getDownloadUrl(fileId: string): string {
+  const token = localStorage.getItem('auth_token');
+  return `${API_BASE}/files/${fileId}/download${token ? `?token=${token}` : ''}`;
 }
 
+/**
+ * Get a preview URL with token (for viewing files inline - images, PDFs, etc.)
+ */
+export function getPreviewUrl(fileId: string): string {
+  const token = localStorage.getItem('auth_token');
+  return `${API_BASE}/files/${fileId}/preview${token ? `?token=${token}` : ''}`;
+}
+
+/**
+ * Download a file by triggering browser download
+ */
 export async function downloadFile(fileId: string, fileName: string): Promise<void> {
-  const token = localStorage.getItem('token');
-  const response = await fetch(`${API_BASE}/files/${fileId}/download`, {
+  const token = localStorage.getItem('auth_token');
+  const response = await fetch(`${API_BASE}/files/${fileId}/download${token ? `?token=${token}` : ''}`, {
     headers: {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
@@ -318,6 +324,22 @@ export async function downloadFile(fileId: string, fileName: string): Promise<vo
   a.click();
   window.URL.revokeObjectURL(url);
   document.body.removeChild(a);
+}
+
+/**
+ * Open file in new tab for preview
+ */
+export function openFilePreview(fileId: string): void {
+  const url = getPreviewUrl(fileId);
+  window.open(url, '_blank');
+}
+
+/**
+ * Open file download in new tab
+ */
+export function openFileDownload(fileId: string): void {
+  const url = getDownloadUrl(fileId);
+  window.open(url, '_blank');
 }
 
 // Sharing

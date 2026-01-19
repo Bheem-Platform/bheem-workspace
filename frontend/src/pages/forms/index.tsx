@@ -30,6 +30,10 @@ import {
   Cloud,
   HardDrive,
   FileSpreadsheet,
+  X,
+  Link2,
+  Mail,
+  UserPlus,
 } from 'lucide-react';
 import { useRequireAuth } from '@/stores/authStore';
 import { api } from '@/lib/api';
@@ -60,6 +64,11 @@ export default function FormsPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'starred' | 'draft' | 'published'>('all');
   const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [shareModal, setShareModal] = useState<{ formId: string; formTitle: string } | null>(null);
+  const [shareEmail, setShareEmail] = useState('');
+  const [sharePermission, setSharePermission] = useState<'view' | 'edit' | 'view_responses'>('view');
+  const [sharingLoading, setSharingLoading] = useState(false);
+  const [existingShares, setExistingShares] = useState<any[]>([]);
 
   const fetchForms = useCallback(async () => {
     try {
@@ -152,6 +161,59 @@ export default function FormsPage() {
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to sync to Drive');
     }
+  };
+
+  const openShareModal = async (id: string, title: string) => {
+    setShareModal({ formId: id, formTitle: title });
+    setShareEmail('');
+    setSharePermission('view');
+    setContextMenu(null);
+    // Load existing shares
+    try {
+      const response = await api.get(`/forms/${id}/shares`);
+      setExistingShares(response.data.shares || []);
+    } catch (err) {
+      console.error('Failed to load shares:', err);
+      setExistingShares([]);
+    }
+  };
+
+  const shareForm = async () => {
+    if (!shareModal || !shareEmail.trim()) return;
+
+    setSharingLoading(true);
+    try {
+      await api.post(`/forms/${shareModal.formId}/share`, {
+        email: shareEmail.trim(),
+        permission: sharePermission,
+        notify: true,
+      });
+      // Reload shares
+      const response = await api.get(`/forms/${shareModal.formId}/shares`);
+      setExistingShares(response.data.shares || []);
+      setShareEmail('');
+      setError(null);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to share form');
+    } finally {
+      setSharingLoading(false);
+    }
+  };
+
+  const removeShare = async (shareId: string) => {
+    if (!shareModal) return;
+    try {
+      await api.delete(`/forms/${shareModal.formId}/shares/${shareId}`);
+      setExistingShares((prev) => prev.filter((s) => s.id !== shareId));
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to remove share');
+    }
+  };
+
+  const copyPublicUrl = (formId: string) => {
+    const publicUrl = `${window.location.origin}/forms/${formId}`;
+    navigator.clipboard.writeText(publicUrl);
+    alert('Public form URL copied to clipboard!');
   };
 
   const formatDate = (dateString: string) => {
@@ -557,7 +619,10 @@ export default function FormsPage() {
                   <span>Make a copy</span>
                 </button>
                 <button
-                  onClick={() => setContextMenu(null)}
+                  onClick={() => {
+                    const form = forms.find(f => f.id === contextMenu.id);
+                    openShareModal(contextMenu.id, form?.title || 'Untitled Form');
+                  }}
                   className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 flex items-center space-x-2"
                 >
                   <Share2 size={16} />
@@ -588,6 +653,138 @@ export default function FormsPage() {
                 </button>
               </div>
             </>
+          )}
+
+          {/* Share Modal */}
+          {shareModal && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+              <div className="bg-white rounded-lg shadow-xl w-full max-w-lg mx-4">
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+                  <h2 className="text-lg font-semibold text-gray-900">Share "{shareModal.formTitle}"</h2>
+                  <button
+                    onClick={() => setShareModal(null)}
+                    className="p-1 text-gray-400 hover:text-gray-600 rounded"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {/* Content */}
+                <div className="px-6 py-4 space-y-4">
+                  {/* Public Link Section */}
+                  <div className="p-4 bg-gray-50 rounded-lg">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center space-x-2">
+                        <Link2 size={18} className="text-purple-600" />
+                        <span className="font-medium text-gray-900">Public Form Link</span>
+                      </div>
+                      <button
+                        onClick={() => copyPublicUrl(shareModal.formId)}
+                        className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded-lg hover:bg-purple-700"
+                      >
+                        Copy Link
+                      </button>
+                    </div>
+                    <p className="text-sm text-gray-500">
+                      Anyone with this link can fill out the form (when published)
+                    </p>
+                    <div className="mt-2 p-2 bg-white rounded border border-gray-200 text-sm text-gray-600 truncate">
+                      {typeof window !== 'undefined' ? `${window.location.origin}/forms/${shareModal.formId}` : ''}
+                    </div>
+                  </div>
+
+                  {/* Share with People */}
+                  <div>
+                    <div className="flex items-center space-x-2 mb-3">
+                      <UserPlus size={18} className="text-gray-600" />
+                      <span className="font-medium text-gray-900">Share with people</span>
+                    </div>
+
+                    <div className="flex space-x-2">
+                      <input
+                        type="email"
+                        placeholder="Enter email (internal or external)"
+                        value={shareEmail}
+                        onChange={(e) => setShareEmail(e.target.value)}
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                      />
+                      <select
+                        value={sharePermission}
+                        onChange={(e) => setSharePermission(e.target.value as any)}
+                        className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500"
+                      >
+                        <option value="view">Can view</option>
+                        <option value="edit">Can edit</option>
+                        <option value="view_responses">View responses</option>
+                      </select>
+                      <button
+                        onClick={shareForm}
+                        disabled={sharingLoading || !shareEmail.trim()}
+                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {sharingLoading ? '...' : 'Share'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Existing Shares */}
+                  {existingShares.length > 0 && (
+                    <div>
+                      <h3 className="font-medium text-gray-900 mb-2">People with access</h3>
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {existingShares.map((share) => (
+                          <div key={share.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                            <div className="flex items-center space-x-3">
+                              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${share.is_external ? 'bg-orange-100' : 'bg-purple-100'}`}>
+                                <Mail size={16} className={share.is_external ? 'text-orange-600' : 'text-purple-600'} />
+                              </div>
+                              <div>
+                                <div className="flex items-center space-x-2">
+                                  <p className="font-medium text-gray-900">{share.user?.name || share.user?.email}</p>
+                                  {share.is_external && (
+                                    <span className="px-1.5 py-0.5 text-xs bg-orange-100 text-orange-700 rounded">
+                                      External
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-gray-500">{share.user?.email}</p>
+                              </div>
+                            </div>
+                            <div className="flex items-center space-x-2">
+                              <span className="text-sm text-gray-500 capitalize">{share.permission}</span>
+                              <button
+                                onClick={() => removeShare(share.id)}
+                                className="p-1 text-gray-400 hover:text-red-600"
+                                title="Remove access"
+                              >
+                                <X size={16} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {error && (
+                    <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
+                      {error}
+                    </div>
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div className="px-6 py-4 border-t border-gray-200 flex justify-end">
+                  <button
+                    onClick={() => setShareModal(null)}
+                    className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
         </div>
       </div>

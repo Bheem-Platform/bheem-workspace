@@ -36,6 +36,7 @@ import {
 import { useDriveStore } from '@/stores/driveStore';
 import { useRequireAuth } from '@/stores/authStore';
 import type { DriveFile } from '@/lib/driveApi';
+import { getPreviewUrl, getDownloadUrl } from '@/lib/driveApi';
 
 export default function DrivePage() {
   const router = useRouter();
@@ -108,11 +109,14 @@ export default function DrivePage() {
     } else if (file.mime_type?.includes('presentation') || file.mime_type?.includes('powerpoint')) {
       router.push(`/slides/${file.id}`);
     } else if (file.mime_type?.startsWith('image/')) {
-      window.open(`/api/v1/drive/files/${file.id}/preview`, '_blank');
+      // Open images in preview mode (inline viewing)
+      window.open(getPreviewUrl(file.id), '_blank');
     } else if (file.mime_type?.includes('pdf')) {
-      window.open(`/api/v1/drive/files/${file.id}/preview`, '_blank');
+      // Open PDFs in preview mode (inline viewing)
+      window.open(getPreviewUrl(file.id), '_blank');
     } else {
-      window.open(`/api/v1/drive/files/${file.id}/download`, '_blank');
+      // Download other files
+      window.open(getDownloadUrl(file.id), '_blank');
     }
   };
 

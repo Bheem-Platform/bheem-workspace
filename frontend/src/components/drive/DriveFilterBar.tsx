@@ -107,7 +107,7 @@ function FilterDropdown({
   const hasActiveFilter = value && value !== 'all';
 
   return (
-    <div ref={dropdownRef} className="relative">
+    <div ref={dropdownRef} className="relative flex items-center gap-1">
       <button
         onClick={() => setIsOpen(!isOpen)}
         className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
@@ -126,18 +126,19 @@ function FilterDropdown({
             hasActiveFilter ? 'text-blue-600' : 'text-gray-400'
           }`}
         />
-        {hasActiveFilter && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onChange(null);
-            }}
-            className="ml-1 p-0.5 hover:bg-blue-100 rounded"
-          >
-            <X size={12} />
-          </button>
-        )}
       </button>
+      {hasActiveFilter && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onChange(null);
+          }}
+          className="p-1 hover:bg-blue-100 rounded text-blue-600"
+          title="Clear filter"
+        >
+          <X size={14} />
+        </button>
+      )}
 
       {isOpen && (
         <div className="absolute left-0 top-full mt-1 w-56 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-30">

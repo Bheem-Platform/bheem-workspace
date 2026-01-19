@@ -57,6 +57,8 @@ export default function PublicFormView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [answers, setAnswers] = useState<Record<string, any>>({});
+  const [fileUploads, setFileUploads] = useState<Record<string, File>>({});
+  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
   const [respondentEmail, setRespondentEmail] = useState('');
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -109,13 +111,52 @@ export default function PublicFormView() {
 
     try {
       setIsSubmitting(true);
+
+      // First create the response
       const response = await api.post(`/forms/${form.id}/responses`, {
         answers: Object.entries(answers).map(([question_id, value]) => ({
           question_id,
-          value,
+          value: fileUploads[question_id] ? value : value, // Keep filename for files
         })),
         respondent_email: respondentEmail || undefined,
       });
+
+      const responseId = response.data.response_id;
+
+      // Upload any files to Nextcloud
+      const fileQuestionIds = Object.keys(fileUploads);
+      for (const questionId of fileQuestionIds) {
+        const file = fileUploads[questionId];
+        if (file) {
+          try {
+            setUploadProgress((prev) => ({ ...prev, [questionId]: 0 }));
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('question_id', questionId);
+
+            await api.post(
+              `/forms/${form.id}/responses/${responseId}/upload-public`,
+              formData,
+              {
+                headers: { 'Content-Type': 'multipart/form-data' },
+                onUploadProgress: (progressEvent) => {
+                  const percentCompleted = Math.round(
+                    (progressEvent.loaded * 100) / (progressEvent.total || 1)
+                  );
+                  setUploadProgress((prev) => ({ ...prev, [questionId]: percentCompleted }));
+                },
+              }
+            );
+
+            setUploadProgress((prev) => ({ ...prev, [questionId]: 100 }));
+          } catch (uploadErr) {
+            console.error(`Failed to upload file for question ${questionId}:`, uploadErr);
+            // Continue with other files even if one fails
+          }
+        }
+      }
+
       setConfirmationMessage(response.data.message);
       setIsSubmitted(true);
     } catch (err: any) {
@@ -181,6 +222,8 @@ export default function PublicFormView() {
               onClick={() => {
                 setIsSubmitted(false);
                 setAnswers({});
+                setFileUploads({});
+                setUploadProgress({});
                 setRespondentEmail('');
               }}
               className="text-purple-600 hover:text-purple-700"
@@ -445,18 +488,60 @@ export default function PublicFormView() {
                     onChange={(e) => {
                       const file = e.target.files?.[0];
                       if (file) {
+                        // Validate file size (max 50MB)
+                        if (file.size > 50 * 1024 * 1024) {
+                          setValidationErrors((prev) => ({
+                            ...prev,
+                            [question.id]: 'File too large. Maximum size is 50MB',
+                          }));
+                          return;
+                        }
+                        // Store the file object for upload
+                        setFileUploads((prev) => ({ ...prev, [question.id]: file }));
                         updateAnswer(question.id, file.name);
                       }
                     }}
                     className="hidden"
                     id={`file-${question.id}`}
                   />
-                  <label
-                    htmlFor={`file-${question.id}`}
-                    className="cursor-pointer text-purple-600 hover:text-purple-700"
-                  >
-                    {answers[question.id] || 'Click to upload file'}
-                  </label>
+                  {fileUploads[question.id] ? (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-center space-x-2">
+                        <svg className="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <span className="text-gray-700 font-medium">{fileUploads[question.id].name}</span>
+                      </div>
+                      <p className="text-sm text-gray-500">
+                        {(fileUploads[question.id].size / 1024 / 1024).toFixed(2)} MB
+                      </p>
+                      {uploadProgress[question.id] !== undefined && uploadProgress[question.id] < 100 && (
+                        <div className="w-full bg-gray-200 rounded-full h-2">
+                          <div
+                            className="bg-purple-600 h-2 rounded-full transition-all duration-300"
+                            style={{ width: `${uploadProgress[question.id]}%` }}
+                          />
+                        </div>
+                      )}
+                      <label
+                        htmlFor={`file-${question.id}`}
+                        className="cursor-pointer text-sm text-purple-600 hover:text-purple-700"
+                      >
+                        Change file
+                      </label>
+                    </div>
+                  ) : (
+                    <label
+                      htmlFor={`file-${question.id}`}
+                      className="cursor-pointer"
+                    >
+                      <svg className="mx-auto w-12 h-12 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                      </svg>
+                      <span className="text-purple-600 hover:text-purple-700">Click to upload file</span>
+                      <p className="text-xs text-gray-500 mt-1">Max 50MB</p>
+                    </label>
+                  )}
                 </div>
               )}
 
@@ -488,6 +573,8 @@ export default function PublicFormView() {
               type="button"
               onClick={() => {
                 setAnswers({});
+                setFileUploads({});
+                setUploadProgress({});
                 setRespondentEmail('');
                 setValidationErrors({});
               }}

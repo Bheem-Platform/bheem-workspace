@@ -414,9 +414,19 @@ class SpreadsheetService:
             algorithm="HS256"
         )
 
+        # Ensure token is a string (PyJWT 2.0+ returns string, older versions returned bytes)
+        if isinstance(access_token, bytes):
+            access_token = access_token.decode('utf-8')
+
+        # URL-encode the token for safety (even though base64url should be URL-safe)
+        from urllib.parse import quote
+        encoded_token = quote(access_token, safe='')
+
         # Use proxy URL instead of S3 presigned URL (OnlyOffice can't access S3 directly)
         # The proxy endpoint streams the file from S3 through our backend
-        download_url = f"{settings.WORKSPACE_URL}/api/v1/sheets/{spreadsheet_id}/content?token={access_token}"
+        download_url = f"{settings.WORKSPACE_URL}/api/v1/sheets/{spreadsheet_id}/content?token={encoded_token}"
+
+        logger.info(f"Generated download URL for spreadsheet {spreadsheet_id}: {download_url[:100]}...")
 
         # Update document key in database
         await self.db.execute(

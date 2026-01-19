@@ -484,18 +484,44 @@ export default function FormResponses() {
                       <div className="pt-4 space-y-4">
                         {form.questions.map((question) => {
                           const answer = response.answers[question.id];
+                          const isFileAnswer = answer && typeof answer === 'object' && answer.file_name;
                           return (
                             <div key={question.id}>
                               <p className="text-sm font-medium text-gray-500 mb-1">
                                 {question.title}
                               </p>
-                              <p className="text-gray-900">
-                                {answer === undefined || answer === null || answer === ''
-                                  ? '-'
-                                  : Array.isArray(answer)
-                                  ? answer.join(', ')
-                                  : String(answer)}
-                              </p>
+                              {isFileAnswer ? (
+                                <div className="flex items-center space-x-2">
+                                  <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                                  </svg>
+                                  {answer.share_url ? (
+                                    <a
+                                      href={answer.share_url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="text-purple-600 hover:text-purple-700 hover:underline font-medium"
+                                    >
+                                      {answer.file_name}
+                                    </a>
+                                  ) : (
+                                    <span className="text-gray-900">{answer.file_name}</span>
+                                  )}
+                                  {answer.file_size && (
+                                    <span className="text-xs text-gray-500">
+                                      ({(answer.file_size / 1024 / 1024).toFixed(2)} MB)
+                                    </span>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="text-gray-900">
+                                  {answer === undefined || answer === null || answer === ''
+                                    ? '-'
+                                    : Array.isArray(answer)
+                                    ? answer.join(', ')
+                                    : String(answer)}
+                                </p>
+                              )}
                             </div>
                           );
                         })}

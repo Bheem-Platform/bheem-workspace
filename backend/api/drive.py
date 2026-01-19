@@ -1,40 +1,163 @@
 """
 Bheem Workspace - Drive API
-File storage and management endpoints
+File storage and management endpoints with Nextcloud integration
 """
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Form
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 from pydantic import BaseModel
 from datetime import datetime
+import io
+import logging
 
 from core.database import get_db
-from core.security import get_current_user
+from core.security import get_current_user, get_optional_user, decode_token, validate_token_via_passport
 from services.drive_service import DriveService
+
+logger = logging.getLogger(__name__)
+
+
+async def get_user_from_token_string(token: str) -> Optional[Dict[str, Any]]:
+    """Get user from token string (for direct download/preview links)"""
+    if not token:
+        logger.warning("Token param is empty")
+        return None
+
+    logger.info(f"Attempting to decode token (first 50 chars): {token[:50]}...")
+
+    # Try local decode first
+    payload = decode_token(token)
+    if payload:
+        logger.info("Token decoded with local secret")
+        user_id = payload.get("sub") or payload.get("user_id")
+        if user_id:
+            return {
+                "id": user_id,
+                "user_id": user_id,
+                "username": payload.get("username"),
+                "email": payload.get("email"),
+                "role": payload.get("role"),
+                "company_id": payload.get("company_id"),
+                "company_code": payload.get("company_code"),
+            }
+
+    # Try Passport validation for tokens issued by Passport
+    logger.info("Trying Passport validation...")
+    passport_payload = await validate_token_via_passport(token)
+    if passport_payload:
+        logger.info("Token validated via Passport")
+        user_id = passport_payload.get("user_id") or passport_payload.get("sub")
+        if user_id:
+            return {
+                "id": user_id,
+                "user_id": user_id,
+                "username": passport_payload.get("username"),
+                "email": passport_payload.get("email"),
+                "role": passport_payload.get("role"),
+                "company_id": passport_payload.get("company_id"),
+                "company_code": passport_payload.get("company_code"),
+            }
+
+    logger.warning("Token validation failed")
+    return None
 
 router = APIRouter(prefix="/drive", tags=["Drive"])
 
 
 def get_user_ids(current_user: Dict[str, Any]) -> tuple:
-    """Extract tenant_id and owner_id from current user"""
-    # company_id is the tenant_id, user_id is the owner_id
-    tenant_id = current_user.get("company_id")
-    owner_id = current_user.get("user_id") or current_user.get("id")
+    """Extract tenant_id and user_id from current user context (matches forms.py pattern)"""
+    tenant_id = current_user.get("tenant_id") or current_user.get("company_id") or current_user.get("erp_company_id")
+    user_id = current_user.get("id") or current_user.get("user_id")
+    return tenant_id, user_id
 
-    if not tenant_id or not owner_id:
-        raise HTTPException(
-            status_code=400,
-            detail="User context incomplete - missing company_id or user_id"
-        )
 
-    # Convert to UUID if string
-    if isinstance(tenant_id, str):
-        tenant_id = UUID(tenant_id)
-    if isinstance(owner_id, str):
-        owner_id = UUID(owner_id)
+async def ensure_tenant_and_user_exist(
+    db: AsyncSession,
+    tenant_id: str,
+    user_id: str,
+    company_code: str = None,
+    user_email: str = None,
+    user_name: str = None
+):
+    """Ensure tenant and user exist in database (auto-create if needed)"""
+    # Ensure tenant exists
+    try:
+        result = await db.execute(text("""
+            SELECT id FROM workspace.tenants WHERE id = CAST(:tenant_id AS uuid)
+        """), {"tenant_id": tenant_id})
+        if not result.fetchone():
+            org_name = f"Organization {company_code or tenant_id[:8]}"
+            await db.execute(text("""
+                INSERT INTO workspace.tenants (id, name, domain, created_at, updated_at)
+                VALUES (
+                    CAST(:tenant_id AS uuid),
+                    :name,
+                    :domain,
+                    NOW(),
+                    NOW()
+                )
+                ON CONFLICT (id) DO NOTHING
+            """), {
+                "tenant_id": tenant_id,
+                "name": org_name,
+                "domain": f"{(company_code or 'erp').lower()}.bheem.workspace"
+            })
+            await db.commit()
+            logger.info(f"Created tenant {tenant_id}")
+    except Exception as e:
+        logger.error(f"Error ensuring tenant exists: {e}")
+        await db.rollback()
 
-    return tenant_id, owner_id
+    # Ensure user exists in tenant_users
+    try:
+        result = await db.execute(text("""
+            SELECT id FROM workspace.tenant_users WHERE id = CAST(:user_id AS uuid)
+        """), {"user_id": user_id})
+        if not result.fetchone():
+            await db.execute(text("""
+                INSERT INTO workspace.tenant_users (id, tenant_id, email, name, role, created_at, updated_at)
+                VALUES (
+                    CAST(:user_id AS uuid),
+                    CAST(:tenant_id AS uuid),
+                    :email,
+                    :name,
+                    'user',
+                    NOW(),
+                    NOW()
+                )
+                ON CONFLICT (id) DO NOTHING
+            """), {
+                "user_id": user_id,
+                "tenant_id": tenant_id,
+                "email": user_email or f"user_{user_id[:8]}@bheem.workspace",
+                "name": user_name or f"User {user_id[:8]}"
+            })
+            await db.commit()
+            logger.info(f"Created tenant_user {user_id} for tenant {tenant_id}")
+    except Exception as e:
+        logger.error(f"Error ensuring user exists: {e}")
+        await db.rollback()
+
+
+async def get_user_ids_with_ensure(current_user: Dict[str, Any], db: AsyncSession) -> tuple:
+    """Extract user IDs and ensure tenant and user exist"""
+    tenant_id, user_id = get_user_ids(current_user)
+
+    if not tenant_id or not user_id:
+        raise HTTPException(status_code=403, detail="User context incomplete - missing tenant or user ID")
+
+    company_code = current_user.get("company_code")
+    user_email = current_user.get("username") or current_user.get("email")
+    user_name = current_user.get("name") or current_user.get("full_name")
+
+    await ensure_tenant_and_user_exist(
+        db, str(tenant_id), str(user_id), company_code, user_email, user_name
+    )
+
+    return tenant_id, user_id
 
 
 # =============================================
@@ -120,7 +243,7 @@ async def create_folder(
     db: AsyncSession = Depends(get_db)
 ):
     """Create a new folder"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     folder = await service.create_folder(
         tenant_id=tenant_id,
@@ -140,7 +263,7 @@ async def list_folder_contents(
     db: AsyncSession = Depends(get_db)
 ):
     """List contents of a folder"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     files = await service.list_files(
         tenant_id=tenant_id,
@@ -158,7 +281,7 @@ async def list_root_contents(
     db: AsyncSession = Depends(get_db)
 ):
     """List contents of root folder (My Drive)"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     files = await service.list_files(
         tenant_id=tenant_id,
@@ -176,31 +299,92 @@ async def list_root_contents(
 @router.post("/files/upload", response_model=FileResponse)
 async def upload_file(
     file: UploadFile = File(...),
-    parent_id: Optional[UUID] = None,
+    parent_id: Optional[UUID] = Form(None),
     current_user: Dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Upload a file"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    """Upload a file to Drive (stored in Nextcloud)"""
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
 
     # Read file content
     content = await file.read()
-    size_bytes = len(content)
 
-    # Create file record
+    # Create file record and upload to Nextcloud
     drive_file = await service.create_file(
         tenant_id=tenant_id,
         owner_id=owner_id,
         name=file.filename,
+        content=content,
         mime_type=file.content_type,
-        size_bytes=size_bytes,
         parent_id=parent_id
     )
 
-    # TODO: Store actual file content to storage backend (S3, etc.)
-
     return drive_file
+
+
+# =============================================
+# Advanced Search Endpoint (Must be before /files/{file_id})
+# =============================================
+
+@router.get("/files/search")
+async def search_files_advanced(
+    # Filter parameters
+    type: Optional[str] = None,  # folder, document, spreadsheet, presentation, pdf, image, video, audio, archive
+    people: Optional[str] = None,  # me, not-me
+    modified: Optional[str] = None,  # today, yesterday, week, month, year
+    location: Optional[str] = None,  # my-drive, shared-with-me, starred, trash
+    search: Optional[str] = None,
+    # Sorting
+    sort_by: str = "updated_at",
+    sort_order: str = "desc",
+    # Pagination
+    skip: int = 0,
+    limit: int = 50,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Search files with advanced filters (frontend-compatible endpoint)"""
+    from datetime import timedelta
+
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
+    service = DriveService(db)
+
+    # Convert 'modified' filter to date range
+    modified_after = None
+    if modified:
+        now = datetime.utcnow()
+        if modified == "today":
+            modified_after = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif modified == "yesterday":
+            modified_after = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        elif modified == "week":
+            modified_after = now - timedelta(days=7)
+        elif modified == "month":
+            modified_after = now - timedelta(days=30)
+        elif modified == "year":
+            modified_after = now - timedelta(days=365)
+
+    # Convert 'people' filter
+    owned_by_me = None
+    if people == "me":
+        owned_by_me = True
+    elif people == "not-me":
+        owned_by_me = False
+
+    files = await service.list_files_advanced(
+        tenant_id=tenant_id,
+        owner_id=owner_id,
+        file_type=type,
+        owned_by_me=owned_by_me,
+        modified_after=modified_after,
+        location=location,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        skip=skip,
+        limit=limit
+    )
+    return files  # Return array directly for frontend compatibility
 
 
 @router.get("/files/{file_id}", response_model=FileResponse)
@@ -210,12 +394,97 @@ async def get_file(
     db: AsyncSession = Depends(get_db)
 ):
     """Get file metadata"""
-    tenant_id, _ = get_user_ids(current_user)
+    tenant_id, _ = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     file = await service.get_file(file_id, tenant_id)
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
     return file
+
+
+@router.get("/files/{file_id}/download")
+async def download_file(
+    file_id: UUID,
+    token: Optional[str] = Query(None, description="Auth token for direct download links"),
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Download file content from Nextcloud. Supports both Bearer token and query param token."""
+    # Try to get user from token param if header auth fails
+    user = current_user
+    if not user and token:
+        user = await get_user_from_token_string(token)
+        logger.info(f"Download auth via token param: user={user.get('id') if user else None}")
+
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    tenant_id, _ = await get_user_ids_with_ensure(user, db)
+    service = DriveService(db)
+
+    # Get file metadata first
+    file = await service.get_file(file_id, tenant_id)
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if file.file_type == 'folder':
+        raise HTTPException(status_code=400, detail="Cannot download a folder")
+
+    # Download from Nextcloud
+    content = await service.download_file(file_id, tenant_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="File content not found")
+
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type=file.mime_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{file.name}"'
+        }
+    )
+
+
+@router.get("/files/{file_id}/preview")
+async def preview_file(
+    file_id: UUID,
+    token: Optional[str] = Query(None, description="Auth token for direct preview links"),
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Preview/view file content inline. Supports both Bearer token and query param token."""
+    # Try to get user from token param if header auth fails
+    user = current_user
+    if not user and token:
+        user = await get_user_from_token_string(token)
+        logger.info(f"Preview auth via token param: user={user.get('id') if user else None}")
+
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    tenant_id, _ = await get_user_ids_with_ensure(user, db)
+    service = DriveService(db)
+
+    # Get file metadata first
+    file = await service.get_file(file_id, tenant_id)
+    if not file:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if file.file_type == 'folder':
+        raise HTTPException(status_code=400, detail="Cannot preview a folder")
+
+    # Download from Nextcloud
+    content = await service.download_file(file_id, tenant_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="File content not found")
+
+    # Return inline for viewing (not as attachment)
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type=file.mime_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'inline; filename="{file.name}"'
+        }
+    )
 
 
 @router.patch("/files/{file_id}", response_model=FileResponse)
@@ -226,7 +495,7 @@ async def update_file(
     db: AsyncSession = Depends(get_db)
 ):
     """Update file metadata"""
-    tenant_id, _ = get_user_ids(current_user)
+    tenant_id, _ = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     file = await service.update_file(
         file_id=file_id,
@@ -246,7 +515,7 @@ async def move_file(
     db: AsyncSession = Depends(get_db)
 ):
     """Move a file to a different folder"""
-    tenant_id, _ = get_user_ids(current_user)
+    tenant_id, _ = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     file = await service.move_file(
         file_id=file_id,
@@ -266,7 +535,7 @@ async def copy_file(
     db: AsyncSession = Depends(get_db)
 ):
     """Copy a file"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     file = await service.copy_file(
         file_id=file_id,
@@ -287,7 +556,7 @@ async def trash_file(
     db: AsyncSession = Depends(get_db)
 ):
     """Move a file to trash"""
-    tenant_id, _ = get_user_ids(current_user)
+    tenant_id, _ = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     success = await service.trash_file(file_id, tenant_id)
     if not success:
@@ -302,7 +571,7 @@ async def restore_file(
     db: AsyncSession = Depends(get_db)
 ):
     """Restore a file from trash"""
-    tenant_id, _ = get_user_ids(current_user)
+    tenant_id, _ = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     success = await service.restore_file(file_id, tenant_id)
     if not success:
@@ -317,7 +586,7 @@ async def delete_file(
     db: AsyncSession = Depends(get_db)
 ):
     """Permanently delete a file"""
-    tenant_id, _ = get_user_ids(current_user)
+    tenant_id, _ = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     success = await service.delete_file(file_id, tenant_id)
     if not success:
@@ -335,7 +604,7 @@ async def list_starred_files(
     db: AsyncSession = Depends(get_db)
 ):
     """List all starred files"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     files = await service.list_files(
         tenant_id=tenant_id,
@@ -352,7 +621,7 @@ async def star_file(
     db: AsyncSession = Depends(get_db)
 ):
     """Star a file"""
-    tenant_id, _ = get_user_ids(current_user)
+    tenant_id, _ = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     file = await service.update_file(
         file_id=file_id,
@@ -371,7 +640,7 @@ async def unstar_file(
     db: AsyncSession = Depends(get_db)
 ):
     """Remove star from a file"""
-    tenant_id, _ = get_user_ids(current_user)
+    tenant_id, _ = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     file = await service.update_file(
         file_id=file_id,
@@ -393,7 +662,7 @@ async def list_trash(
     db: AsyncSession = Depends(get_db)
 ):
     """List all files in trash"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     files = await service.list_files(
         tenant_id=tenant_id,
@@ -410,7 +679,7 @@ async def empty_trash(
     db: AsyncSession = Depends(get_db)
 ):
     """Empty trash - permanently delete all trashed files"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     count = await service.empty_trash(tenant_id, owner_id)
     return {"deleted_count": count}
@@ -428,7 +697,7 @@ async def share_file(
     db: AsyncSession = Depends(get_db)
 ):
     """Share a file with another user"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     share = await service.share_file(
         file_id=file_id,
@@ -449,7 +718,7 @@ async def list_file_shares(
     db: AsyncSession = Depends(get_db)
 ):
     """List all shares for a file"""
-    tenant_id, _ = get_user_ids(current_user)
+    tenant_id, _ = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     shares = await service.get_file_shares(file_id, tenant_id)
     return {"shares": shares}
@@ -463,7 +732,7 @@ async def remove_share(
     db: AsyncSession = Depends(get_db)
 ):
     """Remove a share from a file"""
-    tenant_id, _ = get_user_ids(current_user)
+    tenant_id, _ = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     success = await service.remove_share(share_id, tenant_id)
     if not success:
@@ -477,7 +746,7 @@ async def list_shared_with_me(
     db: AsyncSession = Depends(get_db)
 ):
     """List files shared with the current user"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     user_email = current_user.get("email", "")
     service = DriveService(db)
     files = await service.list_shared_with_user(user_email, tenant_id)
@@ -496,7 +765,7 @@ async def create_public_link(
     db: AsyncSession = Depends(get_db)
 ):
     """Create a public shareable link for a file"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     share = await service.create_public_link(
         file_id=file_id,
@@ -548,7 +817,7 @@ async def search_files(
     db: AsyncSession = Depends(get_db)
 ):
     """Search for files by name"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     files = await service.search_files(
         tenant_id=tenant_id,
@@ -572,7 +841,7 @@ async def list_recent_files(
     db: AsyncSession = Depends(get_db)
 ):
     """List recently accessed/modified files"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     files = await service.list_files(
         tenant_id=tenant_id,
@@ -592,7 +861,7 @@ async def get_storage_info(
     db: AsyncSession = Depends(get_db)
 ):
     """Get storage usage information"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     usage = await service.get_storage_usage(tenant_id, owner_id)
     # Map to frontend expected format
@@ -615,7 +884,7 @@ async def list_activity(
     db: AsyncSession = Depends(get_db)
 ):
     """List activity log for user or specific file"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     activity = await service.get_activity(
         tenant_id=tenant_id,
@@ -641,7 +910,7 @@ async def list_shared_drives(
     db: AsyncSession = Depends(get_db)
 ):
     """List all shared drives for the tenant"""
-    tenant_id, _ = get_user_ids(current_user)
+    tenant_id, _ = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     drives = await service.list_shared_drives(tenant_id)
     return drives  # Return array directly
@@ -654,7 +923,7 @@ async def create_shared_drive(
     db: AsyncSession = Depends(get_db)
 ):
     """Create a new shared drive"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     drive = await service.create_shared_drive(
         tenant_id=tenant_id,
@@ -673,7 +942,7 @@ async def list_shared_drive_contents(
     db: AsyncSession = Depends(get_db)
 ):
     """List contents of a shared drive"""
-    tenant_id, _ = get_user_ids(current_user)
+    tenant_id, _ = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     files = await service.list_shared_drive_contents(
         tenant_id=tenant_id,
@@ -716,7 +985,7 @@ async def list_files_with_filters(
     db: AsyncSession = Depends(get_db)
 ):
     """List files with advanced filtering options"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
 
     # Parse MIME types if provided
@@ -755,7 +1024,7 @@ async def get_home_data(
     db: AsyncSession = Depends(get_db)
 ):
     """Get home page data with suggested files and quick access"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
 
     # Get recent files
@@ -791,7 +1060,7 @@ async def list_workspace_files(
     db: AsyncSession = Depends(get_db)
 ):
     """List all workspace/organization files (for admins)"""
-    tenant_id, _ = get_user_ids(current_user)
+    tenant_id, _ = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     files = await service.list_workspace_files(
         tenant_id=tenant_id,
@@ -811,7 +1080,7 @@ async def list_spam_files(
     db: AsyncSession = Depends(get_db)
 ):
     """List files marked as spam"""
-    tenant_id, owner_id = get_user_ids(current_user)
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     files = await service.list_spam_files(
         tenant_id=tenant_id,
@@ -827,7 +1096,7 @@ async def mark_as_spam(
     db: AsyncSession = Depends(get_db)
 ):
     """Mark a file as spam"""
-    tenant_id, _ = get_user_ids(current_user)
+    tenant_id, _ = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     success = await service.mark_as_spam(file_id, tenant_id)
     if not success:
@@ -842,76 +1111,12 @@ async def unmark_spam(
     db: AsyncSession = Depends(get_db)
 ):
     """Remove spam mark from a file"""
-    tenant_id, _ = get_user_ids(current_user)
+    tenant_id, _ = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     success = await service.unmark_spam(file_id, tenant_id)
     if not success:
         raise HTTPException(status_code=404, detail="File not found")
     return {"status": "unmarked_spam"}
-
-
-# =============================================
-# Advanced Search Endpoint (Frontend-compatible)
-# =============================================
-
-@router.get("/files/search")
-async def search_files_advanced(
-    # Filter parameters
-    type: Optional[str] = None,  # folder, document, spreadsheet, presentation, pdf, image, video, audio, archive
-    people: Optional[str] = None,  # me, not-me
-    modified: Optional[str] = None,  # today, yesterday, week, month, year
-    location: Optional[str] = None,  # my-drive, shared-with-me, starred, trash
-    search: Optional[str] = None,
-    # Sorting
-    sort_by: str = "updated_at",
-    sort_order: str = "desc",
-    # Pagination
-    skip: int = 0,
-    limit: int = 50,
-    current_user: Dict[str, Any] = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db)
-):
-    """Search files with advanced filters (frontend-compatible endpoint)"""
-    from datetime import timedelta
-
-    tenant_id, owner_id = get_user_ids(current_user)
-    service = DriveService(db)
-
-    # Convert 'modified' filter to date range
-    modified_after = None
-    if modified:
-        now = datetime.utcnow()
-        if modified == "today":
-            modified_after = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        elif modified == "yesterday":
-            modified_after = (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        elif modified == "week":
-            modified_after = now - timedelta(days=7)
-        elif modified == "month":
-            modified_after = now - timedelta(days=30)
-        elif modified == "year":
-            modified_after = now - timedelta(days=365)
-
-    # Convert 'people' filter
-    owned_by_me = None
-    if people == "me":
-        owned_by_me = True
-    elif people == "not-me":
-        owned_by_me = False
-
-    files = await service.list_files_advanced(
-        tenant_id=tenant_id,
-        owner_id=owner_id,
-        file_type=type,
-        owned_by_me=owned_by_me,
-        modified_after=modified_after,
-        location=location,
-        sort_by=sort_by,
-        sort_order=sort_order,
-        skip=skip,
-        limit=limit
-    )
-    return files  # Return array directly for frontend compatibility
 
 
 # =============================================

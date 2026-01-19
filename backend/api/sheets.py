@@ -29,6 +29,42 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/sheets", tags=["Bheem Sheets"])
 
 
+# =============================================
+# OnlyOffice Connectivity Endpoints
+# =============================================
+
+@router.options("/{sheet_id}/content")
+async def content_options(sheet_id: str):
+    """Handle CORS preflight requests for content endpoint."""
+    from fastapi.responses import Response
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Max-Age": "86400",
+        }
+    )
+
+
+@router.get("/onlyoffice-test")
+async def onlyoffice_connectivity_test():
+    """
+    Test endpoint for OnlyOffice Document Server connectivity.
+
+    OnlyOffice server should be able to reach this endpoint.
+    Use this to verify network connectivity between OnlyOffice and our backend.
+    """
+    return {
+        "status": "ok",
+        "service": "Bheem Sheets",
+        "message": "OnlyOffice can reach this endpoint",
+        "workspace_url": settings.WORKSPACE_URL,
+        "onlyoffice_url": settings.ONLYOFFICE_URL,
+    }
+
+
 async def ensure_tenant_and_user_exist(db: AsyncSession, tenant_id: str, user_id: str, company_code: str = None, user_email: str = None, user_name: str = None) -> None:
     """Ensure tenant and user records exist for ERP users.
 
@@ -1299,16 +1335,29 @@ async def get_spreadsheet_content(
     from services.docs_storage_service import get_docs_storage_service
     import jwt
     import io
+    from urllib.parse import unquote
+
+    logger.info(f"OnlyOffice content request for sheet {sheet_id}")
+
+    # URL-decode the token if it was encoded
+    token = unquote(token)
 
     # Verify token
     try:
         payload = jwt.decode(token, settings.ONLYOFFICE_JWT_SECRET, algorithms=["HS256"])
-        if payload.get("sheet_id") != sheet_id:
-            raise HTTPException(status_code=403, detail="Invalid token")
+        token_sheet_id = payload.get("sheet_id")
+        if token_sheet_id != sheet_id:
+            logger.warning(f"Sheet ID mismatch: token has {token_sheet_id}, URL has {sheet_id}")
+            raise HTTPException(status_code=403, detail="Invalid token - sheet ID mismatch")
     except jwt.ExpiredSignatureError:
+        logger.warning(f"Token expired for sheet {sheet_id}")
         raise HTTPException(status_code=403, detail="Token expired")
-    except jwt.InvalidTokenError:
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"Invalid token for sheet {sheet_id}: {e}")
         raise HTTPException(status_code=403, detail="Invalid token")
+    except Exception as e:
+        logger.error(f"Token verification error for sheet {sheet_id}: {e}")
+        raise HTTPException(status_code=403, detail="Token verification failed")
 
     # Get storage path
     result = await db.execute(
@@ -1317,17 +1366,27 @@ async def get_spreadsheet_content(
     )
     row = result.fetchone()
 
-    if not row or not row.storage_path:
+    if not row:
+        logger.warning(f"Spreadsheet not found: {sheet_id}")
         raise HTTPException(status_code=404, detail="Spreadsheet not found")
+
+    if not row.storage_path:
+        logger.warning(f"Spreadsheet {sheet_id} has no storage_path")
+        raise HTTPException(status_code=404, detail="Spreadsheet file not found - no storage path")
 
     # Get file from S3
     storage = get_docs_storage_service()
     try:
+        logger.info(f"Downloading spreadsheet from S3: {row.storage_path}")
         file_content, metadata = await storage.download_file(row.storage_path)
         content = file_content.read()
+        logger.info(f"Downloaded spreadsheet {sheet_id}, size: {len(content)} bytes")
+    except FileNotFoundError:
+        logger.error(f"Spreadsheet file not found in S3: {row.storage_path}")
+        raise HTTPException(status_code=404, detail="Spreadsheet file not found in storage")
     except Exception as e:
-        logger.error(f"Failed to download spreadsheet: {e}")
-        raise HTTPException(status_code=500, detail="Failed to download file")
+        logger.error(f"Failed to download spreadsheet {sheet_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to download file from storage")
 
     return StreamingResponse(
         io.BytesIO(content),
@@ -1335,5 +1394,9 @@ async def get_spreadsheet_content(
         headers={
             "Content-Disposition": f'attachment; filename="{row.title}.xlsx"',
             "Content-Length": str(len(content)),
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
         }
     )

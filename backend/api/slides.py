@@ -22,6 +22,42 @@ router = APIRouter(prefix="/slides", tags=["Bheem Slides"])
 
 
 # =============================================
+# OnlyOffice Connectivity Endpoints
+# =============================================
+
+@router.options("/{presentation_id}/content")
+async def content_options(presentation_id: str):
+    """Handle CORS preflight requests for content endpoint."""
+    from fastapi.responses import Response
+    return Response(
+        status_code=200,
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "Access-Control-Max-Age": "86400",
+        }
+    )
+
+
+@router.get("/onlyoffice-test")
+async def onlyoffice_connectivity_test():
+    """
+    Test endpoint for OnlyOffice Document Server connectivity.
+
+    OnlyOffice server should be able to reach this endpoint.
+    Use this to verify network connectivity between OnlyOffice and our backend.
+    """
+    return {
+        "status": "ok",
+        "service": "Bheem Slides",
+        "message": "OnlyOffice can reach this endpoint",
+        "workspace_url": settings.WORKSPACE_URL,
+        "onlyoffice_url": settings.ONLYOFFICE_URL,
+    }
+
+
+# =============================================
 # Helper Functions (same as sheets.py)
 # =============================================
 
@@ -909,15 +945,29 @@ async def get_presentation_content(
     from services.docs_storage_service import get_docs_storage_service
     import jwt
     import io
+    from urllib.parse import unquote
+
+    logger.info(f"OnlyOffice content request for presentation {presentation_id}")
+
+    # URL-decode the token if it was encoded
+    token = unquote(token)
 
     # Verify token
     try:
         payload = jwt.decode(token, settings.ONLYOFFICE_JWT_SECRET, algorithms=["HS256"])
-        if payload.get("presentation_id") != presentation_id:
-            raise HTTPException(status_code=403, detail="Invalid token")
-    except Exception as e:
-        logger.error(f"Token verification failed: {e}")
+        token_presentation_id = payload.get("presentation_id")
+        if token_presentation_id != presentation_id:
+            logger.warning(f"Presentation ID mismatch: token has {token_presentation_id}, URL has {presentation_id}")
+            raise HTTPException(status_code=403, detail="Invalid token - presentation ID mismatch")
+    except jwt.ExpiredSignatureError:
+        logger.warning(f"Token expired for presentation {presentation_id}")
+        raise HTTPException(status_code=403, detail="Token expired")
+    except jwt.InvalidTokenError as e:
+        logger.warning(f"Invalid token for presentation {presentation_id}: {e}")
         raise HTTPException(status_code=403, detail="Invalid token")
+    except Exception as e:
+        logger.error(f"Token verification error for presentation {presentation_id}: {e}")
+        raise HTTPException(status_code=403, detail="Token verification failed")
 
     # Get storage path
     result = await db.execute(
@@ -926,17 +976,27 @@ async def get_presentation_content(
     )
     row = result.fetchone()
 
-    if not row or not row.storage_path:
+    if not row:
+        logger.warning(f"Presentation not found: {presentation_id}")
         raise HTTPException(status_code=404, detail="Presentation not found")
+
+    if not row.storage_path:
+        logger.warning(f"Presentation {presentation_id} has no storage_path")
+        raise HTTPException(status_code=404, detail="Presentation file not found - no storage path")
 
     # Get file from S3
     storage = get_docs_storage_service()
     try:
+        logger.info(f"Downloading presentation from S3: {row.storage_path}")
         file_content, metadata = await storage.download_file(row.storage_path)
         content = file_content.read()
+        logger.info(f"Downloaded presentation {presentation_id}, size: {len(content)} bytes")
+    except FileNotFoundError:
+        logger.error(f"Presentation file not found in S3: {row.storage_path}")
+        raise HTTPException(status_code=404, detail="Presentation file not found in storage")
     except Exception as e:
-        logger.error(f"Failed to download presentation: {e}")
-        raise HTTPException(status_code=500, detail="Failed to download file")
+        logger.error(f"Failed to download presentation {presentation_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to download file from storage")
 
     return StreamingResponse(
         io.BytesIO(content),
@@ -944,5 +1004,9 @@ async def get_presentation_content(
         headers={
             "Content-Disposition": f'attachment; filename="{row.title}.pptx"',
             "Content-Length": str(len(content)),
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
         }
     )
