@@ -25,7 +25,7 @@ import {
 import { useRouter } from 'next/router';
 import * as docsEditorApi from '@/lib/docsEditorApi';
 import * as productivityApi from '@/lib/productivityApi';
-import AppSwitcherBar from '@/components/shared/AppSwitcherBar';
+import WorkspaceLayout from '@/components/workspace/WorkspaceLayout';
 import AppLauncher from '@/components/shared/AppLauncher';
 import FileGrid from '@/components/docs/FileGrid';
 import Breadcrumb from '@/components/docs/Breadcrumb';
@@ -275,54 +275,52 @@ export default function DocsPage() {
     );
   }
 
+  // Docs sidebar component
+  const docsSidebar = (
+    <DocsSidebar
+      activeType={showUnifiedHome ? 'home' : 'docs'}
+      activeQuickAccess={quickAccessFilter || undefined}
+      onQuickAccessChange={(id) => {
+        setQuickAccessFilter(id);
+        if (id === 'recent') setQuickFilter('recent');
+        else if (id === 'starred') setQuickFilter('starred');
+        else setQuickFilter('all');
+      }}
+      onCreateNew={openCreateFolderModal}
+      onUpload={() => setShowUploadModal(true)}
+    />
+  );
+
   return (
     <>
       <Head>
         <title>Docs | Bheem</title>
       </Head>
 
-      <div
-        {...getRootProps()}
-        className={`min-h-screen flex bg-gray-100 ${isDragActive ? 'bg-purple-50' : ''}`}
+      <WorkspaceLayout
+        title="Docs"
+        secondarySidebar={docsSidebar}
+        secondarySidebarWidth={240}
+        hideHeader
       >
-        <input {...getInputProps()} />
+        <div
+          {...getRootProps()}
+          className={`min-h-full flex flex-col bg-gray-100 ${isDragActive ? 'bg-purple-50' : ''}`}
+        >
+          <input {...getInputProps()} />
 
-        {/* Drag overlay */}
-        {isDragActive && (
-          <div className="fixed inset-0 z-50 bg-purple-500/10 border-4 border-dashed border-purple-500 flex items-center justify-center pointer-events-none">
-            <div className="text-center">
-              <Upload size={64} className="mx-auto text-purple-500 mb-4" />
-              <p className="text-xl font-medium text-purple-700">Drop files to upload</p>
+          {/* Drag overlay */}
+          {isDragActive && (
+            <div className="fixed inset-0 z-50 bg-purple-500/10 border-4 border-dashed border-purple-500 flex items-center justify-center pointer-events-none">
+              <div className="text-center">
+                <Upload size={64} className="mx-auto text-purple-500 mb-4" />
+                <p className="text-xl font-medium text-purple-700">Drop files to upload</p>
+              </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* App Switcher Bar */}
-        <AppSwitcherBar activeApp="docs" />
-
-        {/* Docs Sidebar */}
-        <div
-          className="fixed left-[60px] top-0 bottom-0 w-[240px] z-40"
-        >
-          <DocsSidebar
-            activeType={showUnifiedHome ? 'home' : 'docs'}
-            activeQuickAccess={quickAccessFilter || undefined}
-            onQuickAccessChange={(id) => {
-              setQuickAccessFilter(id);
-              if (id === 'recent') setQuickFilter('recent');
-              else if (id === 'starred') setQuickFilter('starred');
-              else setQuickFilter('all');
-            }}
-            onCreateNew={openCreateFolderModal}
-            onUpload={() => setShowUploadModal(true)}
-          />
-        </div>
-
-        {/* Main Content */}
-        <div
-          className="flex-1 transition-all duration-300 flex flex-col"
-          style={{ marginLeft: 300 }}
-        >
+          {/* Main Content */}
+          <div className="flex-1 flex flex-col">
           <div className="flex-1 max-w-6xl mx-auto px-6 py-8 w-full">
             {/* Header */}
             <div className="flex items-center justify-between mb-6">
@@ -619,7 +617,8 @@ export default function DocsPage() {
             onCancel={closeDeleteConfirm}
           />
         )}
-      </div>
+        </div>
+      </WorkspaceLayout>
     </>
   );
 }

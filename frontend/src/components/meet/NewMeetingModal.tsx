@@ -273,14 +273,14 @@ export default function NewMeetingModal({ isOpen, onClose }: NewMeetingModalProp
             className="space-y-5"
           >
             {/* Mode Toggle */}
-            <div className="flex bg-gray-700/50 rounded-xl p-1">
+            <div className="flex bg-gray-100 rounded-xl p-1">
               <button
                 onClick={() => setMode('instant')}
                 className={`
                   flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-medium rounded-lg transition-all
                   ${mode === 'instant'
-                    ? 'bg-emerald-500 text-white shadow-lg'
-                    : 'text-gray-400 hover:text-white'
+                    ? 'bg-gradient-to-r from-[#977DFF] to-[#0033FF] text-white shadow-lg'
+                    : 'text-gray-500 hover:text-gray-700'
                   }
                 `}
               >
@@ -292,8 +292,8 @@ export default function NewMeetingModal({ isOpen, onClose }: NewMeetingModalProp
                 className={`
                   flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-medium rounded-lg transition-all
                   ${mode === 'schedule'
-                    ? 'bg-emerald-500 text-white shadow-lg'
-                    : 'text-gray-400 hover:text-white'
+                    ? 'bg-gradient-to-r from-[#977DFF] to-[#0033FF] text-white shadow-lg'
+                    : 'text-gray-500 hover:text-gray-700'
                   }
                 `}
               >
@@ -321,7 +321,7 @@ export default function NewMeetingModal({ isOpen, onClose }: NewMeetingModalProp
               >
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
                       Date
                     </label>
                     <div className="relative">
@@ -330,12 +330,12 @@ export default function NewMeetingModal({ isOpen, onClose }: NewMeetingModalProp
                         type="date"
                         value={scheduledDate}
                         onChange={(e) => setScheduledDate(e.target.value)}
-                        className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                        className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 focus:ring-2 focus:ring-[#977DFF] focus:border-[#977DFF] outline-none"
                       />
                     </div>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
                       Time
                     </label>
                     <div className="relative">
@@ -344,20 +344,20 @@ export default function NewMeetingModal({ isOpen, onClose }: NewMeetingModalProp
                         type="time"
                         value={scheduledTime}
                         onChange={(e) => setScheduledTime(e.target.value)}
-                        className="w-full pl-10 pr-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                        className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 focus:ring-2 focus:ring-[#977DFF] focus:border-[#977DFF] outline-none"
                       />
                     </div>
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
                     Duration
                   </label>
                   <select
                     value={duration}
                     onChange={(e) => setDuration(Number(e.target.value))}
-                    className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 focus:ring-2 focus:ring-[#977DFF] focus:border-[#977DFF] outline-none"
                   >
                     <option value={15}>15 minutes</option>
                     <option value={30}>30 minutes</option>
@@ -372,7 +372,7 @@ export default function NewMeetingModal({ isOpen, onClose }: NewMeetingModalProp
 
             {/* Participants Input */}
             <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-300">
+              <label className="block text-sm font-medium text-gray-700">
                 <Users size={16} className="inline mr-2" />
                 Invite participants (optional)
               </label>
@@ -381,7 +381,7 @@ export default function NewMeetingModal({ isOpen, onClose }: NewMeetingModalProp
                 value={participants}
                 onChange={(e) => setParticipants(e.target.value)}
                 placeholder="email@example.com, another@example.com"
-                className="w-full px-4 py-3 bg-gray-800 border border-gray-700 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-[#977DFF] focus:border-[#977DFF] outline-none"
               />
               <p className="text-xs text-gray-500">
                 Separate multiple emails with commas
@@ -400,30 +400,30 @@ export default function NewMeetingModal({ isOpen, onClose }: NewMeetingModalProp
                   id="sendInvites"
                   checked={sendInvites}
                   onChange={(e) => setSendInvites(e.target.checked)}
-                  className="w-4 h-4 text-emerald-500 border-gray-600 rounded focus:ring-emerald-500 bg-gray-700"
+                  className="w-4 h-4 text-[#977DFF] border-gray-300 rounded focus:ring-[#977DFF] bg-white"
                 />
-                <label htmlFor="sendInvites" className="text-sm text-gray-300">
+                <label htmlFor="sendInvites" className="text-sm text-gray-700">
                   Send email invitations to participants
                 </label>
               </motion.div>
             )}
 
             {/* Waiting Room Toggle */}
-            <div className="flex items-center justify-between p-4 bg-gray-700/30 rounded-xl">
+            <div className="flex items-center justify-between p-4 bg-gray-50 border border-gray-200 rounded-xl">
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-gray-700 flex items-center justify-center">
-                  <Shield size={20} className="text-gray-400" />
+                <div className="w-10 h-10 rounded-xl bg-gray-100 flex items-center justify-center">
+                  <Shield size={20} className="text-gray-500" />
                 </div>
                 <div>
-                  <p className="text-sm font-medium text-white">Waiting Room</p>
-                  <p className="text-xs text-gray-400">Approve participants before they join</p>
+                  <p className="text-sm font-medium text-gray-900">Waiting Room</p>
+                  <p className="text-xs text-gray-500">Approve participants before they join</p>
                 </div>
               </div>
               <button
                 onClick={() => setWaitingRoom(!waitingRoom)}
                 className={`
                   w-12 h-7 rounded-full transition-colors duration-200
-                  ${waitingRoom ? 'bg-emerald-500' : 'bg-gray-600'}
+                  ${waitingRoom ? 'bg-gradient-to-r from-[#977DFF] to-[#0033FF]' : 'bg-gray-300'}
                 `}
               >
                 <motion.div
@@ -457,42 +457,42 @@ export default function NewMeetingModal({ isOpen, onClose }: NewMeetingModalProp
             className="text-center py-4"
           >
             {/* Success Icon */}
-            <div className="w-20 h-20 rounded-full bg-emerald-500/20 flex items-center justify-center mx-auto mb-6">
+            <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#FFCCF2]/20 via-[#977DFF]/20 to-[#0033FF]/20 flex items-center justify-center mx-auto mb-6">
               <motion.div
                 initial={{ scale: 0 }}
                 animate={{ scale: 1 }}
                 transition={{ type: 'spring', delay: 0.2 }}
               >
-                <Check size={40} className="text-emerald-400" />
+                <Check size={40} className="text-[#977DFF]" />
               </motion.div>
             </div>
 
-            <h2 className="text-xl font-semibold text-white mb-2">
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">
               Your meeting is ready!
             </h2>
-            <p className="text-gray-400 mb-6">
+            <p className="text-gray-600 mb-6">
               Share this link with others you want in the meeting
             </p>
 
             {/* Meeting Link */}
-            <div className="bg-gray-700/50 rounded-xl p-4 mb-4">
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-4">
               <div className="flex items-center gap-3">
                 <LinkIcon size={18} className="text-gray-400 flex-shrink-0" />
                 <input
                   type="text"
                   value={createdMeeting?.joinUrl || ''}
                   readOnly
-                  className="flex-1 bg-transparent text-sm text-white font-mono outline-none truncate"
+                  className="flex-1 bg-transparent text-sm text-gray-900 font-mono outline-none truncate"
                 />
                 <button
                   onClick={handleCopyLink}
-                  className="p-2 hover:bg-gray-600 rounded-lg transition-colors"
+                  className="p-2 hover:bg-gray-200 rounded-lg transition-colors"
                   title="Copy link"
                 >
                   {copied ? (
-                    <Check size={18} className="text-emerald-400" />
+                    <Check size={18} className="text-[#977DFF]" />
                   ) : (
-                    <Copy size={18} className="text-gray-400" />
+                    <Copy size={18} className="text-gray-500" />
                   )}
                 </button>
               </div>
@@ -500,7 +500,7 @@ export default function NewMeetingModal({ isOpen, onClose }: NewMeetingModalProp
                 <motion.p
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="text-emerald-400 text-sm mt-2"
+                  className="text-[#977DFF] text-sm mt-2"
                 >
                   Link copied!
                 </motion.p>
@@ -508,9 +508,9 @@ export default function NewMeetingModal({ isOpen, onClose }: NewMeetingModalProp
             </div>
 
             {/* Meeting Code */}
-            <div className="bg-gray-700/30 rounded-xl p-3 mb-4 inline-block">
-              <p className="text-xs text-gray-400 mb-1">Meeting Code</p>
-              <p className="text-xl font-mono text-white tracking-wider">
+            <div className="bg-gray-100 border border-gray-200 rounded-xl p-3 mb-4 inline-block">
+              <p className="text-xs text-gray-500 mb-1">Meeting Code</p>
+              <p className="text-xl font-mono text-gray-900 tracking-wider">
                 {createdMeeting?.roomCode}
               </p>
             </div>
@@ -519,7 +519,7 @@ export default function NewMeetingModal({ isOpen, onClose }: NewMeetingModalProp
             <div className="mb-6">
               <button
                 onClick={() => setShowShareOptions(!showShareOptions)}
-                className="text-sm text-emerald-400 hover:text-emerald-300 flex items-center gap-1 mx-auto"
+                className="text-sm text-[#977DFF] hover:text-[#8B6FFF] flex items-center gap-1 mx-auto"
               >
                 <Share2 size={16} />
                 More sharing options
@@ -540,17 +540,17 @@ export default function NewMeetingModal({ isOpen, onClose }: NewMeetingModalProp
                     {/* Share with Details */}
                     <button
                       onClick={handleCopyDetails}
-                      className="w-full flex items-center gap-3 p-3 bg-gray-700/30 hover:bg-gray-700/50 rounded-xl transition-colors text-left"
+                      className="w-full flex items-center gap-3 p-3 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl transition-colors text-left"
                     >
-                      <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center">
-                        <FileText size={20} className="text-purple-400" />
+                      <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center">
+                        <FileText size={20} className="text-purple-600" />
                       </div>
                       <div className="flex-1">
-                        <p className="text-sm font-medium text-white">Copy with Details</p>
-                        <p className="text-xs text-gray-400">Copy formatted meeting info</p>
+                        <p className="text-sm font-medium text-gray-900">Copy with Details</p>
+                        <p className="text-xs text-gray-500">Copy formatted meeting info</p>
                       </div>
                       {copiedDetails ? (
-                        <Check size={18} className="text-emerald-400" />
+                        <Check size={18} className="text-[#977DFF]" />
                       ) : (
                         <Copy size={18} className="text-gray-400" />
                       )}
@@ -560,14 +560,14 @@ export default function NewMeetingModal({ isOpen, onClose }: NewMeetingModalProp
                     {'share' in navigator && (
                       <button
                         onClick={handleNativeShare}
-                        className="w-full flex items-center gap-3 p-3 bg-gray-700/30 hover:bg-gray-700/50 rounded-xl transition-colors text-left"
+                        className="w-full flex items-center gap-3 p-3 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl transition-colors text-left"
                       >
-                        <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center">
-                          <Share2 size={20} className="text-blue-400" />
+                        <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
+                          <Share2 size={20} className="text-blue-600" />
                         </div>
                         <div className="flex-1">
-                          <p className="text-sm font-medium text-white">Share</p>
-                          <p className="text-xs text-gray-400">Share via your device</p>
+                          <p className="text-sm font-medium text-gray-900">Share</p>
+                          <p className="text-xs text-gray-500">Share via your device</p>
                         </div>
                         <ChevronRight size={18} className="text-gray-400" />
                       </button>
@@ -576,14 +576,14 @@ export default function NewMeetingModal({ isOpen, onClose }: NewMeetingModalProp
                     {/* Download Calendar */}
                     <button
                       onClick={handleDownloadCalendar}
-                      className="w-full flex items-center gap-3 p-3 bg-gray-700/30 hover:bg-gray-700/50 rounded-xl transition-colors text-left"
+                      className="w-full flex items-center gap-3 p-3 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl transition-colors text-left"
                     >
-                      <div className="w-10 h-10 rounded-lg bg-orange-500/20 flex items-center justify-center">
-                        <Download size={20} className="text-orange-400" />
+                      <div className="w-10 h-10 rounded-lg bg-orange-100 flex items-center justify-center">
+                        <Download size={20} className="text-orange-600" />
                       </div>
                       <div className="flex-1">
-                        <p className="text-sm font-medium text-white">Add to Calendar</p>
-                        <p className="text-xs text-gray-400">Download .ics file</p>
+                        <p className="text-sm font-medium text-gray-900">Add to Calendar</p>
+                        <p className="text-xs text-gray-500">Download .ics file</p>
                       </div>
                       <Calendar size={18} className="text-gray-400" />
                     </button>
@@ -591,14 +591,14 @@ export default function NewMeetingModal({ isOpen, onClose }: NewMeetingModalProp
                     {/* Share via Email */}
                     <button
                       onClick={handleShareViaEmail}
-                      className="w-full flex items-center gap-3 p-3 bg-gray-700/30 hover:bg-gray-700/50 rounded-xl transition-colors text-left"
+                      className="w-full flex items-center gap-3 p-3 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl transition-colors text-left"
                     >
-                      <div className="w-10 h-10 rounded-lg bg-red-500/20 flex items-center justify-center">
-                        <Mail size={20} className="text-red-400" />
+                      <div className="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center">
+                        <Mail size={20} className="text-red-600" />
                       </div>
                       <div className="flex-1">
-                        <p className="text-sm font-medium text-white">Share via Email</p>
-                        <p className="text-xs text-gray-400">Open in email client</p>
+                        <p className="text-sm font-medium text-gray-900">Share via Email</p>
+                        <p className="text-xs text-gray-500">Open in email client</p>
                       </div>
                       <ChevronRight size={18} className="text-gray-400" />
                     </button>
@@ -606,14 +606,14 @@ export default function NewMeetingModal({ isOpen, onClose }: NewMeetingModalProp
                     {/* Share via WhatsApp */}
                     <button
                       onClick={handleShareViaWhatsApp}
-                      className="w-full flex items-center gap-3 p-3 bg-gray-700/30 hover:bg-gray-700/50 rounded-xl transition-colors text-left"
+                      className="w-full flex items-center gap-3 p-3 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-xl transition-colors text-left"
                     >
-                      <div className="w-10 h-10 rounded-lg bg-green-500/20 flex items-center justify-center">
-                        <MessageCircle size={20} className="text-green-400" />
+                      <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
+                        <MessageCircle size={20} className="text-green-600" />
                       </div>
                       <div className="flex-1">
-                        <p className="text-sm font-medium text-white">Share via WhatsApp</p>
-                        <p className="text-xs text-gray-400">Send to WhatsApp</p>
+                        <p className="text-sm font-medium text-gray-900">Share via WhatsApp</p>
+                        <p className="text-xs text-gray-500">Send to WhatsApp</p>
                       </div>
                       <ChevronRight size={18} className="text-gray-400" />
                     </button>

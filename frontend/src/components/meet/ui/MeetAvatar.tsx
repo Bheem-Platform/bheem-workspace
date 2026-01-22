@@ -17,8 +17,8 @@ const sizeStyles = {
 };
 
 const statusStyles = {
-  online: 'ring-2 ring-emerald-500',
-  speaking: 'ring-2 ring-emerald-400 animate-pulse',
+  online: 'ring-2 ring-[#977DFF]',
+  speaking: 'ring-2 ring-[#977DFF] animate-pulse',
   muted: 'ring-2 ring-red-500',
 };
 
@@ -121,7 +121,7 @@ export function MeetAvatarGroup({
           key={index}
           className={`
             ${index > 0 ? overlapStyles[size] : ''}
-            ring-2 ring-gray-800 rounded-full
+            ring-2 ring-white rounded-full
           `}
         >
           <MeetAvatar
@@ -136,9 +136,9 @@ export function MeetAvatarGroup({
           className={`
             ${overlapStyles[size]}
             ${sizeStyles[size]}
-            rounded-full bg-gray-700 ring-2 ring-gray-800
+            rounded-full bg-gray-200 ring-2 ring-white
             flex items-center justify-center
-            text-gray-300 font-medium
+            text-gray-600 font-medium
           `}
         >
           +{remaining}

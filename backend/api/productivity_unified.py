@@ -142,6 +142,9 @@ async def get_unified_documents(
             query = query.where(Spreadsheet.is_starred == True)
         if shared_only:
             query = query.where(Spreadsheet.created_by != user_id)  # Documents not owned by current user
+        else:
+            # By default, show only documents created by current user
+            query = query.where(Spreadsheet.created_by == user_id)
         query = query.order_by(desc(Spreadsheet.updated_at)).limit(
             limit if type_filter == DocumentTypeFilter.SHEETS else 20
         )
@@ -173,6 +176,9 @@ async def get_unified_documents(
             query = query.where(Presentation.is_starred == True)
         if shared_only:
             query = query.where(Presentation.created_by != user_id)
+        else:
+            # By default, show only documents created by current user
+            query = query.where(Presentation.created_by == user_id)
         query = query.order_by(desc(Presentation.updated_at)).limit(
             limit if type_filter == DocumentTypeFilter.SLIDES else 20
         )
@@ -205,6 +211,9 @@ async def get_unified_documents(
                 query = query.where(Video.is_starred == True)
             if shared_only:
                 query = query.where(Video.created_by != user_id)
+            else:
+                # By default, show only documents created by current user
+                query = query.where(Video.created_by == user_id)
             query = query.order_by(desc(Video.updated_at)).limit(
                 limit if type_filter == DocumentTypeFilter.VIDEOS else 20
             )
@@ -240,6 +249,9 @@ async def get_unified_documents(
             query = query.where(Form.is_starred == True)
         if shared_only:
             query = query.where(Form.created_by != user_id)
+        else:
+            # By default, show only documents created by current user
+            query = query.where(Form.created_by == user_id)
         query = query.order_by(desc(Form.updated_at)).limit(
             limit if type_filter == DocumentTypeFilter.FORMS else 20
         )

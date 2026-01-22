@@ -34,8 +34,8 @@ const LiveKitComponents = dynamic(
     loading: () => (
       <div className="w-full h-full flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500 mx-auto mb-2" />
-          <p className="text-gray-400 text-sm">Loading video...</p>
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#977DFF] mx-auto mb-2" />
+          <p className="text-gray-500 text-sm">Loading video...</p>
         </div>
       </div>
     )
@@ -447,14 +447,14 @@ export default function MeetingRoom({
           <meta name="twitter:description" content={pageDescription} />
           <meta name="twitter:image" content={pageImage} />
         </Head>
-        <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <div className="min-h-screen bg-white flex items-center justify-center">
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="text-center"
           >
-            <div className="w-16 h-16 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-6" />
-            <p className="text-white text-lg">Loading...</p>
+            <div className="w-16 h-16 border-4 border-[#977DFF]/30 border-t-[#977DFF] rounded-full animate-spin mx-auto mb-6" />
+            <p className="text-gray-900 text-lg">Loading...</p>
           </motion.div>
         </div>
       </>
@@ -477,15 +477,15 @@ export default function MeetingRoom({
           <meta name="twitter:card" content="summary_large_image" />
           <meta name="twitter:image" content={pageImage} />
         </Head>
-        <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <div className="min-h-screen bg-white flex items-center justify-center">
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="text-center"
           >
-            <div className="w-16 h-16 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-6" />
-            <p className="text-white text-lg">Reconnecting to meeting...</p>
-            <p className="text-gray-400 text-sm mt-2">Please wait while we restore your session</p>
+            <div className="w-16 h-16 border-4 border-[#977DFF]/30 border-t-[#977DFF] rounded-full animate-spin mx-auto mb-6" />
+            <p className="text-gray-900 text-lg">Reconnecting to meeting...</p>
+            <p className="text-gray-500 text-sm mt-2">Please wait while we restore your session</p>
           </motion.div>
         </div>
       </>
@@ -578,22 +578,22 @@ export default function MeetingRoom({
           <meta property="og:image" content={pageImage} />
           <meta property="og:site_name" content="Bheem Meet" />
         </Head>
-        <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <div className="min-h-screen bg-white flex items-center justify-center">
           <motion.div
             initial={{ opacity: 0, scale: 0.9 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="text-center max-w-md mx-auto p-8 bg-gray-800 rounded-3xl border border-gray-700"
+            className="text-center max-w-md mx-auto p-8 bg-white rounded-3xl border border-gray-200 shadow-lg"
           >
-            <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
-              <span className="text-3xl text-red-400">!</span>
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <span className="text-3xl text-red-500">!</span>
             </div>
-            <h2 className="text-xl font-semibold text-white mb-3">
+            <h2 className="text-xl font-semibold text-gray-900 mb-3">
               Unable to join meeting
             </h2>
-            <p className="text-gray-400 mb-8">{error}</p>
+            <p className="text-gray-600 mb-8">{error}</p>
             <button
               onClick={() => router.push('/meet')}
-              className="px-8 py-3 bg-emerald-500 text-white font-medium rounded-xl hover:bg-emerald-600 transition-colors"
+              className="px-8 py-3 bg-gradient-to-r from-[#977DFF] to-[#0033FF] text-white font-medium rounded-xl hover:from-[#8B6FFF] hover:to-[#0029CC] transition-colors"
             >
               Back to Meetings
             </button>
@@ -614,14 +614,14 @@ export default function MeetingRoom({
           <meta property="og:image" content={pageImage} />
           <meta property="og:site_name" content="Bheem Meet" />
         </Head>
-        <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+        <div className="min-h-screen bg-white flex items-center justify-center">
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             className="text-center"
           >
-            <div className="w-16 h-16 border-4 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-6" />
-            <p className="text-white text-lg">Joining meeting...</p>
+            <div className="w-16 h-16 border-4 border-[#977DFF]/30 border-t-[#977DFF] rounded-full animate-spin mx-auto mb-6" />
+            <p className="text-gray-900 text-lg">Joining meeting...</p>
           </motion.div>
         </div>
       </>
@@ -679,8 +679,8 @@ export default function MeetingRoom({
           <div className="flex items-center gap-2 text-xs sm:text-sm text-gray-400 flex-shrink-0">
             <span className="flex items-center gap-1.5">
               <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#977DFF] opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#0033FF]" />
               </span>
               <span className="hidden sm:inline">{participants.length} participant{participants.length !== 1 ? 's' : ''}</span>
               <span className="sm:hidden">{participants.length}</span>
@@ -713,8 +713,8 @@ export default function MeetingRoom({
             {!devicesChecked ? (
               <div className="w-full h-full flex items-center justify-center">
                 <div className="text-center">
-                  <div className="w-10 h-10 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-4" />
-                  <p className="text-gray-400 text-sm">Checking devices...</p>
+                  <div className="w-10 h-10 border-2 border-[#977DFF]/30 border-t-[#977DFF] rounded-full animate-spin mx-auto mb-4" />
+                  <p className="text-gray-500 text-sm">Checking devices...</p>
                 </div>
               </div>
             ) : useLiveKit ? (

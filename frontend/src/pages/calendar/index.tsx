@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import Head from 'next/head';
 import { useHotkeys } from 'react-hotkeys-hook';
-import AppSwitcher from '@/components/shared/AppSwitcher';
+import WorkspaceLayout from '@/components/workspace/WorkspaceLayout';
 import CalendarSidebar from '@/components/calendar/CalendarSidebar';
 import CalendarHeader from '@/components/calendar/CalendarHeader';
 import WeekView from '@/components/calendar/WeekView';
@@ -39,7 +39,6 @@ export default function CalendarPage() {
     clearError,
   } = useCalendarStore();
 
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showMailLoginPrompt, setShowMailLoginPrompt] = useState(false);
   const [activeTab, setActiveTab] = useState<CalendarTab>('calendar');
   const [showMeetPanel, setShowMeetPanel] = useState(false);
@@ -137,48 +136,43 @@ export default function CalendarPage() {
     }
   };
 
+  // Calendar sidebar component with Meet button
+  const calendarSidebar = (
+    <div className="h-full flex flex-col bg-white">
+      {/* Meet Button */}
+      <div className="p-4 border-b border-gray-200">
+        <button
+          onClick={() => setShowMeetPanel(!showMeetPanel)}
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border-2 border-blue-500 text-blue-600 rounded-xl hover:bg-blue-50 transition-all font-medium"
+        >
+          <Video size={20} />
+          <span>Meet</span>
+        </button>
+      </div>
+
+      {/* Meet Panel or Calendar Sidebar */}
+      {showMeetPanel ? (
+        <MeetSection onClose={() => setShowMeetPanel(false)} />
+      ) : (
+        <CalendarSidebar onCreateEvent={() => openEventModal()} />
+      )}
+    </div>
+  );
+
   return (
     <>
       <Head>
         <title>Calendar | Bheem</title>
       </Head>
 
-      <div className="h-screen flex bg-gray-100">
-        {/* App Switcher */}
-        <AppSwitcher
-          activeApp="calendar"
-          collapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-        />
-
-        {/* Main Content */}
-        <div
-          className="flex-1 flex transition-all duration-300"
-          style={{ marginLeft: sidebarCollapsed ? 64 : 240 }}
-        >
-          {/* Calendar Sidebar */}
-          <div className="w-64 flex-shrink-0 border-r border-gray-200 flex flex-col">
-            {/* Meet Button */}
-            <div className="p-4 border-b border-gray-200">
-              <button
-                onClick={() => setShowMeetPanel(!showMeetPanel)}
-                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border-2 border-blue-500 text-blue-600 rounded-xl hover:bg-blue-50 transition-all font-medium"
-              >
-                <Video size={20} />
-                <span>Meet</span>
-              </button>
-            </div>
-
-            {/* Meet Panel or Calendar Sidebar */}
-            {showMeetPanel ? (
-              <MeetSection onClose={() => setShowMeetPanel(false)} />
-            ) : (
-              <CalendarSidebar onCreateEvent={() => openEventModal()} />
-            )}
-          </div>
-
-          {/* Main Content Area */}
-          <div className="flex-1 flex flex-col min-w-0">
+      <WorkspaceLayout
+        title="Calendar"
+        secondarySidebar={calendarSidebar}
+        secondarySidebarWidth={264}
+        hideHeader
+      >
+        {/* Main Content Area */}
+        <div className="flex-1 flex flex-col min-w-0 h-full bg-gray-100">
             {/* Tabs */}
             <div className="bg-white border-b border-gray-200">
               <div className="flex items-center gap-1 px-4 pt-3">
@@ -257,14 +251,13 @@ export default function CalendarPage() {
               <BookingPagesPanel />
             )}
           </div>
-        </div>
 
         {/* Event Modal */}
         <EventModal
           isOpen={isEventModalOpen}
           onClose={closeEventModal}
         />
-      </div>
+      </WorkspaceLayout>
     </>
   );
 }

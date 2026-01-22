@@ -60,22 +60,22 @@ export default function MeetModal({
               <Dialog.Panel
                 className={`
                   w-full ${sizeStyles[size]}
-                  bg-gray-800 rounded-2xl shadow-2xl
-                  border border-gray-700
+                  bg-white rounded-2xl shadow-2xl
+                  border border-gray-200
                   transform transition-all
                 `}
               >
                 {/* Header */}
                 {(title || showCloseButton) && (
-                  <div className="flex items-center justify-between px-6 py-4 border-b border-gray-700">
+                  <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
                     <div>
                       {title && (
-                        <Dialog.Title className="text-lg font-semibold text-white">
+                        <Dialog.Title className="text-lg font-semibold text-gray-900">
                           {title}
                         </Dialog.Title>
                       )}
                       {description && (
-                        <Dialog.Description className="text-sm text-gray-400 mt-1">
+                        <Dialog.Description className="text-sm text-gray-500 mt-1">
                           {description}
                         </Dialog.Description>
                       )}
@@ -83,7 +83,7 @@ export default function MeetModal({
                     {showCloseButton && (
                       <button
                         onClick={onClose}
-                        className="p-2 rounded-full text-gray-400 hover:text-white hover:bg-gray-700 transition-colors"
+                        className="p-2 rounded-full text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
                       >
                         <X size={20} />
                       </button>
@@ -105,7 +105,7 @@ export default function MeetModal({
 // Modal Action Buttons Container
 export function MeetModalActions({ children }: { children: ReactNode }) {
   return (
-    <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-gray-700">
+    <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-gray-200">
       {children}
     </div>
   );

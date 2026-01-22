@@ -27,13 +27,14 @@ interface AppItem {
   description: string;
 }
 
+// Bheem brand color gradient: #FFCCF2 → #977DFF → #0033FF
 const apps: AppItem[] = [
   {
     id: 'dashboard',
     name: 'Dashboard',
     icon: Home,
     href: '/dashboard',
-    gradient: 'from-blue-500 to-purple-600',
+    gradient: 'from-[#FFCCF2] via-[#977DFF] to-[#0033FF]',
     description: 'Overview & quick access',
   },
   {
@@ -41,7 +42,7 @@ const apps: AppItem[] = [
     name: 'Mail',
     icon: Mail,
     href: '/mail',
-    gradient: 'from-orange-500 to-red-500',
+    gradient: 'from-[#FFCCF2] via-[#977DFF] to-[#0033FF]',
     description: 'Email & messaging',
   },
   {
@@ -49,7 +50,7 @@ const apps: AppItem[] = [
     name: 'Calendar',
     icon: Calendar,
     href: '/calendar',
-    gradient: 'from-blue-500 to-cyan-500',
+    gradient: 'from-[#FFCCF2] via-[#977DFF] to-[#0033FF]',
     description: 'Events & scheduling',
   },
   {
@@ -57,7 +58,7 @@ const apps: AppItem[] = [
     name: 'Meet',
     icon: Video,
     href: '/meet',
-    gradient: 'from-green-500 to-emerald-500',
+    gradient: 'from-[#FFCCF2] via-[#977DFF] to-[#0033FF]',
     description: 'Video conferencing',
   },
   {
@@ -65,7 +66,7 @@ const apps: AppItem[] = [
     name: 'Docs',
     icon: FileText,
     href: '/docs',
-    gradient: 'from-purple-500 to-pink-500',
+    gradient: 'from-[#FFCCF2] via-[#977DFF] to-[#0033FF]',
     description: 'Documents & editing',
   },
   {
@@ -73,7 +74,7 @@ const apps: AppItem[] = [
     name: 'Drive',
     icon: HardDrive,
     href: '/drive',
-    gradient: 'from-amber-500 to-orange-500',
+    gradient: 'from-[#FFCCF2] via-[#977DFF] to-[#0033FF]',
     description: 'Files & storage',
   },
 ];

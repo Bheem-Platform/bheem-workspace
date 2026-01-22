@@ -12,11 +12,12 @@ import {
   ChevronRight,
   Sparkles,
 } from 'lucide-react';
-import AppSwitcher from '@/components/shared/AppSwitcher';
+import WorkspaceLayout from '@/components/workspace/WorkspaceLayout';
 import AppLauncher from '@/components/shared/AppLauncher';
 import MeetingCard from '@/components/meet/MeetingCard';
 import QuickJoinInput from '@/components/meet/QuickJoinInput';
 import NewMeetingModal from '@/components/meet/NewMeetingModal';
+import FeaturesCarousel from '@/components/meet/FeaturesCarousel';
 import { MeetButton, MeetAvatar } from '@/components/meet/ui';
 import { useMeetStore } from '@/stores/meetStore';
 import { useAuthStore, useRequireAuth } from '@/stores/authStore';
@@ -38,8 +39,6 @@ export default function MeetPage() {
     clearError,
     loading,
   } = useMeetStore();
-
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   // Fetch meetings and config on mount
   useEffect(() => {
@@ -81,14 +80,54 @@ export default function MeetPage() {
   // Show loading while checking auth
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-gray-900 flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <div className="w-12 h-12 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-gray-400">Loading...</p>
+          <div className="w-12 h-12 border-2 border-[#977DFF]/30 border-t-[#977DFF] rounded-full animate-spin mx-auto mb-4" />
+          <p className="text-gray-600">Loading...</p>
         </div>
       </div>
     );
   }
+
+  // Custom Meet header with brand colors - Light theme
+  const meetHeader = (
+    <header className="sticky top-0 z-10 bg-white/80 backdrop-blur-lg border-b border-gray-200 h-16">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 h-full flex items-center justify-between">
+        <div className="flex items-center gap-3 sm:gap-4">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#FFCCF2] via-[#977DFF] to-[#0033FF] flex items-center justify-center">
+            <Video size={20} className="text-white" />
+          </div>
+          <div className="hidden sm:block">
+            <h1 className="text-xl font-semibold text-gray-900">Bheem Meet</h1>
+            <p className="text-sm text-gray-500">Secure video meetings</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 sm:gap-4">
+          <MeetButton
+            variant="primary"
+            onClick={openCreateModal}
+            leftIcon={<Plus size={18} />}
+            className="hidden sm:inline-flex"
+          >
+            New Meeting
+          </MeetButton>
+          <MeetButton
+            variant="primary"
+            onClick={openCreateModal}
+            size="icon"
+            className="sm:hidden"
+          >
+            <Plus size={20} />
+          </MeetButton>
+          <AppLauncher />
+          <button className="p-2 rounded-full hover:bg-gray-100 transition-colors hidden sm:flex">
+            <Settings size={20} className="text-gray-500" />
+          </button>
+          <MeetAvatar name={user?.username || user?.email || 'User'} size="md" />
+        </div>
+      </div>
+    </header>
+  );
 
   return (
     <>
@@ -96,62 +135,24 @@ export default function MeetPage() {
         <title>Meet | Bheem</title>
       </Head>
 
-      <div className="min-h-screen flex bg-gray-900">
-        {/* App Switcher */}
-        <AppSwitcher
-          activeApp="meet"
-          collapsed={sidebarCollapsed}
-          onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
-        />
+      <WorkspaceLayout
+        title="Meet"
+        customHeader={meetHeader}
+      >
+        <div className="min-h-full overflow-auto">
 
-        {/* Main Content */}
-        <div
-          className="flex-1 transition-all duration-300 overflow-auto"
-          style={{ marginLeft: sidebarCollapsed ? 64 : 240 }}
-        >
-          {/* Header */}
-          <header className="sticky top-0 z-10 bg-gray-900/80 backdrop-blur-lg border-b border-gray-800">
-            <div className="max-w-6xl mx-auto px-6 py-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 flex items-center justify-center">
-                    <Video size={20} className="text-white" />
-                  </div>
-                  <div>
-                    <h1 className="text-xl font-semibold text-white">Bheem Meet</h1>
-                    <p className="text-sm text-gray-400">Secure video meetings</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  <MeetButton
-                    variant="primary"
-                    onClick={openCreateModal}
-                    leftIcon={<Plus size={18} />}
-                  >
-                    New Meeting
-                  </MeetButton>
-                  <AppLauncher variant="dark" />
-                  <button className="p-2 rounded-full hover:bg-gray-800 transition-colors">
-                    <Settings size={20} className="text-gray-400" />
-                  </button>
-                  <MeetAvatar name={user?.username || user?.email || 'User'} size="md" />
-                </div>
-              </div>
-            </div>
-          </header>
-
-          <main className="max-w-6xl mx-auto px-6 py-8">
+          <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
             {/* Error Banner */}
             {error && (
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mb-6 px-4 py-3 bg-red-500/10 border border-red-500/30 rounded-xl flex items-center justify-between"
+                className="mb-6 px-4 py-3 bg-red-50 border border-red-200 rounded-xl flex items-center justify-between"
               >
-                <span className="text-sm text-red-400">{error}</span>
+                <span className="text-sm text-red-600">{error}</span>
                 <button
                   onClick={clearError}
-                  className="text-red-400 hover:text-red-300 text-sm font-medium"
+                  className="text-red-600 hover:text-red-700 text-sm font-medium"
                 >
                   Dismiss
                 </button>
@@ -162,34 +163,34 @@ export default function MeetPage() {
             <motion.section
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mb-12"
+              className="mb-8 sm:mb-12"
             >
-              <div className="grid md:grid-cols-2 gap-8 items-center">
+              <div className="grid lg:grid-cols-2 gap-6 lg:gap-8 items-center">
                 {/* Left: Quick Actions */}
                 <div>
-                  <h2 className="text-3xl font-bold text-white mb-3">
+                  <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-2 sm:mb-3">
                     Start or join a meeting
                   </h2>
-                  <p className="text-gray-400 mb-8">
+                  <p className="text-gray-600 mb-6 sm:mb-8 text-sm sm:text-base">
                     Connect with your team instantly with secure, high-quality video calls.
                   </p>
 
                   {/* Action Cards */}
-                  <div className="grid grid-cols-2 gap-4 mb-8">
+                  <div className="grid grid-cols-2 gap-3 sm:gap-4 mb-6 sm:mb-8">
                     <motion.button
                       whileHover={{ scale: 1.02 }}
                       whileTap={{ scale: 0.98 }}
                       onClick={openCreateModal}
-                      className="p-5 bg-gradient-to-br from-emerald-500 to-emerald-600 rounded-2xl text-left group"
+                      className="p-4 sm:p-5 bg-gradient-to-br from-[#FFCCF2] via-[#977DFF] to-[#0033FF] rounded-2xl text-left group"
                     >
-                      <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center mb-4">
-                        <Sparkles size={24} className="text-white" />
+                      <div className="w-10 h-10 sm:w-12 sm:h-12 bg-white/20 rounded-xl flex items-center justify-center mb-3 sm:mb-4">
+                        <Sparkles size={20} className="text-white sm:w-6 sm:h-6" />
                       </div>
-                      <h3 className="font-semibold text-white mb-1">New Meeting</h3>
-                      <p className="text-emerald-100 text-sm">Start right now</p>
+                      <h3 className="font-semibold text-white mb-1 text-sm sm:text-base">New Meeting</h3>
+                      <p className="text-white/80 text-xs sm:text-sm">Start right now</p>
                       <ChevronRight
-                        size={20}
-                        className="mt-3 text-white/70 group-hover:translate-x-1 transition-transform"
+                        size={18}
+                        className="mt-2 sm:mt-3 text-white/70 group-hover:translate-x-1 transition-transform"
                       />
                     </motion.button>
 
@@ -200,30 +201,30 @@ export default function MeetPage() {
                         openCreateModal();
                         // TODO: Set mode to schedule
                       }}
-                      className="p-5 bg-gray-800 hover:bg-gray-750 border border-gray-700 rounded-2xl text-left group"
+                      className="p-4 sm:p-5 bg-white hover:bg-gray-50 border border-gray-200 rounded-2xl text-left group shadow-sm"
                     >
-                      <div className="w-12 h-12 bg-gray-700 rounded-xl flex items-center justify-center mb-4">
-                        <Calendar size={24} className="text-gray-300" />
+                      <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gray-100 rounded-xl flex items-center justify-center mb-3 sm:mb-4">
+                        <Calendar size={20} className="text-gray-600 sm:w-6 sm:h-6" />
                       </div>
-                      <h3 className="font-semibold text-white mb-1">Schedule</h3>
-                      <p className="text-gray-400 text-sm">Plan for later</p>
+                      <h3 className="font-semibold text-gray-900 mb-1 text-sm sm:text-base">Schedule</h3>
+                      <p className="text-gray-500 text-xs sm:text-sm">Plan for later</p>
                       <ChevronRight
-                        size={20}
-                        className="mt-3 text-gray-500 group-hover:translate-x-1 transition-transform"
+                        size={18}
+                        className="mt-2 sm:mt-3 text-gray-400 group-hover:translate-x-1 transition-transform"
                       />
                     </motion.button>
                   </div>
                 </div>
 
                 {/* Right: Join Input */}
-                <div className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-3xl p-8">
-                  <div className="flex items-center gap-3 mb-6">
-                    <div className="w-10 h-10 bg-gray-700 rounded-xl flex items-center justify-center">
-                      <Users size={20} className="text-gray-400" />
+                <div className="bg-white border border-gray-200 rounded-2xl sm:rounded-3xl p-5 sm:p-8 shadow-sm">
+                  <div className="flex items-center gap-3 mb-4 sm:mb-6">
+                    <div className="w-10 h-10 bg-gradient-to-br from-[#FFCCF2]/20 via-[#977DFF]/20 to-[#0033FF]/20 rounded-xl flex items-center justify-center">
+                      <Users size={20} className="text-[#977DFF]" />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-white">Join a Meeting</h3>
-                      <p className="text-sm text-gray-400">Enter code or paste link</p>
+                      <h3 className="font-semibold text-gray-900 text-sm sm:text-base">Join a Meeting</h3>
+                      <p className="text-xs sm:text-sm text-gray-500">Enter code or paste link</p>
                     </div>
                   </div>
                   <QuickJoinInput onJoin={handleJoin} />
@@ -231,24 +232,27 @@ export default function MeetPage() {
               </div>
             </motion.section>
 
+            {/* Features Carousel */}
+            <FeaturesCarousel />
+
             {/* Live Meetings */}
             {activeMeetings.length > 0 && (
               <motion.section
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 }}
-                className="mb-10"
+                className="mb-8 sm:mb-10"
               >
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <div className="flex items-center justify-between mb-3 sm:mb-4">
+                  <h2 className="text-base sm:text-lg font-semibold text-gray-900 flex items-center gap-2">
                     <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#977DFF] opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-[#0033FF]" />
                     </span>
                     Live Now
                   </h2>
                 </div>
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                   {activeMeetings.map((meeting) => (
                     <MeetingCard
                       key={meeting.id}
@@ -267,18 +271,18 @@ export default function MeetPage() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.2 }}
-                className="mb-10"
+                className="mb-8 sm:mb-10"
               >
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                    <Calendar size={18} className="text-gray-400" />
+                <div className="flex items-center justify-between mb-3 sm:mb-4">
+                  <h2 className="text-base sm:text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <Calendar size={18} className="text-gray-500" />
                     Upcoming
                   </h2>
-                  <button className="text-sm text-emerald-400 hover:text-emerald-300">
+                  <button className="text-sm text-[#977DFF] hover:text-[#8B6FFF]">
                     View all
                   </button>
                 </div>
-                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                   {upcomingMeetings.map((meeting) => (
                     <MeetingCard
                       key={meeting.id}
@@ -297,31 +301,31 @@ export default function MeetPage() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3 }}
-                className="mb-10"
+                className="mb-8 sm:mb-10"
               >
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-lg font-semibold text-white flex items-center gap-2">
-                    <Clock size={18} className="text-gray-400" />
+                <div className="flex items-center justify-between mb-3 sm:mb-4">
+                  <h2 className="text-base sm:text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <Clock size={18} className="text-gray-500" />
                     Recent
                   </h2>
                 </div>
-                <div className="bg-gray-800/30 border border-gray-700/50 rounded-2xl overflow-hidden">
+                <div className="bg-white border border-gray-200 rounded-xl sm:rounded-2xl overflow-hidden shadow-sm">
                   {recentMeetings.map((meeting, index) => (
                     <div
                       key={meeting.id}
                       className={`
-                        flex items-center justify-between px-5 py-4
-                        ${index !== recentMeetings.length - 1 ? 'border-b border-gray-700/50' : ''}
-                        hover:bg-gray-800/50 transition-colors
+                        flex items-center justify-between px-4 sm:px-5 py-3 sm:py-4
+                        ${index !== recentMeetings.length - 1 ? 'border-b border-gray-200' : ''}
+                        hover:bg-gray-50 transition-colors
                       `}
                     >
-                      <div className="flex items-center gap-4">
-                        <div className="w-10 h-10 bg-gray-700/50 rounded-xl flex items-center justify-center">
-                          <Video size={18} className="text-gray-400" />
+                      <div className="flex items-center gap-3 sm:gap-4 min-w-0 flex-1">
+                        <div className="w-9 h-9 sm:w-10 sm:h-10 bg-gray-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                          <Video size={16} className="text-gray-500 sm:w-[18px] sm:h-[18px]" />
                         </div>
-                        <div>
-                          <h3 className="font-medium text-white">{meeting.title || 'Untitled'}</h3>
-                          <p className="text-sm text-gray-500">
+                        <div className="min-w-0 flex-1">
+                          <h3 className="font-medium text-gray-900 text-sm sm:text-base truncate">{meeting.title || 'Untitled'}</h3>
+                          <p className="text-xs sm:text-sm text-gray-500">
                             {meeting.scheduledStart
                               ? new Date(meeting.scheduledStart).toLocaleDateString()
                               : 'No date'}
@@ -332,6 +336,7 @@ export default function MeetPage() {
                         variant="ghost"
                         size="sm"
                         onClick={() => handleJoinFromCard(meeting.roomCode)}
+                        className="flex-shrink-0 ml-2"
                       >
                         Rejoin
                       </MeetButton>
@@ -346,13 +351,13 @@ export default function MeetPage() {
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="text-center py-16"
+                className="text-center py-12 sm:py-16 px-4"
               >
-                <div className="w-20 h-20 bg-gray-800 rounded-2xl flex items-center justify-center mx-auto mb-6">
-                  <Video size={36} className="text-gray-600" />
+                <div className="w-16 h-16 sm:w-20 sm:h-20 bg-gradient-to-br from-[#FFCCF2]/20 via-[#977DFF]/20 to-[#0033FF]/20 rounded-2xl flex items-center justify-center mx-auto mb-4 sm:mb-6">
+                  <Video size={28} className="text-[#977DFF] sm:w-9 sm:h-9" />
                 </div>
-                <h3 className="text-xl font-semibold text-white mb-2">No meetings yet</h3>
-                <p className="text-gray-400 mb-6 max-w-md mx-auto">
+                <h3 className="text-lg sm:text-xl font-semibold text-gray-900 mb-2">No meetings yet</h3>
+                <p className="text-gray-600 mb-6 max-w-md mx-auto text-sm sm:text-base">
                   Start a new meeting to connect with your team, or join an existing one using a meeting code.
                 </p>
                 <MeetButton
@@ -368,23 +373,23 @@ export default function MeetPage() {
 
             {/* Loading State */}
             {loading.meetings && (
-              <div className="flex items-center justify-center py-16">
-                <div className="w-8 h-8 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+              <div className="flex items-center justify-center py-12 sm:py-16">
+                <div className="w-8 h-8 border-2 border-[#977DFF]/30 border-t-[#977DFF] rounded-full animate-spin" />
               </div>
             )}
 
-            {/* Keyboard Shortcuts Hint */}
-            <div className="mt-8 text-center text-sm text-gray-600">
+            {/* Keyboard Shortcuts Hint - Hidden on mobile */}
+            <div className="mt-6 sm:mt-8 text-center text-sm text-gray-500 hidden sm:block">
               Press{' '}
-              <kbd className="px-2 py-1 bg-gray-800 rounded text-gray-400 font-mono text-xs">N</kbd>
+              <kbd className="px-2 py-1 bg-white border border-gray-200 rounded text-gray-600 font-mono text-xs shadow-sm">N</kbd>
               {' '}to start a new meeting
             </div>
           </main>
-        </div>
 
-        {/* Create Meeting Modal */}
-        <NewMeetingModal isOpen={isCreateModalOpen} onClose={closeCreateModal} />
-      </div>
+          {/* Create Meeting Modal */}
+          <NewMeetingModal isOpen={isCreateModalOpen} onClose={closeCreateModal} />
+        </div>
+      </WorkspaceLayout>
     </>
   );
 }

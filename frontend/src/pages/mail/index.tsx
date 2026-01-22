@@ -5,7 +5,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import Head from 'next/head';
 import { useHotkeys } from 'react-hotkeys-hook';
-import AppSwitcherBar from '@/components/shared/AppSwitcherBar';
+import WorkspaceLayout from '@/components/workspace/WorkspaceLayout';
 import MailHeader from '@/components/mail/MailHeader';
 import GmailSidebar from '@/components/mail/GmailSidebar';
 import MailList from '@/components/mail/MailList';
@@ -233,38 +233,42 @@ export default function MailPage() {
     return <MailLoginOverlay onSuccess={handleLoginSuccess} />;
   }
 
+  // Gmail sidebar component
+  const gmailSidebar = (
+    <GmailSidebar
+      onCompose={() => openCompose()}
+      activeCategory={activeCategory}
+      onCategoryChange={handleCategoryChange}
+      activeLabel={activeLabel}
+      onLabelChange={handleLabelChange}
+    />
+  );
+
+  // Custom mail header
+  const mailHeader = (
+    <MailHeader
+      onOpenAdvancedSearch={() => setShowAdvancedSearch(true)}
+      onOpenSettings={() => setShowSettings(true)}
+      onOpenSharedMailbox={() => setShowSharedMailbox(true)}
+      onToggleViewMode={handleToggleViewMode}
+      viewMode={viewMode}
+    />
+  );
+
   return (
     <>
       <Head>
         <title>Inbox | Bheem Mail</title>
       </Head>
 
-      <div className="h-screen bg-gray-50">
-        {/* App Switcher Bar (60px) */}
-        <AppSwitcherBar activeApp="mail" />
-
-        {/* Header */}
-        <MailHeader
-          onOpenAdvancedSearch={() => setShowAdvancedSearch(true)}
-          onOpenSettings={() => setShowSettings(true)}
-          onOpenSharedMailbox={() => setShowSharedMailbox(true)}
-          onToggleViewMode={handleToggleViewMode}
-          viewMode={viewMode}
-        />
-
-        {/* Main Content - offset by header (56px) and app switcher (60px) */}
-        <div className="flex h-[calc(100vh-56px)] pt-14 ml-[60px]">
-          {/* Gmail-like Sidebar - Categories, Labels, Bheem Apps */}
-          <div className="w-64 flex-shrink-0 bg-white border-r border-gray-200 h-full overflow-hidden">
-            <GmailSidebar
-              onCompose={() => openCompose()}
-              activeCategory={activeCategory}
-              onCategoryChange={handleCategoryChange}
-              activeLabel={activeLabel}
-              onLabelChange={handleLabelChange}
-            />
-          </div>
-
+      <WorkspaceLayout
+        title="Mail"
+        secondarySidebar={gmailSidebar}
+        secondarySidebarWidth={264}
+        customHeader={mailHeader}
+      >
+        {/* Main Content - Email List + Viewer */}
+        <div className="flex h-full">
           {/* Email List */}
           <div className="w-[400px] flex-shrink-0 bg-white border-r border-gray-200 h-full overflow-hidden">
             <MailList
@@ -317,17 +321,7 @@ export default function MailPage() {
 
         {/* Undo Send Toast Manager */}
         <UndoSendToastManager />
-
-        {/* WebSocket Connection Status - hidden when WebSocket is disabled */}
-        {/* TODO: Re-enable when WebSocket infrastructure is ready
-        {!isConnected && isMailAuthenticated && (
-          <div className="fixed bottom-4 right-4 px-4 py-2 bg-yellow-100 text-yellow-800 rounded-lg text-sm flex items-center gap-2 shadow-lg">
-            <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse" />
-            Reconnecting to real-time updates...
-          </div>
-        )}
-        */}
-      </div>
+      </WorkspaceLayout>
 
       {/* Custom scrollbar styles */}
       <style jsx global>{`

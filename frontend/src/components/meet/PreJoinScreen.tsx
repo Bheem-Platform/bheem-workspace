@@ -204,12 +204,12 @@ export default function PreJoinScreen({
   };
 
   return (
-    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-white flex items-center justify-center p-4">
       <div className="w-full max-w-5xl">
         {/* Back button */}
         <Link
           href="/meet"
-          className="inline-flex items-center gap-2 text-gray-400 hover:text-white mb-8 transition-colors group"
+          className="inline-flex items-center gap-2 text-gray-500 hover:text-gray-900 mb-8 transition-colors group"
         >
           <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform" />
           <span>Back to meetings</span>
@@ -222,7 +222,7 @@ export default function PreJoinScreen({
         >
           {/* Video Preview */}
           <div className="relative">
-            <div className="relative bg-gray-800 rounded-3xl overflow-hidden aspect-video shadow-2xl">
+            <div className="relative bg-gray-100 rounded-3xl overflow-hidden aspect-video shadow-lg border border-gray-200">
               {isCameraEnabled && videoStream && hasCamera ? (
                 <video
                   ref={videoRef}
@@ -232,8 +232,8 @@ export default function PreJoinScreen({
                   className="w-full h-full object-cover scale-x-[-1]"
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center flex-col gap-4 bg-gradient-to-br from-gray-800 to-gray-900">
-                  <div className="w-28 h-28 rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
+                <div className="w-full h-full flex items-center justify-center flex-col gap-4 bg-gradient-to-br from-gray-100 to-gray-200">
+                  <div className="w-28 h-28 rounded-full bg-gradient-to-br from-[#977DFF] to-[#0033FF] flex items-center justify-center shadow-lg shadow-[#977DFF]/20">
                     {!hasCamera ? (
                       <VideoOff size={48} className="text-white/80" />
                     ) : name ? (
@@ -245,7 +245,7 @@ export default function PreJoinScreen({
                     )}
                   </div>
                   {!hasCamera && (
-                    <p className="text-gray-400 text-sm">Camera is off</p>
+                    <p className="text-gray-500 text-sm">Camera is off</p>
                   )}
                 </div>
               )}
@@ -257,10 +257,10 @@ export default function PreJoinScreen({
                     initial={{ opacity: 0, y: -20 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -20 }}
-                    className="absolute top-4 left-4 right-4 bg-amber-500/20 border border-amber-500/50 backdrop-blur-sm rounded-xl px-4 py-3 flex items-center gap-3"
+                    className="absolute top-4 left-4 right-4 bg-amber-50 border border-amber-200 backdrop-blur-sm rounded-xl px-4 py-3 flex items-center gap-3"
                   >
-                    <AlertCircle size={18} className="text-amber-400 flex-shrink-0" />
-                    <span className="text-amber-200 text-sm">{deviceError}</span>
+                    <AlertCircle size={18} className="text-amber-500 flex-shrink-0" />
+                    <span className="text-amber-700 text-sm">{deviceError}</span>
                   </motion.div>
                 )}
               </AnimatePresence>
@@ -273,11 +273,11 @@ export default function PreJoinScreen({
                   onClick={toggleMic}
                   disabled={!hasMic}
                   className={`
-                    relative p-4 rounded-full transition-all duration-200
+                    relative p-4 rounded-full transition-all duration-200 shadow-md
                     ${!hasMic
-                      ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                       : isMicEnabled
-                        ? 'bg-gray-700/80 backdrop-blur-sm text-white hover:bg-gray-600'
+                        ? 'bg-white text-gray-700 hover:bg-gray-100'
                         : 'bg-red-500 text-white hover:bg-red-600'
                     }
                   `}
@@ -287,7 +287,7 @@ export default function PreJoinScreen({
                   {/* Audio level indicator */}
                   {isMicEnabled && hasMic && audioLevel > 0.1 && (
                     <span
-                      className="absolute inset-0 rounded-full border-2 border-emerald-400 animate-ping opacity-50"
+                      className="absolute inset-0 rounded-full border-2 border-[#977DFF] animate-ping opacity-50"
                       style={{ animationDuration: '1.5s' }}
                     />
                   )}
@@ -299,11 +299,11 @@ export default function PreJoinScreen({
                   onClick={toggleCamera}
                   disabled={!hasCamera}
                   className={`
-                    p-4 rounded-full transition-all duration-200
+                    p-4 rounded-full transition-all duration-200 shadow-md
                     ${!hasCamera
-                      ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                      ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
                       : isCameraEnabled
-                        ? 'bg-gray-700/80 backdrop-blur-sm text-white hover:bg-gray-600'
+                        ? 'bg-white text-gray-700 hover:bg-gray-100'
                         : 'bg-red-500 text-white hover:bg-red-600'
                     }
                   `}
@@ -316,7 +316,7 @@ export default function PreJoinScreen({
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   onClick={() => setShowSettings(!showSettings)}
-                  className="p-4 rounded-full bg-gray-700/80 backdrop-blur-sm text-white hover:bg-gray-600 transition-colors"
+                  className="p-4 rounded-full bg-white text-gray-700 hover:bg-gray-100 transition-colors shadow-md"
                   title="Settings"
                 >
                   <Settings size={22} />
@@ -326,11 +326,11 @@ export default function PreJoinScreen({
               {/* Audio Level Meter */}
               {isMicEnabled && hasMic && (
                 <div className="absolute bottom-20 left-4 right-4">
-                  <div className="flex items-center gap-2">
-                    <Volume2 size={16} className="text-gray-400" />
-                    <div className="flex-1 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                  <div className="flex items-center gap-2 bg-white/80 backdrop-blur-sm rounded-full px-3 py-1.5">
+                    <Volume2 size={16} className="text-gray-500" />
+                    <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
                       <motion.div
-                        className="h-full bg-gradient-to-r from-emerald-400 to-emerald-500"
+                        className="h-full bg-gradient-to-r from-[#977DFF] to-[#0033FF]"
                         animate={{ width: `${audioLevel * 100}%` }}
                         transition={{ duration: 0.1 }}
                       />
@@ -347,16 +347,16 @@ export default function PreJoinScreen({
                   initial={{ opacity: 0, y: -10 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
-                  className="absolute top-full left-0 right-0 mt-4 bg-gray-800 border border-gray-700 rounded-2xl p-4 shadow-xl z-10"
+                  className="absolute top-full left-0 right-0 mt-4 bg-white border border-gray-200 rounded-2xl p-4 shadow-xl z-10"
                 >
-                  <h3 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+                  <h3 className="text-sm font-semibold text-gray-900 mb-4 flex items-center gap-2">
                     <Settings size={16} />
                     Device Settings
                   </h3>
 
                   {/* Camera Selection */}
                   <div className="mb-4">
-                    <label className="block text-xs text-gray-400 mb-2 flex items-center gap-2">
+                    <label className="block text-xs text-gray-500 mb-2 flex items-center gap-2">
                       <Video size={14} />
                       Camera
                     </label>
@@ -365,7 +365,7 @@ export default function PreJoinScreen({
                         value={selectedCamera}
                         onChange={(e) => setSelectedCamera(e.target.value)}
                         disabled={cameras.length === 0}
-                        className="w-full px-4 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-white text-sm appearance-none cursor-pointer focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none disabled:opacity-50"
+                        className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 text-sm appearance-none cursor-pointer focus:ring-2 focus:ring-[#977DFF] focus:border-[#977DFF] outline-none disabled:opacity-50"
                       >
                         {cameras.length === 0 ? (
                           <option>No camera found</option>
@@ -383,7 +383,7 @@ export default function PreJoinScreen({
 
                   {/* Microphone Selection */}
                   <div>
-                    <label className="block text-xs text-gray-400 mb-2 flex items-center gap-2">
+                    <label className="block text-xs text-gray-500 mb-2 flex items-center gap-2">
                       <Mic size={14} />
                       Microphone
                     </label>
@@ -392,7 +392,7 @@ export default function PreJoinScreen({
                         value={selectedMic}
                         onChange={(e) => setSelectedMic(e.target.value)}
                         disabled={microphones.length === 0}
-                        className="w-full px-4 py-2.5 bg-gray-700 border border-gray-600 rounded-xl text-white text-sm appearance-none cursor-pointer focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none disabled:opacity-50"
+                        className="w-full px-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 text-sm appearance-none cursor-pointer focus:ring-2 focus:ring-[#977DFF] focus:border-[#977DFF] outline-none disabled:opacity-50"
                       >
                         {microphones.length === 0 ? (
                           <option>No microphone found</option>
@@ -417,21 +417,21 @@ export default function PreJoinScreen({
             initial={{ opacity: 0, x: 20 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: 0.1 }}
-            className="bg-gray-800/50 backdrop-blur-sm border border-gray-700/50 rounded-3xl p-8"
+            className="bg-white border border-gray-200 rounded-3xl p-8 shadow-lg"
           >
-            <h1 className="text-2xl font-bold text-white mb-2">Ready to join?</h1>
-            <p className="text-gray-400 mb-8">
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">Ready to join?</h1>
+            <p className="text-gray-500 mb-8">
               {roomName ? (
-                <>Meeting: <span className="text-white font-medium">{roomName}</span></>
+                <>Meeting: <span className="text-gray-900 font-medium">{roomName}</span></>
               ) : (
-                <>Room: <span className="font-mono text-white">{roomCode}</span></>
+                <>Room: <span className="font-mono text-gray-900">{roomCode}</span></>
               )}
             </p>
 
             <div className="space-y-6">
               {/* Name Input */}
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-2">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
                   Your name
                 </label>
                 <div className="flex items-center gap-3">
@@ -439,10 +439,10 @@ export default function PreJoinScreen({
                   {isAuthenticated ? (
                     // Authenticated users - show their username as read-only
                     <div className="flex-1 flex items-center gap-2">
-                      <div className="flex-1 px-4 py-3.5 bg-gray-700/30 border border-gray-600 rounded-xl text-white">
+                      <div className="flex-1 px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-900">
                         {name || userName}
                       </div>
-                      <div className="flex items-center gap-1 text-xs text-emerald-400">
+                      <div className="flex items-center gap-1 text-xs text-[#977DFF]">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                         </svg>
@@ -456,7 +456,7 @@ export default function PreJoinScreen({
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       placeholder="Enter your name"
-                      className="flex-1 px-4 py-3.5 bg-gray-700/50 border border-gray-600 rounded-xl text-white placeholder-gray-500 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition-all"
+                      className="flex-1 px-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl text-gray-900 placeholder-gray-400 focus:ring-2 focus:ring-[#977DFF] focus:border-[#977DFF] outline-none transition-all"
                       onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
                     />
                   )}
@@ -477,12 +477,12 @@ export default function PreJoinScreen({
 
               {/* Status Summary */}
               <div className="flex items-center justify-center gap-4 text-sm">
-                <span className={`flex items-center gap-1.5 ${isMicEnabled ? 'text-emerald-400' : 'text-gray-500'}`}>
+                <span className={`flex items-center gap-1.5 ${isMicEnabled ? 'text-[#977DFF]' : 'text-gray-400'}`}>
                   {isMicEnabled ? <Mic size={16} /> : <MicOff size={16} />}
                   {isMicEnabled ? 'Mic on' : 'Mic off'}
                 </span>
-                <span className="text-gray-600">•</span>
-                <span className={`flex items-center gap-1.5 ${isCameraEnabled ? 'text-emerald-400' : 'text-gray-500'}`}>
+                <span className="text-gray-300">•</span>
+                <span className={`flex items-center gap-1.5 ${isCameraEnabled ? 'text-[#977DFF]' : 'text-gray-400'}`}>
                   {isCameraEnabled ? <Video size={16} /> : <VideoOff size={16} />}
                   {isCameraEnabled ? 'Camera on' : 'Camera off'}
                 </span>

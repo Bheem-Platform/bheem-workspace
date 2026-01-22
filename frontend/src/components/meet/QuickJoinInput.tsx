@@ -54,12 +54,12 @@ export default function QuickJoinInput({ onJoin, isLoading }: QuickJoinInputProp
       <div
         className={`
           relative flex items-center
-          bg-gray-800/60 backdrop-blur-sm
+          bg-gray-50
           border rounded-2xl
           transition-all duration-200
           ${isFocused
-            ? 'border-emerald-500/50 ring-4 ring-emerald-500/10'
-            : 'border-gray-700/50 hover:border-gray-600/50'
+            ? 'border-[#977DFF]/50 ring-4 ring-[#977DFF]/10'
+            : 'border-gray-200 hover:border-gray-300'
           }
         `}
       >
@@ -67,7 +67,7 @@ export default function QuickJoinInput({ onJoin, isLoading }: QuickJoinInputProp
         <div className="pl-5 pr-2">
           <Keyboard
             size={20}
-            className={`transition-colors ${isFocused ? 'text-emerald-400' : 'text-gray-500'}`}
+            className={`transition-colors ${isFocused ? 'text-[#977DFF]' : 'text-gray-500'}`}
           />
         </div>
 
@@ -84,8 +84,8 @@ export default function QuickJoinInput({ onJoin, isLoading }: QuickJoinInputProp
           className="
             flex-1 py-4 px-2
             bg-transparent
-            text-white text-base
-            placeholder-gray-500
+            text-gray-900 text-base
+            placeholder-gray-400
             focus:outline-none
             font-mono tracking-wide
           "
@@ -104,8 +104,8 @@ export default function QuickJoinInput({ onJoin, isLoading }: QuickJoinInputProp
               font-medium text-sm
               transition-all duration-150
               ${code.trim()
-                ? 'bg-emerald-500 text-white hover:bg-emerald-600'
-                : 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                ? 'bg-gradient-to-r from-[#977DFF] to-[#0033FF] text-white hover:from-[#8B6FFF] hover:to-[#0029CC]'
+                : 'bg-gray-200 text-gray-400 cursor-not-allowed'
               }
             `}
           >
@@ -124,7 +124,7 @@ export default function QuickJoinInput({ onJoin, isLoading }: QuickJoinInputProp
       {/* Hint */}
       <p className="mt-3 text-sm text-gray-500 text-center">
         Paste a meeting link or enter a code like{' '}
-        <span className="font-mono text-gray-400">abc-defg-hijk</span>
+        <span className="font-mono text-gray-600">abc-defg-hijk</span>
       </p>
     </div>
   );

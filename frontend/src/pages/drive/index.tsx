@@ -21,7 +21,7 @@ import {
   LayoutList,
 } from 'lucide-react';
 
-import AppSwitcherBar from '@/components/shared/AppSwitcherBar';
+import WorkspaceLayout from '@/components/workspace/WorkspaceLayout';
 import AppLauncher from '@/components/shared/AppLauncher';
 import DriveSidebar from '@/components/drive/DriveSidebar';
 import DriveFilterBar, { FilterState } from '@/components/drive/DriveFilterBar';
@@ -303,43 +303,44 @@ export default function DrivePage() {
     );
   }
 
+  // Drive sidebar component
+  const driveSidebar = (
+    <DriveSidebar
+      onNewFolder={openCreateFolderModal}
+      onUpload={() => setShowUploadModal(true)}
+    />
+  );
+
   return (
     <>
       <Head>
         <title>{getPageTitle()} | Bheem Drive</title>
       </Head>
 
-      <div
-        {...getRootProps()}
-        className={`h-screen bg-gray-50 ${isDragActive ? 'bg-blue-50' : ''}`}
+      <WorkspaceLayout
+        title="Drive"
+        secondarySidebar={driveSidebar}
+        secondarySidebarWidth={264}
+        hideHeader
       >
-        <input {...getInputProps()} />
+        <div
+          {...getRootProps()}
+          className={`h-full bg-gray-50 ${isDragActive ? 'bg-blue-50' : ''}`}
+        >
+          <input {...getInputProps()} />
 
-        {/* Drag overlay */}
-        {isDragActive && (
-          <div className="fixed inset-0 z-50 bg-blue-500/10 border-4 border-dashed border-blue-500 flex items-center justify-center pointer-events-none">
-            <div className="text-center">
-              <Upload size={64} className="mx-auto text-blue-500 mb-4" />
-              <p className="text-xl font-medium text-blue-700">Drop files to upload</p>
+          {/* Drag overlay */}
+          {isDragActive && (
+            <div className="fixed inset-0 z-50 bg-blue-500/10 border-4 border-dashed border-blue-500 flex items-center justify-center pointer-events-none">
+              <div className="text-center">
+                <Upload size={64} className="mx-auto text-blue-500 mb-4" />
+                <p className="text-xl font-medium text-blue-700">Drop files to upload</p>
+              </div>
             </div>
-          </div>
-        )}
-
-        {/* App Switcher Bar (60px) */}
-        <AppSwitcherBar activeApp="drive" />
-
-        {/* Main Layout */}
-        <div className="flex h-[calc(100vh-60px)] pt-[60px]">
-          {/* Drive Sidebar */}
-          <div className="fixed left-[60px] top-[60px] h-[calc(100vh-60px)] z-10">
-            <DriveSidebar
-              onNewFolder={openCreateFolderModal}
-              onUpload={() => setShowUploadModal(true)}
-            />
-          </div>
+          )}
 
           {/* Main Content */}
-          <main className={`flex-1 ml-[324px] overflow-y-auto transition-all ${showDetailsPanel ? 'mr-80' : ''}`}>
+          <main className={`h-full overflow-y-auto transition-all ${showDetailsPanel ? 'mr-80' : ''}`}>
             <div className="max-w-7xl mx-auto px-6 py-4">
               {/* Header */}
               <div className="flex items-center justify-between mb-2">
@@ -585,7 +586,7 @@ export default function DrivePage() {
 
           {/* Details Panel */}
           {showDetailsPanel && (
-            <div className="fixed right-0 top-[60px] h-[calc(100vh-60px)] z-10">
+            <div className="fixed right-0 top-0 h-full z-10">
               <FileDetailsPanel
                 file={detailsFile}
                 isOpen={showDetailsPanel}
@@ -598,26 +599,26 @@ export default function DrivePage() {
               />
             </div>
           )}
-        </div>
 
-        {/* Modals */}
-        <CreateFolderModal />
-        <RenameModal />
-        <ShareModal />
-        <MoveModal />
-        <DeleteConfirmModal />
-        <UploadModal isOpen={showUploadModal} onClose={() => setShowUploadModal(false)} />
-        <FilePreviewModal
-          file={previewFile}
-          isOpen={showPreviewModal}
-          onClose={() => {
-            setShowPreviewModal(false);
-            setPreviewFile(null);
-          }}
-          files={files}
-          onNavigate={handlePreviewNavigate}
-        />
-      </div>
+          {/* Modals */}
+          <CreateFolderModal />
+          <RenameModal />
+          <ShareModal />
+          <MoveModal />
+          <DeleteConfirmModal />
+          <UploadModal isOpen={showUploadModal} onClose={() => setShowUploadModal(false)} />
+          <FilePreviewModal
+            file={previewFile}
+            isOpen={showPreviewModal}
+            onClose={() => {
+              setShowPreviewModal(false);
+              setPreviewFile(null);
+            }}
+            files={files}
+            onNavigate={handlePreviewNavigate}
+          />
+        </div>
+      </WorkspaceLayout>
     </>
   );
 }

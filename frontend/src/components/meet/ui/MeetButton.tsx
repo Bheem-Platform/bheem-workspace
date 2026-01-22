@@ -14,23 +14,24 @@ interface MeetButtonProps extends Omit<HTMLMotionProps<'button'>, 'children'> {
   children?: ReactNode;
 }
 
+// Brand colors: #FFCCF2 (pink) → #977DFF (purple) → #0033FF (blue)
 const variantStyles: Record<ButtonVariant, string> = {
   primary: `
-    bg-emerald-500 text-white
-    hover:bg-emerald-600
-    active:bg-emerald-700
-    disabled:bg-emerald-500/50
+    bg-gradient-to-r from-[#977DFF] to-[#0033FF] text-white
+    hover:from-[#8B6FFF] hover:to-[#0029CC]
+    active:from-[#7F61FF] active:to-[#001F99]
+    disabled:opacity-50
   `,
   secondary: `
-    bg-gray-700 text-white
-    hover:bg-gray-600
-    active:bg-gray-500
-    disabled:bg-gray-700/50
+    bg-gray-100 text-gray-700 border border-gray-200
+    hover:bg-gray-200
+    active:bg-gray-300
+    disabled:bg-gray-100/50
   `,
   ghost: `
-    bg-transparent text-gray-300
-    hover:bg-gray-700/50 hover:text-white
-    active:bg-gray-600/50
+    bg-transparent text-gray-600
+    hover:bg-gray-100 hover:text-gray-900
+    active:bg-gray-200
   `,
   danger: `
     bg-red-500 text-white
@@ -39,19 +40,19 @@ const variantStyles: Record<ButtonVariant, string> = {
     disabled:bg-red-500/50
   `,
   control: `
-    bg-gray-700/80 text-white
-    hover:bg-gray-600/90
-    active:bg-gray-500/90
+    bg-gray-100/80 text-gray-700
+    hover:bg-gray-200/90
+    active:bg-gray-300/90
     backdrop-blur-md
   `,
 };
 
 const activeVariantStyles: Record<ButtonVariant, string> = {
-  primary: 'ring-2 ring-emerald-400/50',
-  secondary: 'bg-gray-600',
-  ghost: 'bg-gray-700/50 text-white',
+  primary: 'ring-2 ring-[#977DFF]/50',
+  secondary: 'bg-gray-200',
+  ghost: 'bg-gray-100 text-gray-900',
   danger: 'ring-2 ring-red-400/50',
-  control: 'bg-emerald-500/20 text-emerald-400 ring-1 ring-emerald-500/50',
+  control: 'bg-[#977DFF]/20 text-[#977DFF] ring-1 ring-[#977DFF]/50',
 };
 
 const sizeStyles: Record<ButtonSize, string> = {
@@ -80,8 +81,8 @@ const MeetButton = forwardRef<HTMLButtonElement, MeetButtonProps>(
     const baseStyles = `
       inline-flex items-center justify-center
       font-medium rounded-full
-      transition-colors duration-150
-      focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900
+      transition-all duration-150
+      focus:outline-none focus-visible:ring-2 focus-visible:ring-[#977DFF] focus-visible:ring-offset-2 focus-visible:ring-offset-white
       disabled:cursor-not-allowed disabled:opacity-50
     `;
 

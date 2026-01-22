@@ -1,33 +1,32 @@
 /**
  * AppLauncher - Google-like app grid launcher
  * Shows all Bheem apps in a popup grid when clicked
+ * Uses Bheem brand colors with light gradients
  */
 import { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/router';
+import { LayoutGrid } from 'lucide-react';
 import {
-  LayoutGrid,
-  Mail,
-  Calendar,
-  Video,
-  FileText,
-  HardDrive,
-  MessageSquare,
-  LayoutDashboard,
-  Sheet,
-  Presentation,
-  FormInput,
-  Film,
-  Settings,
-  Users,
-  Shield
-} from 'lucide-react';
+  BheemMailIcon,
+  BheemCalendarIcon,
+  BheemMeetIcon,
+  BheemDocsIcon,
+  BheemDriveIcon,
+  BheemSheetsIcon,
+  BheemSlidesIcon,
+  BheemFormsIcon,
+  BheemChatIcon,
+  BheemVideosIcon,
+  BheemDashboardIcon,
+  BheemAdminIcon,
+} from './AppIcons';
+import { useAuthStore } from '@/stores/authStore';
 
 interface AppItem {
   id: string;
   name: string;
   icon: React.ReactNode;
   href: string;
-  gradient: string;
   description?: string;
 }
 
@@ -35,103 +34,113 @@ const mainApps: AppItem[] = [
   {
     id: 'mail',
     name: 'Mail',
-    icon: <Mail size={24} />,
+    icon: <BheemMailIcon size={40} />,
     href: '/mail',
-    gradient: 'from-red-500 to-orange-500',
     description: 'Email & Communication'
   },
   {
     id: 'calendar',
     name: 'Calendar',
-    icon: <Calendar size={24} />,
+    icon: <BheemCalendarIcon size={40} />,
     href: '/calendar',
-    gradient: 'from-blue-500 to-cyan-500',
     description: 'Events & Scheduling'
   },
   {
     id: 'meet',
     name: 'Meet',
-    icon: <Video size={24} />,
+    icon: <BheemMeetIcon size={40} />,
     href: '/meet',
-    gradient: 'from-green-500 to-emerald-500',
     description: 'Video Meetings'
   },
   {
     id: 'docs',
     name: 'Docs',
-    icon: <FileText size={24} />,
+    icon: <BheemDocsIcon size={40} />,
     href: '/docs',
-    gradient: 'from-blue-600 to-blue-400',
     description: 'Documents'
   },
   {
     id: 'sheets',
     name: 'Sheets',
-    icon: <Sheet size={24} />,
+    icon: <BheemSheetsIcon size={40} />,
     href: '/sheets',
-    gradient: 'from-green-600 to-green-400',
     description: 'Spreadsheets'
   },
   {
     id: 'slides',
     name: 'Slides',
-    icon: <Presentation size={24} />,
+    icon: <BheemSlidesIcon size={40} />,
     href: '/slides',
-    gradient: 'from-yellow-500 to-orange-400',
     description: 'Presentations'
   },
   {
     id: 'forms',
     name: 'Forms',
-    icon: <FormInput size={24} />,
+    icon: <BheemFormsIcon size={40} />,
     href: '/forms',
-    gradient: 'from-purple-500 to-pink-500',
     description: 'Surveys & Forms'
   },
   {
     id: 'drive',
     name: 'Drive',
-    icon: <HardDrive size={24} />,
+    icon: <BheemDriveIcon size={40} />,
     href: '/drive',
-    gradient: 'from-yellow-500 to-amber-500',
     description: 'File Storage'
   },
   {
     id: 'chat',
     name: 'Chat',
-    icon: <MessageSquare size={24} />,
+    icon: <BheemChatIcon size={40} />,
     href: '/chat',
-    gradient: 'from-emerald-500 to-teal-500',
     description: 'Team Messaging'
   },
   {
     id: 'videos',
     name: 'Videos',
-    icon: <Film size={24} />,
+    icon: <BheemVideosIcon size={40} />,
     href: '/videos',
-    gradient: 'from-red-600 to-pink-500',
     description: 'Video Library'
   },
   {
     id: 'dashboard',
     name: 'Dashboard',
-    icon: <LayoutDashboard size={24} />,
+    icon: <BheemDashboardIcon size={40} />,
     href: '/dashboard',
-    gradient: 'from-indigo-500 to-purple-500',
     description: 'Overview'
   },
 ];
 
-const adminApps: AppItem[] = [
-  {
-    id: 'admin',
-    name: 'Admin',
-    icon: <Settings size={24} />,
-    href: '/admin',
-    gradient: 'from-slate-600 to-slate-400',
-    description: 'Workspace Settings'
-  },
-];
+// Admin apps - shown based on user role
+const getAdminApps = (userRole: string | undefined): AppItem[] => {
+  const apps: AppItem[] = [];
+
+  // Super Admin sees Super Admin option
+  if (userRole === 'SuperAdmin') {
+    apps.push({
+      id: 'super-admin',
+      name: 'Super Admin',
+      icon: <BheemAdminIcon size={40} />,
+      href: '/super-admin',
+      description: 'Platform Settings'
+    });
+  }
+
+  // Tenant Admin (or any Admin role) sees Admin option
+  if (userRole === 'Admin' || userRole === 'TenantAdmin' || userRole?.includes('Admin')) {
+    // Don't show regular Admin for SuperAdmin - they have their own panel
+    if (userRole !== 'SuperAdmin') {
+      apps.push({
+        id: 'admin',
+        name: 'Admin',
+        icon: <BheemAdminIcon size={40} />,
+        href: '/admin',
+        description: 'Workspace Settings'
+      });
+    }
+  }
+
+  return apps;
+};
 
 interface AppLauncherProps {
   variant?: 'light' | 'dark';
@@ -142,6 +151,10 @@ export default function AppLauncher({ variant = 'light' }: AppLauncherProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const router = useRouter();
+  const user = useAuthStore((state) => state.user);
+
+  // Get admin apps based on user role
+  const adminApps = getAdminApps(user?.role);
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -223,17 +236,15 @@ export default function AppLauncher({ variant = 'light' }: AppLauncherProps) {
                     <button
                       key={app.id}
                       onClick={() => handleAppClick(app.href)}
-                      className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-all hover:bg-gray-50 ${
-                        isActive ? 'bg-blue-50 ring-1 ring-blue-200' : ''
+                      className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-all hover:bg-gray-50 hover:scale-105 ${
+                        isActive ? 'bg-purple-50 ring-1 ring-purple-200' : ''
                       }`}
                     >
-                      <div
-                        className={`w-12 h-12 rounded-xl bg-gradient-to-br ${app.gradient} flex items-center justify-center text-white shadow-lg`}
-                      >
+                      <div className="w-12 h-12 flex items-center justify-center">
                         {app.icon}
                       </div>
                       <span className={`text-xs font-medium truncate w-full text-center ${
-                        isActive ? 'text-blue-600' : 'text-gray-700'
+                        isActive ? 'text-purple-600' : 'text-gray-700'
                       }`}>
                         {app.name}
                       </span>
@@ -242,35 +253,35 @@ export default function AppLauncher({ variant = 'light' }: AppLauncherProps) {
                 })}
               </div>
 
-              {/* Admin Section */}
-              <div className="mt-3 pt-3 border-t border-gray-100">
-                <p className="text-xs text-gray-500 px-2 mb-2">Administration</p>
-                <div className="grid grid-cols-3 gap-1">
-                  {adminApps.map((app) => {
-                    const isActive = currentPath.startsWith(app.href);
-                    return (
-                      <button
-                        key={app.id}
-                        onClick={() => handleAppClick(app.href)}
-                        className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-all hover:bg-gray-50 ${
-                          isActive ? 'bg-blue-50 ring-1 ring-blue-200' : ''
-                        }`}
-                      >
-                        <div
-                          className={`w-12 h-12 rounded-xl bg-gradient-to-br ${app.gradient} flex items-center justify-center text-white shadow-lg`}
+              {/* Admin Section - Only show for admins */}
+              {adminApps.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-gray-100">
+                  <p className="text-xs text-gray-500 px-2 mb-2">Administration</p>
+                  <div className="grid grid-cols-3 gap-1">
+                    {adminApps.map((app) => {
+                      const isActive = currentPath.startsWith(app.href);
+                      return (
+                        <button
+                          key={app.id}
+                          onClick={() => handleAppClick(app.href)}
+                          className={`flex flex-col items-center gap-2 p-3 rounded-xl transition-all hover:bg-gray-50 hover:scale-105 ${
+                            isActive ? 'bg-purple-50 ring-1 ring-purple-200' : ''
+                          }`}
                         >
-                          {app.icon}
-                        </div>
-                        <span className={`text-xs font-medium truncate w-full text-center ${
-                          isActive ? 'text-blue-600' : 'text-gray-700'
-                        }`}>
-                          {app.name}
-                        </span>
-                      </button>
-                    );
-                  })}
+                          <div className="w-12 h-12 flex items-center justify-center">
+                            {app.icon}
+                          </div>
+                          <span className={`text-xs font-medium truncate w-full text-center ${
+                            isActive ? 'text-purple-600' : 'text-gray-700'
+                          }`}>
+                            {app.name}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Footer */}

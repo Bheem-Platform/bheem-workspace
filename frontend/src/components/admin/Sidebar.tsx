@@ -21,6 +21,9 @@ import {
   Calendar,
   Upload,
   MessageCircle,
+  Inbox,
+  FolderOpen,
+  ExternalLink,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -81,7 +84,7 @@ export default function Sidebar({ role, isOpen, onClose, tenantName, isInternalM
 
       {/* Sidebar */}
       <aside
-        className={`fixed top-0 left-0 z-50 h-full w-64 bg-white border-r border-gray-200 transform transition-transform lg:translate-x-0 ${
+        className={`fixed top-0 left-0 z-50 h-full w-64 bg-white border-r border-gray-200 transform transition-transform lg:translate-x-0 flex flex-col ${
           isOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -113,39 +116,72 @@ export default function Sidebar({ role, isOpen, onClose, tenantName, isInternalM
         {/* Back to Workspace link */}
         <Link
           href="/"
-          className="flex items-center space-x-2 px-4 py-3 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-50 border-b border-gray-100"
+          className="flex items-center space-x-2 px-4 py-3 text-sm text-gray-500 hover:text-gray-700 hover:bg-gray-50 border-b border-gray-100 flex-shrink-0"
         >
           <ChevronLeft size={16} />
           <span>Back to Workspace</span>
         </Link>
 
-        {/* Navigation */}
-        <nav className="p-4 space-y-1">
-          {navigation.map((item) => {
-            const isActive = router.pathname === item.href ||
-              (item.href !== '/super-admin' && item.href !== '/admin' && router.pathname.startsWith(item.href));
+        {/* Scrollable Content */}
+        <div className="flex-1 overflow-y-auto">
+          {/* Navigation */}
+          <nav className="p-4 space-y-1">
+            {navigation.map((item) => {
+              const isActive = router.pathname === item.href ||
+                (item.href !== '/super-admin' && item.href !== '/admin' && router.pathname.startsWith(item.href));
 
-            return (
-              <Link
-                key={item.name}
-                href={item.href}
-                className={`flex items-center space-x-3 px-3 py-2.5 rounded-lg transition-colors ${
-                  isActive
-                    ? isSuperAdmin
-                      ? 'bg-purple-100 text-purple-700'
-                      : 'bg-blue-100 text-blue-700'
-                    : 'text-gray-700 hover:bg-gray-100'
-                }`}
-              >
-                <item.icon size={20} />
-                <span className="font-medium">{item.name}</span>
-              </Link>
-            );
-          })}
-        </nav>
+              return (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  className={`flex items-center space-x-3 px-3 py-2.5 rounded-lg transition-colors ${
+                    isActive
+                      ? isSuperAdmin
+                        ? 'bg-purple-100 text-purple-700'
+                        : 'bg-blue-100 text-blue-700'
+                      : 'text-gray-700 hover:bg-gray-100'
+                  }`}
+                >
+                  <item.icon size={20} />
+                  <span className="font-medium">{item.name}</span>
+                </Link>
+              );
+            })}
+          </nav>
+
+          {/* Bheem Apps Section */}
+          <div className="px-4 pb-4">
+            <div className="border-t border-gray-200 pt-4">
+              <h3 className="px-3 text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                Bheem Apps
+              </h3>
+              <div className="space-y-1">
+                {[
+                  { name: 'Mail', href: '/mail', icon: Inbox, color: 'text-red-500' },
+                  { name: 'Calendar', href: '/calendar', icon: Calendar, color: 'text-blue-500' },
+                  { name: 'Meet', href: '/meet', icon: Video, color: 'text-green-500' },
+                  { name: 'Drive', href: '/drive', icon: FolderOpen, color: 'text-yellow-500' },
+                  { name: 'Docs', href: '/docs', icon: FileText, color: 'text-purple-500' },
+                ].map((app) => (
+                  <Link
+                    key={app.name}
+                    href={app.href}
+                    className="flex items-center justify-between px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-100 hover:text-gray-900 transition-colors group"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <app.icon size={18} className={app.color} />
+                      <span className="text-sm font-medium">{app.name}</span>
+                    </div>
+                    <ExternalLink size={14} className="opacity-0 group-hover:opacity-50 transition-opacity" />
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
 
         {/* Footer */}
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200 bg-gray-50">
+        <div className="flex-shrink-0 p-4 border-t border-gray-200 bg-gray-50">
           <div className="text-xs text-gray-500">
             {isSuperAdmin ? (
               <p>Platform Administration</p>
