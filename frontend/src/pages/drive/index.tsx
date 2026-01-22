@@ -26,12 +26,17 @@ import AppLauncher from '@/components/shared/AppLauncher';
 import DriveSidebar from '@/components/drive/DriveSidebar';
 import DriveFilterBar, { FilterState } from '@/components/drive/DriveFilterBar';
 import FileGrid from '@/components/drive/FileGrid';
+import FileDetailsPanel from '@/components/drive/FileDetailsPanel';
+import ActivityFeed from '@/components/drive/ActivityFeed';
+import HomeView from '@/components/drive/HomeView';
 import {
   CreateFolderModal,
   RenameModal,
   ShareModal,
   DeleteConfirmModal,
   UploadModal,
+  MoveModal,
+  FilePreviewModal,
 } from '@/components/drive/DriveModals';
 import { useDriveStore } from '@/stores/driveStore';
 import { useRequireAuth } from '@/stores/authStore';
@@ -72,10 +77,20 @@ export default function DrivePage() {
     fetchStorageUsage,
     setAdvancedFilters,
     advancedFilters,
+    openShareModal,
+    openRenameModal,
+    openDeleteConfirm,
+    toggleStar,
+    downloadFile,
+    trashFile,
   } = useDriveStore();
 
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showSortMenu, setShowSortMenu] = useState(false);
+  const [previewFile, setPreviewFile] = useState<DriveFile | null>(null);
+  const [showPreviewModal, setShowPreviewModal] = useState(false);
+  const [showDetailsPanel, setShowDetailsPanel] = useState(false);
+  const [detailsFile, setDetailsFile] = useState<DriveFile | null>(null);
 
   // Fetch files on mount
   useEffect(() => {
@@ -84,6 +99,144 @@ export default function DrivePage() {
       fetchStorageUsage();
     }
   }, [authLoading, isLoggedIn]);
+
+  // Update details panel when selection changes
+  useEffect(() => {
+    if (selectedFiles.length === 1) {
+      const file = files.find(f => f.id === selectedFiles[0]);
+      if (file) {
+        setDetailsFile(file);
+      }
+    } else if (selectedFiles.length === 0) {
+      setDetailsFile(null);
+    }
+  }, [selectedFiles, files]);
+
+  const handleToggleDetailsPanel = () => {
+    if (showDetailsPanel) {
+      setShowDetailsPanel(false);
+    } else {
+      setShowDetailsPanel(true);
+    }
+  };
+
+  const handleFileOpen = useCallback((file: DriveFile) => {
+    if (file.mime_type?.includes('document') || file.mime_type?.includes('word')) {
+      router.push(`/docs/editor/${file.id}`);
+    } else if (file.mime_type?.includes('spreadsheet') || file.mime_type?.includes('excel')) {
+      router.push(`/sheets/${file.id}`);
+    } else if (file.mime_type?.includes('presentation') || file.mime_type?.includes('powerpoint')) {
+      router.push(`/slides/${file.id}`);
+    } else if (file.mime_type?.startsWith('image/') || file.mime_type?.includes('pdf')) {
+      // Open images and PDFs in preview modal
+      setPreviewFile(file);
+      setShowPreviewModal(true);
+    } else {
+      // Download other files
+      window.open(getDownloadUrl(file.id), '_blank');
+    }
+  }, [router]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't handle shortcuts when typing in input fields
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        (e.target as HTMLElement).isContentEditable
+      ) {
+        return;
+      }
+
+      const ctrlOrCmd = e.ctrlKey || e.metaKey;
+
+      // Delete key - move selected files to trash
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        if (selectedFiles.length > 0 && !ctrlOrCmd) {
+          e.preventDefault();
+          if (activeFilter === 'trash') {
+            // Permanent delete if in trash
+            deleteFiles(selectedFiles, true);
+          } else {
+            deleteFiles(selectedFiles, false);
+          }
+        }
+      }
+
+      // Ctrl/Cmd + A - Select all
+      if (ctrlOrCmd && e.key === 'a') {
+        e.preventDefault();
+        selectAll();
+      }
+
+      // Escape - Clear selection
+      if (e.key === 'Escape') {
+        clearSelection();
+        setShowPreviewModal(false);
+      }
+
+      // / or Ctrl/Cmd + F - Focus search
+      if (e.key === '/' || (ctrlOrCmd && e.key === 'f')) {
+        e.preventDefault();
+        const searchInput = document.querySelector('input[placeholder="Search in Drive"]') as HTMLInputElement;
+        if (searchInput) {
+          searchInput.focus();
+        }
+      }
+
+      // Ctrl/Cmd + N - New folder
+      if (ctrlOrCmd && e.key === 'n') {
+        e.preventDefault();
+        openCreateFolderModal();
+      }
+
+      // Enter - Open selected file (if only one selected)
+      if (e.key === 'Enter' && selectedFiles.length === 1) {
+        e.preventDefault();
+        const file = files.find(f => f.id === selectedFiles[0]);
+        if (file) {
+          if (file.file_type === 'folder') {
+            navigateToFolder(file.id, file.name);
+          } else {
+            handleFileOpen(file);
+          }
+        }
+      }
+
+      // i - Toggle details panel
+      if (e.key === 'i' && !ctrlOrCmd) {
+        handleToggleDetailsPanel();
+      }
+
+      // g then d - Go to My Drive
+      // g then h - Go to Home
+      // g then s - Go to Starred
+
+      // Star with 's' key
+      if (e.key === 's' && !ctrlOrCmd && selectedFiles.length === 1) {
+        const file = files.find(f => f.id === selectedFiles[0]);
+        if (file) {
+          toggleStar(file.id, file.is_starred);
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [
+    selectedFiles,
+    files,
+    activeFilter,
+    deleteFiles,
+    selectAll,
+    clearSelection,
+    openCreateFolderModal,
+    navigateToFolder,
+    handleFileOpen,
+    toggleStar,
+    showDetailsPanel,
+  ]);
 
   // Drag and drop
   const onDrop = useCallback(
@@ -101,23 +254,8 @@ export default function DrivePage() {
     noKeyboard: true,
   });
 
-  const handleFileOpen = (file: DriveFile) => {
-    if (file.mime_type?.includes('document') || file.mime_type?.includes('word')) {
-      router.push(`/docs/editor/${file.id}`);
-    } else if (file.mime_type?.includes('spreadsheet') || file.mime_type?.includes('excel')) {
-      router.push(`/sheets/${file.id}`);
-    } else if (file.mime_type?.includes('presentation') || file.mime_type?.includes('powerpoint')) {
-      router.push(`/slides/${file.id}`);
-    } else if (file.mime_type?.startsWith('image/')) {
-      // Open images in preview mode (inline viewing)
-      window.open(getPreviewUrl(file.id), '_blank');
-    } else if (file.mime_type?.includes('pdf')) {
-      // Open PDFs in preview mode (inline viewing)
-      window.open(getPreviewUrl(file.id), '_blank');
-    } else {
-      // Download other files
-      window.open(getDownloadUrl(file.id), '_blank');
-    }
+  const handlePreviewNavigate = (file: DriveFile) => {
+    setPreviewFile(file);
   };
 
   const handleBulkDelete = async () => {
@@ -201,7 +339,7 @@ export default function DrivePage() {
           </div>
 
           {/* Main Content */}
-          <main className="flex-1 ml-[324px] overflow-y-auto">
+          <main className={`flex-1 ml-[324px] overflow-y-auto transition-all ${showDetailsPanel ? 'mr-80' : ''}`}>
             <div className="max-w-7xl mx-auto px-6 py-4">
               {/* Header */}
               <div className="flex items-center justify-between mb-2">
@@ -329,8 +467,14 @@ export default function DrivePage() {
                   </div>
 
                   {/* Info */}
-                  <button className="p-2 hover:bg-gray-100 rounded-lg" title="Details">
-                    <Info size={18} className="text-gray-600" />
+                  <button
+                    onClick={handleToggleDetailsPanel}
+                    className={`p-2 rounded-lg transition-colors ${
+                      showDetailsPanel ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-100 text-gray-600'
+                    }`}
+                    title="Details"
+                  >
+                    <Info size={18} />
                   </button>
 
                   {/* App Launcher */}
@@ -422,23 +566,13 @@ export default function DrivePage() {
 
               {/* Home View - Quick Access */}
               {activeFilter === 'home' && (
-                <div className="mb-6">
-                  <h2 className="text-lg font-medium text-gray-900 mb-4">Quick Access</h2>
-                  <div className="grid grid-cols-4 gap-4">
-                    {/* Quick access items would go here */}
-                    <div className="p-4 bg-white rounded-xl border border-gray-200 hover:shadow-md transition-shadow cursor-pointer">
-                      <p className="text-sm text-gray-500">No recent files</p>
-                    </div>
-                  </div>
-                </div>
+                <HomeView onFileOpen={handleFileOpen} />
               )}
 
               {/* Activity View */}
               {activeFilter === 'activity' && (
                 <div className="mb-6">
-                  <div className="bg-white rounded-xl border border-gray-200 p-6">
-                    <p className="text-gray-500 text-center">Activity feed coming soon</p>
-                  </div>
+                  <ActivityFeed />
                 </div>
               )}
 
@@ -448,14 +582,41 @@ export default function DrivePage() {
               )}
             </div>
           </main>
+
+          {/* Details Panel */}
+          {showDetailsPanel && (
+            <div className="fixed right-0 top-[60px] h-[calc(100vh-60px)] z-10">
+              <FileDetailsPanel
+                file={detailsFile}
+                isOpen={showDetailsPanel}
+                onClose={() => setShowDetailsPanel(false)}
+                onStar={() => detailsFile && toggleStar(detailsFile.id, detailsFile.is_starred)}
+                onShare={() => detailsFile && openShareModal(detailsFile)}
+                onRename={() => detailsFile && openRenameModal(detailsFile)}
+                onTrash={() => detailsFile && trashFile(detailsFile.id)}
+                onDownload={() => detailsFile && downloadFile(detailsFile)}
+              />
+            </div>
+          )}
         </div>
 
         {/* Modals */}
         <CreateFolderModal />
         <RenameModal />
         <ShareModal />
+        <MoveModal />
         <DeleteConfirmModal />
         <UploadModal isOpen={showUploadModal} onClose={() => setShowUploadModal(false)} />
+        <FilePreviewModal
+          file={previewFile}
+          isOpen={showPreviewModal}
+          onClose={() => {
+            setShowPreviewModal(false);
+            setPreviewFile(null);
+          }}
+          files={files}
+          onNavigate={handlePreviewNavigate}
+        />
       </div>
     </>
   );

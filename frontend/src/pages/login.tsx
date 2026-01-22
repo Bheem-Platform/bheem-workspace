@@ -9,54 +9,184 @@ import {
   UserPlus,
   AlertCircle,
   Check,
-  Building2,
-  Mail,
-  Video,
-  FileText,
-  Calendar,
-  HardDrive,
-  Table,
-  Presentation,
-  ClipboardList,
   ArrowRight,
   MessageSquare,
-  Users,
   BarChart3,
-  Shield,
-  Cloud,
   Sparkles,
   Zap,
-  Globe,
   Lock,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { api } from '@/lib/api';
+import { BheemLogoSegmented, BHEEM_COLORS } from '@/components/shared/BheemLogo';
 
 type AuthMode = 'login' | 'signup';
 
-// Floating icons for background animation
-const floatingIcons = [
-  { icon: Mail, color: '#EA4335', size: 40, x: 8, y: 12, duration: 20, delay: 0 },
-  { icon: Video, color: '#34A853', size: 48, x: 92, y: 8, duration: 25, delay: 1 },
-  { icon: FileText, color: '#4285F4', size: 36, x: 15, y: 85, duration: 22, delay: 2 },
-  { icon: Calendar, color: '#8E24AA', size: 44, x: 88, y: 78, duration: 28, delay: 0.5 },
-  { icon: HardDrive, color: '#FBBC04', size: 32, x: 5, y: 45, duration: 24, delay: 3 },
-  { icon: Table, color: '#0F9D58', size: 38, x: 95, y: 42, duration: 26, delay: 1.5 },
-  { icon: Presentation, color: '#F4B400', size: 42, x: 12, y: 65, duration: 21, delay: 2.5 },
-  { icon: ClipboardList, color: '#7B1FA2', size: 34, x: 85, y: 25, duration: 23, delay: 4 },
-  { icon: MessageSquare, color: '#00ACC1', size: 30, x: 50, y: 5, duration: 19, delay: 0 },
-  { icon: Users, color: '#5C6BC0', size: 46, x: 48, y: 92, duration: 27, delay: 2 },
-  { icon: BarChart3, color: '#43A047', size: 28, x: 25, y: 30, duration: 18, delay: 3.5 },
-  { icon: Shield, color: '#E53935', size: 36, x: 72, y: 55, duration: 24, delay: 1 },
-  { icon: Cloud, color: '#039BE5', size: 40, x: 35, y: 70, duration: 22, delay: 4.5 },
-  { icon: Sparkles, color: '#FF6F00', size: 26, x: 62, y: 18, duration: 20, delay: 2 },
-  { icon: Zap, color: '#FFD600', size: 32, x: 78, y: 88, duration: 25, delay: 0.5 },
-  { icon: Globe, color: '#26A69A', size: 38, x: 20, y: 50, duration: 23, delay: 3 },
+// Custom Bheem App Icons with brand colors
+const BheemAppIcons = {
+  Mail: () => (
+    <svg viewBox="0 0 48 48" className="w-full h-full">
+      <defs>
+        <linearGradient id="mailGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#FF6B6B" />
+          <stop offset="100%" stopColor="#EE5A5A" />
+        </linearGradient>
+      </defs>
+      <rect x="4" y="10" width="40" height="28" rx="3" fill="url(#mailGrad)" />
+      <path d="M4 13l20 14 20-14" stroke="white" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+    </svg>
+  ),
+  Docs: () => (
+    <svg viewBox="0 0 48 48" className="w-full h-full">
+      <defs>
+        <linearGradient id="docsGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor={BHEEM_COLORS.blue} />
+          <stop offset="100%" stopColor={BHEEM_COLORS.darkBlue} />
+        </linearGradient>
+      </defs>
+      <rect x="8" y="4" width="32" height="40" rx="3" fill="url(#docsGrad)" />
+      <rect x="14" y="12" width="20" height="3" rx="1.5" fill="white" />
+      <rect x="14" y="19" width="16" height="3" rx="1.5" fill="white" opacity="0.8" />
+      <rect x="14" y="26" width="18" height="3" rx="1.5" fill="white" opacity="0.6" />
+    </svg>
+  ),
+  Meet: () => (
+    <svg viewBox="0 0 48 48" className="w-full h-full">
+      <defs>
+        <linearGradient id="meetGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#00C853" />
+          <stop offset="100%" stopColor="#00A846" />
+        </linearGradient>
+      </defs>
+      <rect x="4" y="8" width="30" height="32" rx="3" fill="url(#meetGrad)" />
+      <polygon points="38,14 44,10 44,38 38,34" fill="#00A846" />
+      <circle cx="19" cy="24" r="8" fill="white" opacity="0.3" />
+    </svg>
+  ),
+  Calendar: () => (
+    <svg viewBox="0 0 48 48" className="w-full h-full">
+      <defs>
+        <linearGradient id="calGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor={BHEEM_COLORS.purple} />
+          <stop offset="100%" stopColor={BHEEM_COLORS.darkBlue} />
+        </linearGradient>
+      </defs>
+      <rect x="4" y="8" width="40" height="36" rx="3" fill="url(#calGrad)" />
+      <rect x="4" y="8" width="40" height="10" rx="3" fill={BHEEM_COLORS.pink} />
+      <circle cx="14" cy="13" r="2" fill={BHEEM_COLORS.purple} />
+      <circle cx="34" cy="13" r="2" fill={BHEEM_COLORS.purple} />
+      <text x="24" y="34" textAnchor="middle" fill="white" fontSize="14" fontWeight="bold">15</text>
+    </svg>
+  ),
+  Drive: () => (
+    <svg viewBox="0 0 48 48" className="w-full h-full">
+      <polygon points="24,4 44,38 4,38" fill={BHEEM_COLORS.blue} />
+      <polygon points="14,38 24,20 44,38" fill={BHEEM_COLORS.purple} />
+      <polygon points="4,38 14,22 24,38" fill={BHEEM_COLORS.pink} />
+    </svg>
+  ),
+  Sheets: () => (
+    <svg viewBox="0 0 48 48" className="w-full h-full">
+      <defs>
+        <linearGradient id="sheetsGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#34A853" />
+          <stop offset="100%" stopColor="#2E8B4A" />
+        </linearGradient>
+      </defs>
+      <rect x="6" y="4" width="36" height="40" rx="3" fill="url(#sheetsGrad)" />
+      <rect x="12" y="12" width="10" height="6" rx="1" fill="white" />
+      <rect x="26" y="12" width="10" height="6" rx="1" fill="white" opacity="0.8" />
+      <rect x="12" y="22" width="10" height="6" rx="1" fill="white" opacity="0.8" />
+      <rect x="26" y="22" width="10" height="6" rx="1" fill="white" opacity="0.6" />
+      <rect x="12" y="32" width="10" height="6" rx="1" fill="white" opacity="0.6" />
+      <rect x="26" y="32" width="10" height="6" rx="1" fill="white" opacity="0.4" />
+    </svg>
+  ),
+  Slides: () => (
+    <svg viewBox="0 0 48 48" className="w-full h-full">
+      <defs>
+        <linearGradient id="slidesGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#FBBC04" />
+          <stop offset="100%" stopColor="#F9A825" />
+        </linearGradient>
+      </defs>
+      <rect x="4" y="8" width="40" height="32" rx="3" fill="url(#slidesGrad)" />
+      <rect x="10" y="14" width="28" height="20" rx="2" fill="white" opacity="0.9" />
+      <circle cx="24" cy="24" r="6" fill={BHEEM_COLORS.purple} />
+    </svg>
+  ),
+  Forms: () => (
+    <svg viewBox="0 0 48 48" className="w-full h-full">
+      <defs>
+        <linearGradient id="formsGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor={BHEEM_COLORS.purple} />
+          <stop offset="100%" stopColor="#6B5BFF" />
+        </linearGradient>
+      </defs>
+      <rect x="8" y="4" width="32" height="40" rx="3" fill="url(#formsGrad)" />
+      <rect x="14" y="12" width="6" height="6" rx="1" fill="white" />
+      <rect x="24" y="14" width="12" height="2" rx="1" fill="white" opacity="0.8" />
+      <rect x="14" y="22" width="6" height="6" rx="1" fill="white" />
+      <rect x="24" y="24" width="12" height="2" rx="1" fill="white" opacity="0.8" />
+      <rect x="14" y="32" width="6" height="6" rx="1" fill="white" />
+      <rect x="24" y="34" width="12" height="2" rx="1" fill="white" opacity="0.8" />
+    </svg>
+  ),
+  Chat: () => (
+    <svg viewBox="0 0 48 48" className="w-full h-full">
+      <defs>
+        <linearGradient id="chatGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor="#00BCD4" />
+          <stop offset="100%" stopColor="#0097A7" />
+        </linearGradient>
+      </defs>
+      <path d="M8,8 h28 a4,4 0 0,1 4,4 v18 a4,4 0 0,1 -4,4 h-20 l-8,8 v-8 a4,4 0 0,1 -4,-4 v-18 a4,4 0 0,1 4,-4 z" fill="url(#chatGrad)" />
+      <circle cx="16" cy="21" r="3" fill="white" />
+      <circle cx="26" cy="21" r="3" fill="white" />
+      <circle cx="36" cy="21" r="3" fill="white" opacity="0.6" />
+    </svg>
+  ),
+  AI: () => (
+    <svg viewBox="0 0 48 48" className="w-full h-full">
+      <defs>
+        <linearGradient id="aiGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor={BHEEM_COLORS.pink} />
+          <stop offset="50%" stopColor={BHEEM_COLORS.purple} />
+          <stop offset="100%" stopColor={BHEEM_COLORS.blue} />
+        </linearGradient>
+      </defs>
+      <circle cx="24" cy="24" r="20" fill="url(#aiGrad)" />
+      <path d="M16,20 Q24,10 32,20 Q36,28 24,36 Q12,28 16,20" fill="white" opacity="0.9" />
+      <circle cx="20" cy="22" r="2" fill={BHEEM_COLORS.deepBlue} />
+      <circle cx="28" cy="22" r="2" fill={BHEEM_COLORS.deepBlue} />
+      <path d="M20,28 Q24,32 28,28" stroke={BHEEM_COLORS.deepBlue} strokeWidth="2" fill="none" strokeLinecap="round" />
+    </svg>
+  ),
+};
+
+// Floating app icons for background animation
+const floatingApps = [
+  { Icon: BheemAppIcons.Mail, size: 40, x: 8, y: 12, duration: 20, delay: 0 },
+  { Icon: BheemAppIcons.Meet, size: 48, x: 92, y: 8, duration: 25, delay: 1 },
+  { Icon: BheemAppIcons.Docs, size: 36, x: 15, y: 85, duration: 22, delay: 2 },
+  { Icon: BheemAppIcons.Calendar, size: 44, x: 88, y: 78, duration: 28, delay: 0.5 },
+  { Icon: BheemAppIcons.Drive, size: 32, x: 5, y: 45, duration: 24, delay: 3 },
+  { Icon: BheemAppIcons.Sheets, size: 38, x: 95, y: 42, duration: 26, delay: 1.5 },
+  { Icon: BheemAppIcons.Slides, size: 42, x: 12, y: 65, duration: 21, delay: 2.5 },
+  { Icon: BheemAppIcons.Forms, size: 34, x: 85, y: 25, duration: 23, delay: 4 },
+  { Icon: BheemAppIcons.Chat, size: 30, x: 50, y: 5, duration: 19, delay: 0 },
+  { Icon: BheemAppIcons.AI, size: 46, x: 48, y: 92, duration: 27, delay: 2 },
+  { Icon: BheemAppIcons.Mail, size: 28, x: 25, y: 30, duration: 18, delay: 3.5 },
+  { Icon: BheemAppIcons.Meet, size: 36, x: 72, y: 55, duration: 24, delay: 1 },
+  { Icon: BheemAppIcons.Docs, size: 40, x: 35, y: 70, duration: 22, delay: 4.5 },
+  { Icon: BheemAppIcons.Calendar, size: 26, x: 62, y: 18, duration: 20, delay: 2 },
+  { Icon: BheemAppIcons.Drive, size: 32, x: 78, y: 88, duration: 25, delay: 0.5 },
+  { Icon: BheemAppIcons.Sheets, size: 38, x: 20, y: 50, duration: 23, delay: 3 },
 ];
 
 export default function LoginPage() {
   const router = useRouter();
-  const { isAuthenticated, isLoading, setAuth } = useAuthStore();
+  const { isAuthenticated, isLoading, setAuth, user } = useAuthStore();
   const [mode, setMode] = useState<AuthMode>('login');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -95,10 +225,25 @@ export default function LoginPage() {
   }, [selectedPlan, urlMode]);
 
   useEffect(() => {
-    if (!isLoading && isAuthenticated && !isLoggingIn) {
-      router.push(redirectTo || '/dashboard');
+    // Double-check token exists in localStorage before redirecting
+    // This prevents redirect when store state is stale after logout
+    const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+
+    if (!isLoading && isAuthenticated && !isLoggingIn && token) {
+      // Determine default redirect based on role hierarchy:
+      // 1. SuperAdmin (platform admin) -> /super-admin
+      // 2. workspace_role admin (external tenant admin) -> /admin
+      // 3. Default -> /dashboard
+      let defaultRedirect = '/dashboard';
+      if (user?.role === 'SuperAdmin') {
+        defaultRedirect = '/super-admin';
+      } else if (user?.workspace_role === 'admin') {
+        // External customer who is admin of their workspace
+        defaultRedirect = '/admin';
+      }
+      router.push(redirectTo || defaultRedirect);
     }
-  }, [isAuthenticated, isLoading, router, redirectTo, isLoggingIn]);
+  }, [isAuthenticated, isLoading, router, redirectTo, isLoggingIn, user]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -113,13 +258,33 @@ export default function LoginPage() {
       });
 
       const { access_token, user } = response.data;
+
+      // Set auth first (this also fetches workspace info)
+      await setAuth(access_token, user);
+
+      // Determine redirect based on role hierarchy:
+      // 1. SuperAdmin (platform admin) -> /super-admin
+      // 2. Check workspace role for external customers -> /admin if workspace admin
+      // 3. Default -> /dashboard
       let targetUrl = '/dashboard';
       if (user.role === 'SuperAdmin') {
         targetUrl = '/super-admin';
+      } else {
+        // For external customers, check their workspace role
+        // setAuth fetches workspace info, but we need to check it separately for redirect
+        try {
+          const workspaceRes = await api.get('/user-workspace/me');
+          const workspace = workspaceRes.data;
+          if (workspace?.role === 'admin' || workspace?.user?.workspace_role === 'admin') {
+            targetUrl = '/admin';
+          }
+        } catch (err) {
+          // No workspace - use default dashboard
+          console.log('No workspace found, using default redirect');
+        }
       }
 
       const finalRedirect = redirectTo || targetUrl;
-      await setAuth(access_token, user);
       router.push(finalRedirect);
     } catch (err: any) {
       console.error('Login error:', err);
@@ -227,13 +392,11 @@ export default function LoginPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0a0a1a]">
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: BHEEM_COLORS.deepBlue }}>
         <div className="relative">
-          <div className="w-20 h-20 border-4 border-purple-500/30 rounded-full animate-spin border-t-purple-500"></div>
+          <div className="w-20 h-20 border-4 rounded-full animate-spin" style={{ borderColor: `${BHEEM_COLORS.purple}30`, borderTopColor: BHEEM_COLORS.purple }}></div>
           <div className="absolute inset-0 flex items-center justify-center">
-            <div className="w-12 h-12 bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 rounded-xl flex items-center justify-center">
-              <span className="text-xl font-black text-white">B</span>
-            </div>
+            <BheemLogoSegmented size={48} />
           </div>
         </div>
       </div>
@@ -247,10 +410,10 @@ export default function LoginPage() {
         <meta name="description" content="Sign in to Bheem Workspace - Your complete productivity suite" />
       </Head>
 
-      <div className="min-h-screen flex relative overflow-hidden bg-[#0a0a1a]">
-        {/* Floating Background Icons */}
-        {mounted && floatingIcons.map((item, index) => {
-          const Icon = item.icon;
+      <div className="min-h-screen flex relative overflow-hidden" style={{ backgroundColor: BHEEM_COLORS.deepBlue }}>
+        {/* Floating Background App Icons */}
+        {mounted && floatingApps.map((item, index) => {
+          const { Icon } = item;
           return (
             <div
               key={index}
@@ -258,32 +421,27 @@ export default function LoginPage() {
               style={{
                 left: `${item.x}%`,
                 top: `${item.y}%`,
+                width: item.size,
+                height: item.size,
                 animationDuration: `${item.duration}s`,
                 animationDelay: `${item.delay}s`,
               }}
             >
-              <div className="relative animate-pulse-slow" style={{ animationDelay: `${item.delay * 0.5}s` }}>
-                <div
-                  className="absolute inset-0 rounded-xl blur-lg opacity-30"
-                  style={{ backgroundColor: item.color }}
-                />
-                <div
-                  className="relative rounded-xl p-2.5 backdrop-blur-sm border border-white/5"
-                  style={{
-                    backgroundColor: `${item.color}15`,
-                    boxShadow: `0 0 20px ${item.color}20`,
-                  }}
-                >
-                  <Icon size={item.size} style={{ color: item.color }} className="opacity-70" />
-                </div>
+              <div className="relative animate-pulse-slow opacity-50 hover:opacity-80 transition-opacity" style={{ animationDelay: `${item.delay * 0.5}s` }}>
+                <Icon />
               </div>
             </div>
           );
         })}
 
         {/* Gradient Overlays */}
-        <div className="absolute inset-0 bg-gradient-to-br from-blue-900/10 via-transparent to-purple-900/10 z-0" />
-        <div className="absolute top-0 left-0 w-1/2 h-full bg-gradient-to-r from-[#0a0a1a] via-[#0a0a1a]/80 to-transparent z-[1]" />
+        <div className="absolute inset-0 z-0" style={{ background: `linear-gradient(135deg, ${BHEEM_COLORS.darkBlue}20 0%, transparent 50%, ${BHEEM_COLORS.purple}20 100%)` }} />
+        <div className="absolute top-0 left-0 w-1/2 h-full z-[1]" style={{ background: `linear-gradient(90deg, ${BHEEM_COLORS.deepBlue} 0%, ${BHEEM_COLORS.deepBlue}80 50%, transparent 100%)` }} />
+
+        {/* Animated Background Blobs */}
+        <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full opacity-20 blur-3xl animate-blob" style={{ backgroundColor: BHEEM_COLORS.purple }} />
+        <div className="absolute bottom-1/4 right-1/4 w-80 h-80 rounded-full opacity-15 blur-3xl animate-blob animation-delay-2000" style={{ backgroundColor: BHEEM_COLORS.pink }} />
+        <div className="absolute top-1/2 right-1/3 w-72 h-72 rounded-full opacity-10 blur-3xl animate-blob animation-delay-4000" style={{ backgroundColor: BHEEM_COLORS.blue }} />
 
         {/* Left Side - Branding & Info */}
         <div className="hidden lg:flex lg:w-1/2 flex-col justify-center px-16 xl:px-24 relative z-10">
@@ -291,14 +449,12 @@ export default function LoginPage() {
           <div className="mb-12">
             <div className="flex items-center gap-4 mb-8">
               <div className="relative">
-                <div className="absolute -inset-2 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 rounded-2xl blur-lg opacity-50" />
-                <div className="relative w-16 h-16 bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 rounded-2xl flex items-center justify-center">
-                  <span className="text-3xl font-black text-white">B</span>
-                </div>
+                <div className="absolute -inset-2 rounded-2xl blur-lg opacity-50" style={{ background: `linear-gradient(135deg, ${BHEEM_COLORS.pink}, ${BHEEM_COLORS.purple}, ${BHEEM_COLORS.blue})` }} />
+                <BheemLogoSegmented size={64} />
               </div>
               <div>
                 <h1 className="text-3xl font-bold text-white">Bheem</h1>
-                <p className="text-gray-400">Workspace</p>
+                <p style={{ color: BHEEM_COLORS.lavender }}>Workspace</p>
               </div>
             </div>
           </div>
@@ -308,11 +464,11 @@ export default function LoginPage() {
             <h2 className="text-5xl xl:text-6xl font-bold text-white leading-tight mb-6">
               Everything you need.
               <br />
-              <span className="bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
+              <span className="bg-clip-text text-transparent" style={{ backgroundImage: `linear-gradient(90deg, ${BHEEM_COLORS.pink}, ${BHEEM_COLORS.purple}, ${BHEEM_COLORS.blue})` }}>
                 One workspace.
               </span>
             </h2>
-            <p className="text-xl text-gray-400 max-w-lg">
+            <p className="text-xl max-w-lg" style={{ color: BHEEM_COLORS.lavender }}>
               Collaborate, communicate, and create with your team using our integrated suite of productivity tools.
             </p>
           </div>
@@ -320,31 +476,56 @@ export default function LoginPage() {
           {/* AI Features - Compact Horizontal */}
           <div className="flex items-center gap-6 flex-wrap">
             <div className="flex items-center gap-3 group cursor-pointer">
-              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center shadow-lg shadow-purple-500/20 group-hover:scale-110 transition-transform">
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform" style={{ background: `linear-gradient(135deg, ${BHEEM_COLORS.purple}, ${BHEEM_COLORS.pink})`, boxShadow: `0 8px 20px ${BHEEM_COLORS.purple}40` }}>
                 <Sparkles size={22} className="text-white" />
               </div>
               <span className="text-white font-medium">AI Writer</span>
             </div>
 
             <div className="flex items-center gap-3 group cursor-pointer">
-              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-blue-500/20 group-hover:scale-110 transition-transform">
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform" style={{ background: `linear-gradient(135deg, ${BHEEM_COLORS.blue}, ${BHEEM_COLORS.darkBlue})`, boxShadow: `0 8px 20px ${BHEEM_COLORS.blue}40` }}>
                 <MessageSquare size={22} className="text-white" />
               </div>
               <span className="text-white font-medium">Summarize</span>
             </div>
 
             <div className="flex items-center gap-3 group cursor-pointer">
-              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-green-500 to-emerald-500 flex items-center justify-center shadow-lg shadow-green-500/20 group-hover:scale-110 transition-transform">
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform" style={{ background: 'linear-gradient(135deg, #00C853, #00A846)', boxShadow: '0 8px 20px rgba(0, 200, 83, 0.4)' }}>
                 <Zap size={22} className="text-white" />
               </div>
               <span className="text-white font-medium">Automate</span>
             </div>
 
             <div className="flex items-center gap-3 group cursor-pointer">
-              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-orange-500 to-yellow-500 flex items-center justify-center shadow-lg shadow-orange-500/20 group-hover:scale-110 transition-transform">
+              <div className="w-11 h-11 rounded-xl flex items-center justify-center shadow-lg group-hover:scale-110 transition-transform" style={{ background: `linear-gradient(135deg, ${BHEEM_COLORS.pink}, ${BHEEM_COLORS.purple})`, boxShadow: `0 8px 20px ${BHEEM_COLORS.pink}40` }}>
                 <BarChart3 size={22} className="text-white" />
               </div>
               <span className="text-white font-medium">Analytics</span>
+            </div>
+          </div>
+
+          {/* App Icons Grid */}
+          <div className="mt-12">
+            <p className="text-sm uppercase tracking-wider mb-4" style={{ color: BHEEM_COLORS.purple }}>All your tools in one place</p>
+            <div className="flex gap-3 flex-wrap">
+              {[
+                { Icon: BheemAppIcons.Mail, name: 'Mail' },
+                { Icon: BheemAppIcons.Docs, name: 'Docs' },
+                { Icon: BheemAppIcons.Meet, name: 'Meet' },
+                { Icon: BheemAppIcons.Calendar, name: 'Calendar' },
+                { Icon: BheemAppIcons.Drive, name: 'Drive' },
+                { Icon: BheemAppIcons.Sheets, name: 'Sheets' },
+                { Icon: BheemAppIcons.Slides, name: 'Slides' },
+                { Icon: BheemAppIcons.Forms, name: 'Forms' },
+                { Icon: BheemAppIcons.Chat, name: 'Chat' },
+                { Icon: BheemAppIcons.AI, name: 'AI' },
+              ].map((app, i) => (
+                <div key={i} className="group relative">
+                  <div className="w-10 h-10 rounded-lg overflow-hidden transform group-hover:scale-110 transition-transform cursor-pointer">
+                    <app.Icon />
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -355,28 +536,27 @@ export default function LoginPage() {
             {/* Mobile Logo */}
             <div className="lg:hidden text-center mb-8">
               <div className="inline-flex items-center gap-3 mb-4">
-                <div className="w-12 h-12 bg-gradient-to-br from-blue-500 via-purple-500 to-pink-500 rounded-xl flex items-center justify-center">
-                  <span className="text-2xl font-black text-white">B</span>
-                </div>
+                <BheemLogoSegmented size={48} />
                 <span className="text-2xl font-bold text-white">Bheem Workspace</span>
               </div>
             </div>
 
             {/* Card */}
             <div className="relative">
-              <div className="absolute -inset-1 bg-gradient-to-r from-blue-500/30 via-purple-500/30 to-pink-500/30 rounded-3xl blur-xl" />
+              <div className="absolute -inset-1 rounded-3xl blur-xl" style={{ background: `linear-gradient(135deg, ${BHEEM_COLORS.pink}30, ${BHEEM_COLORS.purple}30, ${BHEEM_COLORS.blue}30)` }} />
 
-              <div className="relative bg-[#12121f]/80 backdrop-blur-2xl rounded-3xl border border-white/10 p-8 shadow-2xl">
+              <div className="relative backdrop-blur-2xl rounded-3xl border p-8 shadow-2xl" style={{ backgroundColor: `${BHEEM_COLORS.darkBlue}60`, borderColor: `${BHEEM_COLORS.purple}30` }}>
                 {/* Mode Toggle */}
-                <div className="flex bg-white/5 rounded-2xl p-1.5 mb-8">
+                <div className="flex rounded-2xl p-1.5 mb-8" style={{ backgroundColor: `${BHEEM_COLORS.purple}15` }}>
                   <button
                     type="button"
                     onClick={() => { setMode('login'); setError(''); }}
                     className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-semibold transition-all duration-300 ${
                       mode === 'login'
-                        ? 'bg-gradient-to-r from-blue-500 to-purple-500 text-white shadow-lg'
+                        ? 'text-white shadow-lg'
                         : 'text-gray-400 hover:text-white'
                     }`}
+                    style={mode === 'login' ? { background: `linear-gradient(90deg, ${BHEEM_COLORS.blue}, ${BHEEM_COLORS.purple})` } : {}}
                   >
                     <LogIn size={18} />
                     Sign In
@@ -386,9 +566,10 @@ export default function LoginPage() {
                     onClick={() => { setMode('signup'); setError(''); }}
                     className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-sm font-semibold transition-all duration-300 ${
                       mode === 'signup'
-                        ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg'
+                        ? 'text-white shadow-lg'
                         : 'text-gray-400 hover:text-white'
                     }`}
+                    style={mode === 'signup' ? { background: `linear-gradient(90deg, ${BHEEM_COLORS.purple}, ${BHEEM_COLORS.pink})` } : {}}
                   >
                     <UserPlus size={18} />
                     Sign Up
@@ -400,7 +581,7 @@ export default function LoginPage() {
                   <h3 className="text-2xl font-bold text-white mb-2">
                     {mode === 'login' ? 'Welcome back' : 'Create your workspace'}
                   </h3>
-                  <p className="text-gray-400">
+                  <p style={{ color: BHEEM_COLORS.lavender }}>
                     {mode === 'login'
                       ? 'Enter your credentials to access your workspace'
                       : 'Start your 14-day free trial today'}
@@ -408,7 +589,7 @@ export default function LoginPage() {
                 </div>
 
                 {selectedPlan && mode === 'signup' && (
-                  <div className="mb-6 flex items-center justify-center gap-2 bg-green-500/10 text-green-400 px-4 py-3 rounded-xl text-sm font-medium border border-green-500/20">
+                  <div className="mb-6 flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-medium" style={{ backgroundColor: '#00C85315', color: '#00C853', border: '1px solid #00C85330' }}>
                     <Check size={18} />
                     {selectedPlan.replace('WORKSPACE-', '')} plan selected
                   </div>
@@ -416,13 +597,13 @@ export default function LoginPage() {
 
                 {/* Messages */}
                 {error && (
-                  <div className="flex items-center gap-3 p-4 mb-6 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400">
+                  <div className="flex items-center gap-3 p-4 mb-6 rounded-xl" style={{ backgroundColor: '#EF444415', border: '1px solid #EF444430', color: '#EF4444' }}>
                     <AlertCircle size={20} className="flex-shrink-0" />
                     <span className="text-sm">{error}</span>
                   </div>
                 )}
                 {success && (
-                  <div className="flex items-center gap-3 p-4 mb-6 bg-green-500/10 border border-green-500/20 rounded-xl text-green-400">
+                  <div className="flex items-center gap-3 p-4 mb-6 rounded-xl" style={{ backgroundColor: '#00C85315', border: '1px solid #00C85330', color: '#00C853' }}>
                     <Check size={20} className="flex-shrink-0" />
                     <span className="text-sm">{success}</span>
                   </div>
@@ -432,30 +613,39 @@ export default function LoginPage() {
                 {mode === 'login' ? (
                   <form className="space-y-5" onSubmit={handleLogin}>
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">Email address</label>
+                      <label className="block text-sm font-medium mb-2" style={{ color: BHEEM_COLORS.lavender }}>Email address</label>
                       <div className="relative">
-                        <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" />
+                        <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 opacity-60" viewBox="0 0 48 48">
+                          <rect x="4" y="10" width="40" height="28" rx="3" fill={BHEEM_COLORS.purple} />
+                          <path d="M4 13l20 14 20-14" stroke="white" strokeWidth="2.5" fill="none" />
+                        </svg>
                         <input
                           type="email"
                           required
                           value={loginData.username}
                           onChange={(e) => setLoginData({ ...loginData, username: e.target.value })}
-                          className="w-full pl-12 pr-4 py-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent transition-all"
+                          className="w-full pl-12 pr-4 py-3.5 rounded-xl text-white placeholder-gray-500 focus:outline-none transition-all"
+                          style={{ backgroundColor: `${BHEEM_COLORS.purple}15`, border: `1px solid ${BHEEM_COLORS.purple}30` }}
+                          onFocus={(e) => e.target.style.boxShadow = `0 0 0 2px ${BHEEM_COLORS.purple}50`}
+                          onBlur={(e) => e.target.style.boxShadow = 'none'}
                           placeholder="you@example.com"
                         />
                       </div>
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">Password</label>
+                      <label className="block text-sm font-medium mb-2" style={{ color: BHEEM_COLORS.lavender }}>Password</label>
                       <div className="relative">
-                        <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" />
+                        <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 opacity-60" style={{ color: BHEEM_COLORS.purple }} />
                         <input
                           type={showPassword ? 'text' : 'password'}
                           required
                           value={loginData.password}
                           onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
-                          className="w-full pl-12 pr-12 py-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent transition-all"
+                          className="w-full pl-12 pr-12 py-3.5 rounded-xl text-white placeholder-gray-500 focus:outline-none transition-all"
+                          style={{ backgroundColor: `${BHEEM_COLORS.purple}15`, border: `1px solid ${BHEEM_COLORS.purple}30` }}
+                          onFocus={(e) => e.target.style.boxShadow = `0 0 0 2px ${BHEEM_COLORS.purple}50`}
+                          onBlur={(e) => e.target.style.boxShadow = 'none'}
                           placeholder="Enter your password"
                         />
                         <button
@@ -470,10 +660,10 @@ export default function LoginPage() {
 
                     <div className="flex items-center justify-between">
                       <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" className="w-4 h-4 rounded border-white/20 bg-white/5 text-purple-500 focus:ring-purple-500/50" />
-                        <span className="text-sm text-gray-400">Remember me</span>
+                        <input type="checkbox" className="w-4 h-4 rounded" style={{ accentColor: BHEEM_COLORS.purple }} />
+                        <span className="text-sm" style={{ color: BHEEM_COLORS.lavender }}>Remember me</span>
                       </label>
-                      <a href="#" className="text-sm text-purple-400 hover:text-purple-300 transition-colors">
+                      <a href="#" className="text-sm transition-colors hover:opacity-80" style={{ color: BHEEM_COLORS.pink }}>
                         Forgot password?
                       </a>
                     </div>
@@ -483,8 +673,8 @@ export default function LoginPage() {
                       disabled={loading}
                       className="w-full relative group py-4 rounded-xl font-semibold text-white transition-all duration-300 disabled:opacity-50 overflow-hidden"
                     >
-                      <div className="absolute inset-0 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500" />
-                      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600" />
+                      <div className="absolute inset-0" style={{ background: `linear-gradient(90deg, ${BHEEM_COLORS.blue}, ${BHEEM_COLORS.purple}, ${BHEEM_COLORS.pink})` }} />
+                      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300" style={{ background: `linear-gradient(90deg, ${BHEEM_COLORS.darkBlue}, ${BHEEM_COLORS.blue}, ${BHEEM_COLORS.purple})` }} />
                       <span className="relative flex items-center justify-center gap-2">
                         {loading ? (
                           <>
@@ -504,54 +694,69 @@ export default function LoginPage() {
                   <form className="space-y-4" onSubmit={handleSignup}>
                     <div className="grid grid-cols-2 gap-4">
                       <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">Full Name</label>
+                        <label className="block text-sm font-medium mb-2" style={{ color: BHEEM_COLORS.lavender }}>Full Name</label>
                         <input
                           type="text"
                           required
                           value={signupData.fullName}
                           onChange={(e) => setSignupData({ ...signupData, fullName: e.target.value })}
-                          className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent transition-all"
+                          className="w-full px-4 py-3 rounded-xl text-white placeholder-gray-500 focus:outline-none transition-all"
+                          style={{ backgroundColor: `${BHEEM_COLORS.purple}15`, border: `1px solid ${BHEEM_COLORS.purple}30` }}
+                          onFocus={(e) => e.target.style.boxShadow = `0 0 0 2px ${BHEEM_COLORS.purple}50`}
+                          onBlur={(e) => e.target.style.boxShadow = 'none'}
                           placeholder="John Doe"
                         />
                       </div>
                       <div>
-                        <label className="block text-sm font-medium text-gray-300 mb-2">Workspace</label>
+                        <label className="block text-sm font-medium mb-2" style={{ color: BHEEM_COLORS.lavender }}>Workspace</label>
                         <input
                           type="text"
                           required
                           value={signupData.workspaceName}
                           onChange={(e) => setSignupData({ ...signupData, workspaceName: e.target.value })}
-                          className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent transition-all"
+                          className="w-full px-4 py-3 rounded-xl text-white placeholder-gray-500 focus:outline-none transition-all"
+                          style={{ backgroundColor: `${BHEEM_COLORS.purple}15`, border: `1px solid ${BHEEM_COLORS.purple}30` }}
+                          onFocus={(e) => e.target.style.boxShadow = `0 0 0 2px ${BHEEM_COLORS.purple}50`}
+                          onBlur={(e) => e.target.style.boxShadow = 'none'}
                           placeholder="My Company"
                         />
                       </div>
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">Work Email</label>
+                      <label className="block text-sm font-medium mb-2" style={{ color: BHEEM_COLORS.lavender }}>Work Email</label>
                       <div className="relative">
-                        <Mail size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" />
+                        <svg className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 opacity-60" viewBox="0 0 48 48">
+                          <rect x="4" y="10" width="40" height="28" rx="3" fill={BHEEM_COLORS.purple} />
+                          <path d="M4 13l20 14 20-14" stroke="white" strokeWidth="2.5" fill="none" />
+                        </svg>
                         <input
                           type="email"
                           required
                           value={signupData.email}
                           onChange={(e) => setSignupData({ ...signupData, email: e.target.value })}
-                          className="w-full pl-12 pr-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent transition-all"
+                          className="w-full pl-12 pr-4 py-3 rounded-xl text-white placeholder-gray-500 focus:outline-none transition-all"
+                          style={{ backgroundColor: `${BHEEM_COLORS.purple}15`, border: `1px solid ${BHEEM_COLORS.purple}30` }}
+                          onFocus={(e) => e.target.style.boxShadow = `0 0 0 2px ${BHEEM_COLORS.purple}50`}
+                          onBlur={(e) => e.target.style.boxShadow = 'none'}
                           placeholder="you@company.com"
                         />
                       </div>
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">Password</label>
+                      <label className="block text-sm font-medium mb-2" style={{ color: BHEEM_COLORS.lavender }}>Password</label>
                       <div className="relative">
-                        <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" />
+                        <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 opacity-60" style={{ color: BHEEM_COLORS.purple }} />
                         <input
                           type={showPassword ? 'text' : 'password'}
                           required
                           value={signupData.password}
                           onChange={(e) => setSignupData({ ...signupData, password: e.target.value })}
-                          className="w-full pl-12 pr-12 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent transition-all"
+                          className="w-full pl-12 pr-12 py-3 rounded-xl text-white placeholder-gray-500 focus:outline-none transition-all"
+                          style={{ backgroundColor: `${BHEEM_COLORS.purple}15`, border: `1px solid ${BHEEM_COLORS.purple}30` }}
+                          onFocus={(e) => e.target.style.boxShadow = `0 0 0 2px ${BHEEM_COLORS.purple}50`}
+                          onBlur={(e) => e.target.style.boxShadow = 'none'}
                           placeholder="Min 8 characters"
                         />
                         <button
@@ -565,25 +770,28 @@ export default function LoginPage() {
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-300 mb-2">Confirm Password</label>
+                      <label className="block text-sm font-medium mb-2" style={{ color: BHEEM_COLORS.lavender }}>Confirm Password</label>
                       <div className="relative">
-                        <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500" />
+                        <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 opacity-60" style={{ color: BHEEM_COLORS.purple }} />
                         <input
                           type="password"
                           required
                           value={signupData.confirmPassword}
                           onChange={(e) => setSignupData({ ...signupData, confirmPassword: e.target.value })}
-                          className="w-full pl-12 pr-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-transparent transition-all"
+                          className="w-full pl-12 pr-4 py-3 rounded-xl text-white placeholder-gray-500 focus:outline-none transition-all"
+                          style={{ backgroundColor: `${BHEEM_COLORS.purple}15`, border: `1px solid ${BHEEM_COLORS.purple}30` }}
+                          onFocus={(e) => e.target.style.boxShadow = `0 0 0 2px ${BHEEM_COLORS.purple}50`}
+                          onBlur={(e) => e.target.style.boxShadow = 'none'}
                           placeholder="Confirm your password"
                         />
                       </div>
                     </div>
 
-                    <p className="text-xs text-gray-500">
+                    <p className="text-xs" style={{ color: `${BHEEM_COLORS.lavender}80` }}>
                       By signing up, you agree to our{' '}
-                      <a href="#" className="text-purple-400 hover:text-purple-300">Terms</a>
+                      <a href="#" style={{ color: BHEEM_COLORS.pink }} className="hover:opacity-80">Terms</a>
                       {' '}and{' '}
-                      <a href="#" className="text-purple-400 hover:text-purple-300">Privacy Policy</a>.
+                      <a href="#" style={{ color: BHEEM_COLORS.pink }} className="hover:opacity-80">Privacy Policy</a>.
                     </p>
 
                     <button
@@ -591,8 +799,8 @@ export default function LoginPage() {
                       disabled={loading}
                       className="w-full relative group py-4 rounded-xl font-semibold text-white transition-all duration-300 disabled:opacity-50 overflow-hidden"
                     >
-                      <div className="absolute inset-0 bg-gradient-to-r from-purple-500 via-pink-500 to-red-500" />
-                      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-r from-purple-600 via-pink-600 to-red-600" />
+                      <div className="absolute inset-0" style={{ background: `linear-gradient(90deg, ${BHEEM_COLORS.purple}, ${BHEEM_COLORS.pink}, #FF6B6B)` }} />
+                      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300" style={{ background: `linear-gradient(90deg, ${BHEEM_COLORS.blue}, ${BHEEM_COLORS.purple}, ${BHEEM_COLORS.pink})` }} />
                       <span className="relative flex items-center justify-center gap-2">
                         {loading ? (
                           <>
@@ -613,10 +821,10 @@ export default function LoginPage() {
                 {/* Divider */}
                 <div className="relative my-6">
                   <div className="absolute inset-0 flex items-center">
-                    <div className="w-full border-t border-white/10" />
+                    <div className="w-full border-t" style={{ borderColor: `${BHEEM_COLORS.purple}30` }} />
                   </div>
                   <div className="relative flex justify-center">
-                    <span className="px-4 bg-[#12121f] text-gray-500 text-sm">or continue with</span>
+                    <span className="px-4 text-sm" style={{ backgroundColor: BHEEM_COLORS.darkBlue, color: BHEEM_COLORS.lavender }}>or continue with</span>
                   </div>
                 </div>
 
@@ -624,7 +832,10 @@ export default function LoginPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <button
                     type="button"
-                    className="flex items-center justify-center gap-2 py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white hover:bg-white/10 transition-all duration-300"
+                    className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-white transition-all duration-300"
+                    style={{ backgroundColor: `${BHEEM_COLORS.purple}15`, border: `1px solid ${BHEEM_COLORS.purple}30` }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${BHEEM_COLORS.purple}30`}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = `${BHEEM_COLORS.purple}15`}
                   >
                     <svg className="w-5 h-5" viewBox="0 0 24 24">
                       <path fill="#EA4335" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
@@ -636,7 +847,10 @@ export default function LoginPage() {
                   </button>
                   <button
                     type="button"
-                    className="flex items-center justify-center gap-2 py-3 px-4 bg-white/5 border border-white/10 rounded-xl text-white hover:bg-white/10 transition-all duration-300"
+                    className="flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-white transition-all duration-300"
+                    style={{ backgroundColor: `${BHEEM_COLORS.purple}15`, border: `1px solid ${BHEEM_COLORS.purple}30` }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = `${BHEEM_COLORS.purple}30`}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = `${BHEEM_COLORS.purple}15`}
                   >
                     <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                       <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
@@ -648,8 +862,8 @@ export default function LoginPage() {
             </div>
 
             {/* Footer */}
-            <p className="text-center text-sm text-gray-500 mt-8">
-              <Link href="/" className="text-purple-400 hover:text-purple-300 transition-colors inline-flex items-center gap-1">
+            <p className="text-center text-sm mt-8" style={{ color: BHEEM_COLORS.lavender }}>
+              <Link href="/" className="inline-flex items-center gap-1 transition-colors hover:opacity-80" style={{ color: BHEEM_COLORS.pink }}>
                 <ArrowRight size={14} className="rotate-180" />
                 Back to home
               </Link>
@@ -677,12 +891,27 @@ export default function LoginPage() {
 
         @keyframes pulse-slow {
           0%, 100% {
-            opacity: 0.5;
+            opacity: 0.4;
             transform: scale(1);
           }
           50% {
-            opacity: 0.8;
+            opacity: 0.6;
             transform: scale(1.05);
+          }
+        }
+
+        @keyframes blob {
+          0%, 100% {
+            transform: translate(0, 0) scale(1);
+          }
+          25% {
+            transform: translate(20px, -30px) scale(1.1);
+          }
+          50% {
+            transform: translate(-20px, 20px) scale(0.9);
+          }
+          75% {
+            transform: translate(30px, 10px) scale(1.05);
           }
         }
 
@@ -692,6 +921,18 @@ export default function LoginPage() {
 
         .animate-pulse-slow {
           animation: pulse-slow 4s ease-in-out infinite;
+        }
+
+        .animate-blob {
+          animation: blob 15s ease-in-out infinite;
+        }
+
+        .animation-delay-2000 {
+          animation-delay: 2s;
+        }
+
+        .animation-delay-4000 {
+          animation-delay: 4s;
         }
       `}</style>
     </>

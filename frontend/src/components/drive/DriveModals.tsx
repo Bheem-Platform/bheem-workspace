@@ -2,10 +2,10 @@
  * Bheem Drive - Modal Components
  */
 import { useState, useEffect } from 'react';
-import { X, Folder, Link, Copy, Check, Globe, Lock, Users } from 'lucide-react';
+import { X, Folder, Link, Copy, Check, Globe, Lock, Users, ChevronRight, ChevronDown, FolderOpen, Home, ArrowRight, Download, ZoomIn, ZoomOut, RotateCw, Maximize2, ChevronLeft } from 'lucide-react';
 import { useDriveStore } from '@/stores/driveStore';
 import * as driveApi from '@/lib/driveApi';
-import type { DriveShare } from '@/lib/driveApi';
+import type { DriveShare, DriveFile } from '@/lib/driveApi';
 
 // Create Folder Modal
 export function CreateFolderModal() {
@@ -475,4 +475,508 @@ export function UploadModal({ isOpen, onClose }: { isOpen: boolean; onClose: () 
       </div>
     </div>
   );
+}
+
+// Folder Tree Item for Move Modal
+interface FolderTreeItemProps {
+  folder: DriveFile;
+  level: number;
+  selectedId: string | null;
+  onSelect: (id: string | null) => void;
+  expandedIds: Set<string>;
+  onToggleExpand: (id: string) => void;
+  excludeId?: string; // The file being moved - can't move into itself
+}
+
+function FolderTreeItem({ folder, level, selectedId, onSelect, expandedIds, onToggleExpand, excludeId }: FolderTreeItemProps) {
+  const [subFolders, setSubFolders] = useState<DriveFile[]>([]);
+  const [loading, setLoading] = useState(false);
+  const isExpanded = expandedIds.has(folder.id);
+  const isSelected = selectedId === folder.id;
+  const isExcluded = folder.id === excludeId;
+
+  useEffect(() => {
+    if (isExpanded && subFolders.length === 0) {
+      loadSubFolders();
+    }
+  }, [isExpanded]);
+
+  const loadSubFolders = async () => {
+    setLoading(true);
+    try {
+      const files = await driveApi.listFiles({ parent_id: folder.id, file_type: 'folder' });
+      setSubFolders(files);
+    } catch (err) {
+      console.error('Failed to load subfolders:', err);
+    }
+    setLoading(false);
+  };
+
+  const handleToggle = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onToggleExpand(folder.id);
+  };
+
+  if (isExcluded) return null;
+
+  return (
+    <div>
+      <div
+        onClick={() => !isExcluded && onSelect(folder.id)}
+        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer transition-colors ${
+          isSelected ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100'
+        } ${isExcluded ? 'opacity-50 cursor-not-allowed' : ''}`}
+        style={{ paddingLeft: `${level * 16 + 8}px` }}
+      >
+        <button
+          onClick={handleToggle}
+          className="p-0.5 hover:bg-gray-200 rounded"
+        >
+          {isExpanded ? (
+            <ChevronDown size={16} className="text-gray-500" />
+          ) : (
+            <ChevronRight size={16} className="text-gray-500" />
+          )}
+        </button>
+        {isExpanded ? (
+          <FolderOpen size={18} className="text-amber-500" />
+        ) : (
+          <Folder size={18} className="text-amber-500" />
+        )}
+        <span className="text-sm truncate">{folder.name}</span>
+      </div>
+
+      {isExpanded && (
+        <div>
+          {loading ? (
+            <div className="text-xs text-gray-400 pl-12 py-1">Loading...</div>
+          ) : subFolders.length > 0 ? (
+            subFolders.map(subFolder => (
+              <FolderTreeItem
+                key={subFolder.id}
+                folder={subFolder}
+                level={level + 1}
+                selectedId={selectedId}
+                onSelect={onSelect}
+                expandedIds={expandedIds}
+                onToggleExpand={onToggleExpand}
+                excludeId={excludeId}
+              />
+            ))
+          ) : (
+            <div className="text-xs text-gray-400 pl-12 py-1">No subfolders</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Move Modal
+export function MoveModal() {
+  const { isMoveModalOpen, closeMoveModal, selectedFileForAction, moveFile, loading } = useDriveStore();
+  const [selectedDestination, setSelectedDestination] = useState<string | null>(null);
+  const [rootFolders, setRootFolders] = useState<DriveFile[]>([]);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [loadingFolders, setLoadingFolders] = useState(false);
+
+  useEffect(() => {
+    if (isMoveModalOpen) {
+      setSelectedDestination(null);
+      setExpandedIds(new Set());
+      loadRootFolders();
+    }
+  }, [isMoveModalOpen]);
+
+  const loadRootFolders = async () => {
+    setLoadingFolders(true);
+    try {
+      const files = await driveApi.listFiles({ file_type: 'folder' });
+      // Filter to only root folders (no parent_id)
+      const rootOnly = files.filter(f => !f.parent_id);
+      setRootFolders(rootOnly);
+    } catch (err) {
+      console.error('Failed to load folders:', err);
+    }
+    setLoadingFolders(false);
+  };
+
+  const handleToggleExpand = (id: string) => {
+    setExpandedIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  const handleMove = async () => {
+    if (selectedFileForAction) {
+      await moveFile(selectedFileForAction.id, selectedDestination);
+    }
+  };
+
+  if (!isMoveModalOpen || !selectedFileForAction) return null;
+
+  const isFolder = selectedFileForAction.file_type === 'folder';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50" onClick={closeMoveModal} />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+        <button
+          onClick={closeMoveModal}
+          className="absolute top-4 right-4 p-1 hover:bg-gray-100 rounded-lg"
+        >
+          <X size={20} className="text-gray-500" />
+        </button>
+
+        <div className="flex items-center gap-3 mb-2">
+          <div className="p-2.5 bg-blue-100 rounded-xl">
+            <ArrowRight size={20} className="text-blue-600" />
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Move</h2>
+            <p className="text-sm text-gray-500 truncate max-w-[280px]">
+              {selectedFileForAction.name}
+            </p>
+          </div>
+        </div>
+
+        <p className="text-sm text-gray-600 mb-4">
+          Select a destination folder:
+        </p>
+
+        {/* Folder Tree */}
+        <div className="border border-gray-200 rounded-xl max-h-72 overflow-y-auto mb-4">
+          {/* My Drive (root) option */}
+          <div
+            onClick={() => setSelectedDestination(null)}
+            className={`flex items-center gap-2 px-3 py-2.5 cursor-pointer transition-colors border-b border-gray-100 ${
+              selectedDestination === null ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-50'
+            }`}
+          >
+            <Home size={18} className="text-blue-500" />
+            <span className="font-medium text-sm">My Drive</span>
+          </div>
+
+          {loadingFolders ? (
+            <div className="p-4 text-center text-gray-500 text-sm">Loading folders...</div>
+          ) : rootFolders.length === 0 ? (
+            <div className="p-4 text-center text-gray-400 text-sm">No folders available</div>
+          ) : (
+            <div className="py-1">
+              {rootFolders.map(folder => (
+                <FolderTreeItem
+                  key={folder.id}
+                  folder={folder}
+                  level={0}
+                  selectedId={selectedDestination}
+                  onSelect={setSelectedDestination}
+                  expandedIds={expandedIds}
+                  onToggleExpand={handleToggleExpand}
+                  excludeId={isFolder ? selectedFileForAction.id : undefined}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Info text */}
+        {selectedDestination === selectedFileForAction.parent_id && (
+          <p className="text-sm text-amber-600 mb-4">
+            This is the current location
+          </p>
+        )}
+
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={closeMoveModal}
+            className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleMove}
+            disabled={loading || selectedDestination === selectedFileForAction.parent_id}
+            className="px-4 py-2 bg-blue-500 text-white font-medium rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50"
+          >
+            {loading ? 'Moving...' : 'Move here'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// File Preview Modal
+interface FilePreviewModalProps {
+  file: DriveFile | null;
+  isOpen: boolean;
+  onClose: () => void;
+  onDownload?: () => void;
+  files?: DriveFile[]; // For navigation between files
+  onNavigate?: (file: DriveFile) => void;
+}
+
+export function FilePreviewModal({ file, isOpen, onClose, onDownload, files, onNavigate }: FilePreviewModalProps) {
+  const [zoom, setZoom] = useState(1);
+  const [rotation, setRotation] = useState(0);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      setZoom(1);
+      setRotation(0);
+      setLoading(true);
+      setError(null);
+    }
+  }, [isOpen, file?.id]);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (isFullscreen) {
+          setIsFullscreen(false);
+        } else {
+          onClose();
+        }
+      } else if (e.key === '+' || e.key === '=') {
+        setZoom(z => Math.min(z + 0.25, 3));
+      } else if (e.key === '-') {
+        setZoom(z => Math.max(z - 0.25, 0.25));
+      } else if (e.key === 'r') {
+        setRotation(r => (r + 90) % 360);
+      } else if (e.key === 'ArrowLeft' && files && onNavigate) {
+        navigatePrev();
+      } else if (e.key === 'ArrowRight' && files && onNavigate) {
+        navigateNext();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, isFullscreen, files, onNavigate]);
+
+  const navigatePrev = () => {
+    if (!files || !file || !onNavigate) return;
+    const previewableFiles = files.filter(f => isPreviewable(f));
+    const currentIndex = previewableFiles.findIndex(f => f.id === file.id);
+    if (currentIndex > 0) {
+      onNavigate(previewableFiles[currentIndex - 1]);
+    }
+  };
+
+  const navigateNext = () => {
+    if (!files || !file || !onNavigate) return;
+    const previewableFiles = files.filter(f => isPreviewable(f));
+    const currentIndex = previewableFiles.findIndex(f => f.id === file.id);
+    if (currentIndex < previewableFiles.length - 1) {
+      onNavigate(previewableFiles[currentIndex + 1]);
+    }
+  };
+
+  if (!isOpen || !file) return null;
+
+  const isImage = file.mime_type?.startsWith('image/');
+  const isPdf = file.mime_type?.includes('pdf');
+  const previewUrl = driveApi.getPreviewUrl(file.id);
+  const downloadUrl = driveApi.getDownloadUrl(file.id);
+
+  const hasPrev = files && files.filter(f => isPreviewable(f)).findIndex(f => f.id === file.id) > 0;
+  const hasNext = files && files.filter(f => isPreviewable(f)).findIndex(f => f.id === file.id) < files.filter(f => isPreviewable(f)).length - 1;
+
+  return (
+    <div className={`fixed inset-0 z-50 ${isFullscreen ? '' : 'p-4'} flex items-center justify-center`}>
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/90" onClick={onClose} />
+
+      {/* Content */}
+      <div className={`relative flex flex-col ${isFullscreen ? 'w-full h-full' : 'w-full max-w-6xl h-[90vh]'} bg-gray-900 rounded-lg overflow-hidden`}>
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 bg-gray-800/50 border-b border-gray-700">
+          <div className="flex items-center gap-3">
+            <h3 className="text-white font-medium truncate max-w-md">{file.name}</h3>
+            {file.size && (
+              <span className="text-gray-400 text-sm">{driveApi.formatFileSize(file.size)}</span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Zoom controls for images */}
+            {isImage && (
+              <>
+                <button
+                  onClick={() => setZoom(z => Math.max(z - 0.25, 0.25))}
+                  className="p-2 text-gray-300 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+                  title="Zoom out"
+                >
+                  <ZoomOut size={18} />
+                </button>
+                <span className="text-gray-400 text-sm w-14 text-center">{Math.round(zoom * 100)}%</span>
+                <button
+                  onClick={() => setZoom(z => Math.min(z + 0.25, 3))}
+                  className="p-2 text-gray-300 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+                  title="Zoom in"
+                >
+                  <ZoomIn size={18} />
+                </button>
+                <button
+                  onClick={() => setRotation(r => (r + 90) % 360)}
+                  className="p-2 text-gray-300 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+                  title="Rotate"
+                >
+                  <RotateCw size={18} />
+                </button>
+                <div className="w-px h-6 bg-gray-600 mx-1" />
+              </>
+            )}
+
+            {/* Fullscreen toggle */}
+            <button
+              onClick={() => setIsFullscreen(f => !f)}
+              className="p-2 text-gray-300 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+              title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+            >
+              <Maximize2 size={18} />
+            </button>
+
+            {/* Download */}
+            <button
+              onClick={onDownload || (() => window.open(downloadUrl, '_blank'))}
+              className="p-2 text-gray-300 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+              title="Download"
+            >
+              <Download size={18} />
+            </button>
+
+            {/* Close */}
+            <button
+              onClick={onClose}
+              className="p-2 text-gray-300 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+              title="Close (Esc)"
+            >
+              <X size={18} />
+            </button>
+          </div>
+        </div>
+
+        {/* Preview content */}
+        <div className="flex-1 flex items-center justify-center overflow-hidden relative">
+          {/* Navigation arrows */}
+          {files && onNavigate && (
+            <>
+              {hasPrev && (
+                <button
+                  onClick={navigatePrev}
+                  className="absolute left-4 z-10 p-3 bg-black/50 hover:bg-black/70 text-white rounded-full transition-colors"
+                  title="Previous (←)"
+                >
+                  <ChevronLeft size={24} />
+                </button>
+              )}
+              {hasNext && (
+                <button
+                  onClick={navigateNext}
+                  className="absolute right-4 z-10 p-3 bg-black/50 hover:bg-black/70 text-white rounded-full transition-colors"
+                  title="Next (→)"
+                >
+                  <ChevronRight size={24} />
+                </button>
+              )}
+            </>
+          )}
+
+          {loading && (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white" />
+            </div>
+          )}
+
+          {error && (
+            <div className="text-center text-red-400">
+              <p className="mb-2">Failed to load preview</p>
+              <button
+                onClick={() => window.open(downloadUrl, '_blank')}
+                className="text-blue-400 hover:text-blue-300 underline"
+              >
+                Download file instead
+              </button>
+            </div>
+          )}
+
+          {isImage && (
+            <div className="w-full h-full flex items-center justify-center overflow-auto p-4">
+              <img
+                src={previewUrl}
+                alt={file.name}
+                className="max-w-full max-h-full object-contain transition-transform duration-200"
+                style={{
+                  transform: `scale(${zoom}) rotate(${rotation}deg)`,
+                  transformOrigin: 'center center',
+                }}
+                onLoad={() => setLoading(false)}
+                onError={() => {
+                  setLoading(false);
+                  setError('Failed to load image');
+                }}
+              />
+            </div>
+          )}
+
+          {isPdf && (
+            <iframe
+              src={previewUrl}
+              className="w-full h-full border-0"
+              title={file.name}
+              onLoad={() => setLoading(false)}
+              onError={() => {
+                setLoading(false);
+                setError('Failed to load PDF');
+              }}
+            />
+          )}
+
+          {!isImage && !isPdf && (
+            <div className="text-center text-gray-400">
+              <p className="mb-4">Preview not available for this file type</p>
+              <button
+                onClick={() => window.open(downloadUrl, '_blank')}
+                className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+              >
+                Download file
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Footer with file info */}
+        <div className="px-4 py-2 bg-gray-800/50 border-t border-gray-700 text-sm text-gray-400">
+          <div className="flex items-center justify-between">
+            <span>Type: {file.mime_type || 'Unknown'}</span>
+            {files && (
+              <span>
+                {files.filter(f => isPreviewable(f)).findIndex(f => f.id === file.id) + 1} of {files.filter(f => isPreviewable(f)).length}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Helper to check if file is previewable
+function isPreviewable(file: DriveFile): boolean {
+  if (file.file_type !== 'file') return false;
+  const mime = file.mime_type || '';
+  return mime.startsWith('image/') || mime.includes('pdf');
 }

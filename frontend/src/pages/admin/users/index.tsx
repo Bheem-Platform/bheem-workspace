@@ -52,8 +52,8 @@ export default function UsersPage() {
 
   const filteredUsers = tenantUsers.filter((user) => {
     const matchesSearch =
-      user.email.toLowerCase().includes(search.toLowerCase()) ||
-      user.name.toLowerCase().includes(search.toLowerCase());
+      (user.email || '').toLowerCase().includes(search.toLowerCase()) ||
+      (user.name || '').toLowerCase().includes(search.toLowerCase());
     const matchesRole = !roleFilter || user.role === roleFilter;
     return matchesSearch && matchesRole;
   });
@@ -88,12 +88,12 @@ export default function UsersPage() {
         <div className="flex items-center space-x-3">
           <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
             <span className="text-blue-600 font-semibold">
-              {user.name.charAt(0).toUpperCase()}
+              {(user.name || user.email || '?').charAt(0).toUpperCase()}
             </span>
           </div>
           <div>
-            <p className="font-medium text-gray-900">{user.name}</p>
-            <p className="text-sm text-gray-500">{user.email}</p>
+            <p className="font-medium text-gray-900">{user.name || 'Unnamed'}</p>
+            <p className="text-sm text-gray-500">{user.email || 'No email'}</p>
           </div>
         </div>
       ),

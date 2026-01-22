@@ -784,13 +784,19 @@ class DriveService:
         result = await self.db.execute(query)
         activities = result.scalars().all()
 
-        # Enrich with file info
+        # Enrich with file info and user info
         activity_list = []
         for activity in activities:
             file_result = await self.db.execute(
                 select(DriveFile).where(DriveFile.id == activity.file_id)
             )
             file = file_result.scalar_one_or_none()
+
+            # Get user info from tenant_users
+            user_result = await self.db.execute(text("""
+                SELECT email, name FROM workspace.tenant_users WHERE id = CAST(:user_id AS uuid)
+            """), {"user_id": str(activity.user_id)})
+            user_row = user_result.fetchone()
 
             activity_list.append({
                 "id": str(activity.id),
@@ -799,6 +805,8 @@ class DriveService:
                 "file_type": file.file_type if file else "file",
                 "user_id": str(activity.user_id),
                 "action": activity.action,
+                "actor_name": user_row.name if user_row else "You",
+                "actor_email": user_row.email if user_row else "",
                 "details": activity.details or {},
                 "created_at": activity.created_at.isoformat()
             })

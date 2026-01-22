@@ -126,35 +126,20 @@ async def ensure_tenant_and_user_exist(
     user_email: str = None,
     user_name: str = None
 ):
-    """Ensure tenant and user records exist for ERP users."""
-    # Ensure tenant exists
+    """Ensure user exists in tenant_users table. Tenant must already exist."""
+    # Verify tenant exists (NO auto-creation - tenants must be created manually)
     try:
         result = await db.execute(text("""
             SELECT id FROM workspace.tenants WHERE id = CAST(:tenant_id AS uuid)
         """), {"tenant_id": tenant_id})
         if not result.fetchone():
-            org_name = f"Organization {company_code or 'ERP'}"
-            await db.execute(text("""
-                INSERT INTO workspace.tenants (id, name, domain, settings, created_at, updated_at)
-                VALUES (
-                    CAST(:tenant_id AS uuid),
-                    :name,
-                    :domain,
-                    '{}'::jsonb,
-                    NOW(),
-                    NOW()
-                )
-                ON CONFLICT (id) DO NOTHING
-            """), {
-                "tenant_id": tenant_id,
-                "name": org_name,
-                "domain": f"{(company_code or 'erp').lower()}.bheem.workspace"
-            })
-            await db.commit()
-            logger.info(f"Created tenant {tenant_id} for ERP company {company_code}")
+            logger.error(f"Tenant {tenant_id} not found. Tenants must be created manually.")
+            raise HTTPException(status_code=403, detail="Tenant not configured. Contact administrator.")
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error ensuring tenant exists: {e}")
-        await db.rollback()
+        logger.error(f"Error verifying tenant: {e}")
+        raise HTTPException(status_code=500, detail="Error verifying tenant")
 
     # Ensure user exists in tenant_users
     try:

@@ -509,7 +509,7 @@ async def bulk_tenant_action(
                 tenant.is_active = False
             elif action.action == "suspend":
                 tenant.is_suspended = True
-            elif action.action == "change_plan" and action.plan:
+            elif action.action in ("change_plan", "update_plan") and action.plan:
                 tenant.plan = action.plan
                 # Update quotas based on plan
                 quotas = {

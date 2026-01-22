@@ -367,13 +367,15 @@ export interface ApiError {
 
 // Subscription Plans (from ERP SKU)
 export interface SubscriptionPlan {
-  sku_id: string;
+  sku_id?: string;  // Legacy field
+  sku_code: string; // Actual field from backend (e.g., "WORKSPACE-PROFESSIONAL")
+  plan_id?: string; // UUID from backend
   name: string;
-  description: string;
+  description?: string;
   base_price: number;
   offer_price?: number;
-  billing_cycle: BillingCycle;
-  features: string[];
+  billing_cycle?: BillingCycle;
+  features: string[] | Record<string, any>; // Can be array or object
   max_users?: number;
   max_storage_gb?: number;
   max_meet_hours?: number;

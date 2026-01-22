@@ -2,7 +2,7 @@
 Bheem Workspace Admin API - Database-backed Administration Module
 With full authentication and RBAC
 """
-from fastapi import APIRouter, HTTPException, Depends, Query, Body, Request
+from fastapi import APIRouter, HTTPException, Depends, Query, Body, Request, status
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
@@ -12,6 +12,7 @@ import uuid
 
 from sqlalchemy import select, func, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from core.database import get_db
 from core.security import (
@@ -19,6 +20,9 @@ from core.security import (
     require_admin,
     require_superadmin,
     require_tenant_admin,
+    require_internal_admin_or_superadmin,
+    is_internal_admin,
+    is_internal_user,
     has_permission,
     Permission,
     get_user_tenant_role
@@ -98,6 +102,10 @@ class TenantResponse(BaseModel):
     recordings_used_mb: float
     created_at: datetime
     user_count: int = 0
+    # Internal/External mode
+    tenant_mode: Optional[str] = None  # 'internal' or 'external'
+    erp_company_code: Optional[str] = None  # BHM001-BHM008 for internal tenants
+    can_manage: bool = True  # Whether current user can manage this tenant
 
     class Config:
         from_attributes = True
@@ -217,8 +225,11 @@ class RecordingPolicy(BaseModel):
 
 # Developer Models
 class DeveloperCreate(BaseModel):
-    user_id: str
-    role: str  # lead_developer, developer, junior_developer
+    name: str
+    email: str
+    company: Optional[str] = None
+    website: Optional[str] = None
+    role: str = "developer"  # lead_developer, developer, junior_developer
     ssh_public_key: Optional[str] = None
     github_username: Optional[str] = None
 
@@ -266,20 +277,27 @@ def is_valid_uuid(value: str) -> bool:
 
 async def resolve_tenant_id(tenant_id: str, db: AsyncSession) -> uuid.UUID:
     """
-    Resolve tenant_id which can be either a UUID or a slug/company_code.
+    Resolve tenant_id which can be either a UUID, slug, domain, or ERP company_code.
     Returns the actual UUID of the tenant.
     Raises HTTPException if tenant not found.
+
+    Supports:
+    - UUID: Direct lookup
+    - Slug: e.g., 'bheemverse-innovation-company'
+    - Domain: e.g., 'bheem.co.uk'
+    - ERP Company Code: e.g., 'BHM001', 'bhm001'
     """
     # First check if it's a valid UUID
     if is_valid_uuid(tenant_id):
         return uuid.UUID(tenant_id)
 
-    # Otherwise, try to find tenant by slug (case-insensitive)
+    # Otherwise, try to find tenant by slug, domain, or erp_company_code (case-insensitive)
     result = await db.execute(
         select(Tenant).where(
             or_(
                 func.lower(Tenant.slug) == tenant_id.lower(),
-                func.lower(Tenant.domain) == tenant_id.lower()
+                func.lower(Tenant.domain) == tenant_id.lower(),
+                func.upper(Tenant.erp_company_code) == tenant_id.upper()
             )
         )
     )
@@ -303,6 +321,46 @@ def get_plan_quotas(plan: str) -> dict:
         "enterprise": {"max_users": 10000, "meet": 10000, "docs": 1048576, "mail": 524288, "recordings": 2097152}
     }
     return quotas.get(plan, quotas["free"])
+
+async def validate_tenant_access(
+    tenant_id: str,
+    current_user: dict,
+    db: AsyncSession
+) -> None:
+    """
+    Validate that the current user has access to the specified tenant.
+    SuperAdmin can access any tenant.
+    Other users can only access their own tenant (via company_code or tenant_users membership).
+    Raises HTTPException if access is denied.
+    """
+    # SuperAdmin can access everything
+    if current_user.get("role") == "SuperAdmin":
+        return
+
+    # Check company_code match (for internal ERP users)
+    user_company = current_user.get("company_code") or current_user.get("company_id")
+    if user_company and str(tenant_id).lower() == str(user_company).lower():
+        return
+
+    # Check tenant_users membership (for external customers)
+    user_id = current_user.get("id") or current_user.get("user_id")
+    if user_id:
+        tenant_info = await get_user_tenant_role(user_id, db)
+        if tenant_info:
+            user_tenant_id = str(tenant_info.get("tenant_id", "")).lower()
+            # Also resolve the requested tenant_id to UUID for comparison
+            try:
+                resolved_id = await resolve_tenant_id(tenant_id, db)
+                if user_tenant_id == str(resolved_id).lower():
+                    return
+            except HTTPException:
+                pass  # Tenant not found, access denied
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Access denied to this tenant"
+    )
+
 
 async def log_activity(
     db: AsyncSession,
@@ -334,14 +392,26 @@ async def log_activity(
 @router.get("/tenants", response_model=List[TenantResponse])
 async def list_tenants(
     db: AsyncSession = Depends(get_db),
-    current_user: dict = Depends(require_superadmin()),
+    current_user: dict = Depends(require_internal_admin_or_superadmin()),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
     search: Optional[str] = None,
     plan: Optional[PlanType] = None,
-    is_active: Optional[bool] = None
+    is_active: Optional[bool] = None,
+    tenant_mode: Optional[str] = Query(None, description="Filter by tenant mode: 'internal' or 'external'")
 ):
-    """List all tenants/organizations (SuperAdmin only)"""
+    """
+    List all tenants/organizations.
+
+    Access Control:
+    - SuperAdmin: Can see ALL tenants with full access
+    - Internal Admin (BHM001-BHM008): Can see ALL tenants
+      - Full management for internal tenants
+      - Read-only view for external customer tenants
+
+    Args:
+        tenant_mode: Filter by 'internal' (Bheemverse) or 'external' (customers)
+    """
     query = select(Tenant)
 
     if search:
@@ -355,11 +425,17 @@ async def list_tenants(
         query = query.where(Tenant.plan == plan.value)
     if is_active is not None:
         query = query.where(Tenant.is_active == is_active)
+    if tenant_mode:
+        query = query.where(Tenant.tenant_mode == tenant_mode)
 
     query = query.offset(skip).limit(limit).order_by(Tenant.created_at.desc())
 
     result = await db.execute(query)
     tenants = result.scalars().all()
+
+    # Determine user's access level
+    is_superadmin = current_user.get("is_superadmin", False)
+    user_company_code = (current_user.get("company_code") or "").upper()
 
     # Get user counts for each tenant
     responses = []
@@ -370,7 +446,15 @@ async def list_tenants(
         user_count_result = await db.execute(user_count_query)
         user_count = user_count_result.scalar() or 0
 
-        responses.append(TenantResponse(
+        # Determine if this tenant is manageable by the current user
+        # SuperAdmin can manage all, Internal Admin can manage internal tenants
+        tenant_erp_code = (tenant.erp_company_code or "").upper()
+        can_manage = is_superadmin or (
+            tenant.tenant_mode == "internal" and
+            (tenant_erp_code == user_company_code or is_superadmin)
+        )
+
+        response = TenantResponse(
             id=str(tenant.id),
             name=tenant.name,
             slug=tenant.slug,
@@ -390,8 +474,14 @@ async def list_tenants(
             mail_used_mb=float(tenant.mail_used_mb or 0),
             recordings_used_mb=float(tenant.recordings_used_mb or 0),
             created_at=tenant.created_at,
-            user_count=user_count
-        ))
+            user_count=user_count,
+            # Internal/External mode info
+            tenant_mode=tenant.tenant_mode,
+            erp_company_code=tenant.erp_company_code,
+            can_manage=can_manage
+        )
+
+        responses.append(response)
 
     return responses
 
@@ -466,22 +556,38 @@ async def get_tenant(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get tenant details (authenticated users can access their own tenant)"""
-    # Check access: SuperAdmin can access any, others only their own
-    if current_user.get("role") != "SuperAdmin":
-        # First check company_code/company_id match (for internal ERP users)
-        user_company = current_user.get("company_code") or current_user.get("company_id")
-        company_match = user_company and str(tenant_id).lower() == str(user_company).lower()
+    """
+    Get tenant details.
 
-        # If no company match, check tenant_users membership (for external customers)
-        if not company_match:
-            user_id = current_user.get("id") or current_user.get("user_id")
-            if user_id:
-                tenant_info = await get_user_tenant_role(user_id, db)
-                if not tenant_info or str(tenant_info.get("tenant_id")).lower() != str(tenant_id).lower():
+    Access Control:
+    - SuperAdmin: Can access any tenant
+    - Internal Admin (BHM001-BHM008): Can view any tenant (read-only for external)
+    - External Admin: Can only access their own tenant
+    """
+    is_superadmin = current_user.get("role") == "SuperAdmin"
+    is_internal = is_internal_user(current_user)
+    user_company_code = (current_user.get("company_code") or "").upper()
+
+    # Check access permissions
+    if not is_superadmin:
+        # Internal admins can view any tenant
+        if is_internal and await is_internal_admin(current_user, db):
+            pass  # Internal admins can view all tenants
+        else:
+            # Check company_code/company_id match (for internal ERP users)
+            user_company = current_user.get("company_code") or current_user.get("company_id")
+            company_match = user_company and str(tenant_id).lower() == str(user_company).lower()
+
+            # If no company match, check tenant_users membership (for external customers)
+            if not company_match:
+                user_id = current_user.get("id") or current_user.get("user_id")
+                if user_id:
+                    tenant_info = await get_user_tenant_role(user_id, db)
+                    if not tenant_info or str(tenant_info.get("tenant_id")).lower() != str(tenant_id).lower():
+                        raise HTTPException(status_code=403, detail="Access denied to this tenant")
+                else:
                     raise HTTPException(status_code=403, detail="Access denied to this tenant")
-            else:
-                raise HTTPException(status_code=403, detail="Access denied to this tenant")
+
     resolved_id = await resolve_tenant_id(tenant_id, db)
     result = await db.execute(
         select(Tenant).where(Tenant.id == resolved_id)
@@ -495,6 +601,16 @@ async def get_tenant(
         select(func.count(TenantUser.id)).where(TenantUser.tenant_id == tenant.id)
     )
     user_count = user_count_result.scalar() or 0
+
+    # Determine if user can manage this tenant
+    tenant_erp_code = (tenant.erp_company_code or "").upper()
+    can_manage = is_superadmin or (
+        tenant.tenant_mode == "internal" and
+        (tenant_erp_code == user_company_code or is_superadmin)
+    ) or (
+        # External admin can manage their own tenant
+        not is_internal and tenant.tenant_mode == "external"
+    )
 
     return TenantResponse(
         id=str(tenant.id),
@@ -516,7 +632,10 @@ async def get_tenant(
         mail_used_mb=float(tenant.mail_used_mb or 0),
         recordings_used_mb=float(tenant.recordings_used_mb or 0),
         created_at=tenant.created_at,
-        user_count=user_count
+        user_count=user_count,
+        tenant_mode=tenant.tenant_mode,
+        erp_company_code=tenant.erp_company_code,
+        can_manage=can_manage
     )
 
 @router.patch("/tenants/{tenant_id}", response_model=TenantResponse)
@@ -635,7 +754,10 @@ async def list_tenant_users(
     limit: int = Query(50, ge=1, le=100),
     role: Optional[UserRole] = None
 ):
-    """List users in a tenant (requires authentication)"""
+    """List users in a tenant (requires authentication and tenant access)"""
+    # Validate tenant access - users can only see their own tenant's users
+    await validate_tenant_access(tenant_id, current_user, db)
+
     resolved_id = await resolve_tenant_id(tenant_id, db)
     query = select(TenantUser).where(
         TenantUser.tenant_id == resolved_id
@@ -801,7 +923,10 @@ async def get_tenant_user(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get a specific user in tenant"""
+    """Get a specific user in tenant (requires tenant access)"""
+    # Validate tenant access
+    await validate_tenant_access(tenant_id, current_user, db)
+
     resolved_id = await resolve_tenant_id(tenant_id, db)
     result = await db.execute(
         select(TenantUser).where(
@@ -941,7 +1066,10 @@ async def list_domains(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """List domains for tenant (requires authentication)"""
+    """List domains for tenant (requires tenant access)"""
+    # Validate tenant access
+    await validate_tenant_access(tenant_id, current_user, db)
+
     resolved_id = await resolve_tenant_id(tenant_id, db)
 
     result = await db.execute(
@@ -1125,7 +1253,10 @@ async def get_domain_dns_records(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get required DNS records for domain verification (requires authentication)"""
+    """Get required DNS records for domain verification (requires tenant access)"""
+    # Validate tenant access
+    await validate_tenant_access(tenant_id, current_user, db)
+
     resolved_id = await resolve_tenant_id(tenant_id, db)
     result = await db.execute(
         select(Domain).where(
@@ -1353,7 +1484,10 @@ async def get_domain(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get a specific domain details"""
+    """Get a specific domain details (requires tenant access)"""
+    # Validate tenant access
+    await validate_tenant_access(tenant_id, current_user, db)
+
     resolved_id = await resolve_tenant_id(tenant_id, db)
     result = await db.execute(
         select(Domain).where(
@@ -1484,6 +1618,9 @@ async def list_mail_domains(
     current_user: dict = Depends(get_current_user)
 ):
     """List mail domains - filtered by tenant's domains for multi-tenancy security"""
+    # Validate tenant access
+    await validate_tenant_access(tenant_id, current_user, db)
+
     resolved_id = await resolve_tenant_id(tenant_id, db)
 
     # Get tenant's domains from database first (for filtering)
@@ -1555,7 +1692,10 @@ async def list_mailboxes(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """List mailboxes via Mailcow - filtered by tenant's domains"""
+    """List mailboxes via Mailcow - filtered by tenant's domains (requires tenant access)"""
+    # Validate tenant access
+    await validate_tenant_access(tenant_id, current_user, db)
+
     # Resolve tenant ID
     resolved_id = await resolve_tenant_id(tenant_id, db)
 
@@ -1693,7 +1833,10 @@ async def get_mailbox(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get a specific mailbox details"""
+    """Get a specific mailbox details (requires tenant access)"""
+    # Validate tenant access
+    await validate_tenant_access(tenant_id, current_user, db)
+
     await resolve_tenant_id(tenant_id, db)
 
     mailbox_info = await mailcow_service.get_mailbox_info(email)
@@ -1754,6 +1897,9 @@ async def get_mail_stats(
     current_user: dict = Depends(get_current_user)
 ):
     """Get mail usage statistics - filtered by tenant's domains for multi-tenancy"""
+    # Validate tenant access
+    await validate_tenant_access(tenant_id, current_user, db)
+
     resolved_id = await resolve_tenant_id(tenant_id, db)
     tenant_result = await db.execute(
         select(Tenant).where(Tenant.id == resolved_id)
@@ -1806,7 +1952,10 @@ async def get_meet_stats(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get meeting statistics (requires authentication)"""
+    """Get meeting statistics (requires tenant access)"""
+    # Validate tenant access
+    await validate_tenant_access(tenant_id, current_user, db)
+
     resolved_id = await resolve_tenant_id(tenant_id, db)
     tenant_result = await db.execute(
         select(Tenant).where(Tenant.id == resolved_id)
@@ -1830,7 +1979,10 @@ async def get_meeting_settings(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get tenant meeting settings (requires authentication)"""
+    """Get tenant meeting settings (requires tenant access)"""
+    # Validate tenant access
+    await validate_tenant_access(tenant_id, current_user, db)
+
     resolved_id = await resolve_tenant_id(tenant_id, db)
     tenant_result = await db.execute(
         select(Tenant).where(Tenant.id == resolved_id)
@@ -1886,7 +2038,10 @@ async def get_docs_stats(
     db: AsyncSession = Depends(get_db),
     current_user: dict = Depends(get_current_user)
 ):
-    """Get document storage statistics (requires authentication)"""
+    """Get document storage statistics (requires tenant access)"""
+    # Validate tenant access
+    await validate_tenant_access(tenant_id, current_user, db)
+
     resolved_id = await resolve_tenant_id(tenant_id, db)
     tenant_result = await db.execute(
         select(Tenant).where(Tenant.id == resolved_id)
@@ -1914,7 +2069,7 @@ async def list_developers(
     """List all developers (SuperAdmin only)"""
     result = await db.execute(
         select(Developer)
-        .where(Developer.is_active == True)
+        .options(selectinload(Developer.projects))
         .offset(skip)
         .limit(limit)
         .order_by(Developer.created_at.desc())
@@ -1924,11 +2079,25 @@ async def list_developers(
     return [
         {
             "id": str(d.id),
-            "user_id": str(d.user_id),
+            "name": d.name or "",
+            "email": d.email or "",
+            "company": d.company,
+            "website": d.website,
+            "api_key": d.api_key or "",
             "role": d.role,
             "github_username": d.github_username,
             "is_active": d.is_active,
-            "created_at": d.created_at
+            "projects": [
+                {
+                    "id": str(p.id),
+                    "developer_id": str(p.developer_id),
+                    "name": p.project_name,
+                    "access_level": p.access_level,
+                    "created_at": p.granted_at.isoformat() if p.granted_at else None
+                }
+                for p in d.projects
+            ],
+            "created_at": d.created_at.isoformat() if d.created_at else None
         }
         for d in developers
     ]
@@ -1940,8 +2109,17 @@ async def create_developer(
     current_user: dict = Depends(require_superadmin())
 ):
     """Add a developer (SuperAdmin only)"""
+    import secrets
+
+    # Generate API key for the developer
+    api_key = secrets.token_urlsafe(32)
+
     new_dev = Developer(
-        user_id=uuid.UUID(developer.user_id),
+        name=developer.name,
+        email=developer.email,
+        company=developer.company,
+        website=developer.website,
+        api_key=api_key,
         role=developer.role,
         ssh_public_key=developer.ssh_public_key,
         github_username=developer.github_username
@@ -1954,17 +2132,22 @@ async def create_developer(
     await log_activity(
         db,
         action="developer_created",
-        user_id=developer.user_id,
+        user_id=current_user.get("user_id"),
         entity_type="developer",
         entity_id=str(new_dev.id),
-        description=f"Added developer with role: {developer.role}"
+        description=f"Added developer {developer.name} with role: {developer.role}"
     )
 
     return {
         "id": str(new_dev.id),
-        "user_id": str(new_dev.user_id),
+        "name": new_dev.name,
+        "email": new_dev.email,
+        "company": new_dev.company,
+        "website": new_dev.website,
+        "api_key": new_dev.api_key,
         "role": new_dev.role,
-        "created_at": new_dev.created_at
+        "is_active": new_dev.is_active,
+        "created_at": new_dev.created_at.isoformat() if new_dev.created_at else None
     }
 
 @router.post("/developers/{developer_id}/projects")
@@ -2202,7 +2385,10 @@ async def get_activity_log(
     to_date: Optional[datetime] = None,
     limit: int = Query(50, ge=1, le=200)
 ):
-    """Get activity log for tenant (requires authentication)"""
+    """Get activity log for tenant (requires tenant access)"""
+    # Validate tenant access
+    await validate_tenant_access(tenant_id, current_user, db)
+
     resolved_id = await resolve_tenant_id(tenant_id, db)
     query = select(ActivityLogModel).where(
         ActivityLogModel.tenant_id == resolved_id

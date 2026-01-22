@@ -374,3 +374,55 @@ async def check_single_service(
         "timestamp": datetime.utcnow().isoformat() + "Z",
         **result
     }
+
+
+@router.get("/health/erp-integration")
+async def check_erp_integration(
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """Check ERP and BheemPay integration status"""
+    erp_url = settings.ERP_SERVICE_URL
+    bheempay_url = getattr(settings, 'BHEEMPAY_URL', None)
+
+    erp_connected = False
+    bheempay_connected = False
+
+    async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+        # Check ERP connection
+        if erp_url:
+            try:
+                # Try multiple endpoints to check connectivity (use GET since HEAD may return 405)
+                for endpoint in [f"{erp_url}/api/v1/health", f"{erp_url}/health", erp_url]:
+                    try:
+                        response = await client.get(endpoint)
+                        # Any response < 500 means server is reachable
+                        if response.status_code < 500:
+                            erp_connected = True
+                            break
+                    except:
+                        continue
+            except:
+                erp_connected = False
+
+        # Check BheemPay connection
+        if bheempay_url:
+            try:
+                for endpoint in [f"{bheempay_url}/api/v1/health", f"{bheempay_url}/health", bheempay_url]:
+                    try:
+                        response = await client.get(endpoint)
+                        if response.status_code < 500:
+                            bheempay_connected = True
+                            break
+                    except:
+                        continue
+            except:
+                bheempay_connected = False
+
+    return {
+        "erp_connected": erp_connected,
+        "bheempay_connected": bheempay_connected,
+        "erp_url": erp_url or "",
+        "bheempay_url": bheempay_url or "",
+        "timestamp": datetime.utcnow().isoformat() + "Z"
+    }

@@ -4,9 +4,10 @@ Handles synchronization with Bheem Core ERP for internal Bheemverse tenants (BHM
 """
 from typing import Optional, List
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Header, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 
 from core.database import get_db
 from core.security import get_current_user, require_admin
@@ -55,8 +56,16 @@ class ProvisionResult(BaseModel):
 # HELPER FUNCTIONS
 # ═══════════════════════════════════════════════════════════════════
 
+def get_internal_service_with_token(request: Request, db: AsyncSession = Depends(get_db)) -> InternalWorkspaceService:
+    """Dependency to get internal workspace service with user's auth token for ERP calls"""
+    # Extract user's auth token from request
+    auth_header = request.headers.get("Authorization", "")
+    user_token = auth_header.replace("Bearer ", "") if auth_header.startswith("Bearer ") else None
+    return InternalWorkspaceService(db, user_token=user_token)
+
+
 async def get_internal_service(db: AsyncSession = Depends(get_db)) -> InternalWorkspaceService:
-    """Dependency to get internal workspace service"""
+    """Dependency to get internal workspace service (without user token - for background tasks)"""
     return InternalWorkspaceService(db)
 
 
@@ -190,7 +199,7 @@ async def sync_employees(
     background_tasks: BackgroundTasks,
     run_async: bool = False,
     tenant: dict = Depends(get_current_internal_tenant),
-    service: InternalWorkspaceService = Depends(get_internal_service),
+    service: InternalWorkspaceService = Depends(get_internal_service_with_token),
     current_user: dict = Depends(require_superadmin_or_internal_admin())
 ):
     """
@@ -228,7 +237,7 @@ async def sync_employees_for_company(
     company_code: str,
     background_tasks: BackgroundTasks,
     run_async: bool = False,
-    service: InternalWorkspaceService = Depends(get_internal_service),
+    service: InternalWorkspaceService = Depends(get_internal_service_with_token),
     current_user: dict = Depends(require_superadmin_or_internal_admin())
 ):
     """
@@ -261,7 +270,7 @@ async def sync_projects(
     background_tasks: BackgroundTasks,
     run_async: bool = False,
     tenant: dict = Depends(get_current_internal_tenant),
-    service: InternalWorkspaceService = Depends(get_internal_service),
+    service: InternalWorkspaceService = Depends(get_internal_service_with_token),
     current_user: dict = Depends(require_superadmin_or_internal_admin())
 ):
     """
@@ -288,7 +297,7 @@ async def sync_projects_for_company(
     company_code: str,
     background_tasks: BackgroundTasks,
     run_async: bool = False,
-    service: InternalWorkspaceService = Depends(get_internal_service),
+    service: InternalWorkspaceService = Depends(get_internal_service_with_token),
     current_user: dict = Depends(require_superadmin_or_internal_admin())
 ):
     """
@@ -319,7 +328,7 @@ async def sync_projects_for_company(
 async def sync_all(
     background_tasks: BackgroundTasks,
     tenant: dict = Depends(get_current_internal_tenant),
-    service: InternalWorkspaceService = Depends(get_internal_service),
+    service: InternalWorkspaceService = Depends(get_internal_service_with_token),
     current_user: dict = Depends(require_superadmin_or_internal_admin())
 ):
     """
@@ -439,3 +448,360 @@ async def get_sync_status(
         },
         "last_sync": row.last_sync.isoformat() if row and row.last_sync else None
     }
+
+
+# ═══════════════════════════════════════════════════════════════════
+# WEBHOOK ENDPOINTS (Called by ERP when employee is created/updated)
+# ═══════════════════════════════════════════════════════════════════
+
+class EmployeeWebhookPayload(BaseModel):
+    """Payload sent by ERP when employee is created/updated"""
+    event: str  # employee.created, employee.updated, employee.deleted
+    employee_id: str
+    employee_code: Optional[str] = None
+    first_name: str
+    last_name: str
+    work_email: Optional[str] = None
+    personal_email: Optional[str] = None
+    company_id: str
+    company_code: str
+    department: Optional[str] = None
+    job_title: Optional[str] = None
+    status: str = "ACTIVE"
+    user_id: Optional[str] = None  # ERP auth user ID
+
+
+class WebhookResponse(BaseModel):
+    """Response from webhook processing"""
+    success: bool
+    message: str
+    user_id: Optional[str] = None
+    email: Optional[str] = None
+    tenant_id: Optional[str] = None
+
+
+async def verify_webhook_secret(
+    x_webhook_secret: Optional[str] = None
+) -> bool:
+    """
+    Verify the webhook secret from ERP.
+    The secret should be passed in X-Webhook-Secret header.
+    """
+    from core.config import settings
+    expected_secret = getattr(settings, 'ERP_WEBHOOK_SECRET', None)
+
+    # If no secret configured, allow all requests (for development)
+    if not expected_secret:
+        return True
+
+    return x_webhook_secret == expected_secret
+
+
+@router.post("/webhook/employee", response_model=WebhookResponse)
+async def handle_employee_webhook(
+    payload: EmployeeWebhookPayload,
+    db: AsyncSession = Depends(get_db),
+    x_webhook_secret: Optional[str] = Header(None, alias="X-Webhook-Secret")
+):
+    """
+    Webhook endpoint called by ERP when an employee is created, updated, or deleted.
+
+    This automatically provisions/updates/removes workspace access for the employee
+    in the appropriate internal tenant based on their company_code.
+
+    Events:
+    - employee.created: Provision new workspace user
+    - employee.updated: Update workspace user details
+    - employee.deleted: Deactivate workspace user
+
+    Security: Requires X-Webhook-Secret header matching ERP_WEBHOOK_SECRET setting.
+    """
+    import logging
+    from uuid import UUID
+    import uuid as uuid_module
+
+    logger = logging.getLogger(__name__)
+
+    # Verify webhook secret
+    if not await verify_webhook_secret(x_webhook_secret):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid webhook secret"
+        )
+
+    company_code = payload.company_code.upper()
+
+    # Check if this is an internal company
+    if company_code not in BHEEMVERSE_COMPANY_CODES:
+        return WebhookResponse(
+            success=False,
+            message=f"Company {company_code} is not a Bheemverse subsidiary - skipping workspace provisioning"
+        )
+
+    # Find the tenant for this company
+    query = text("""
+        SELECT id, name, slug FROM workspace.tenants
+        WHERE erp_company_code = :company_code
+        LIMIT 1
+    """)
+    result = await db.execute(query, {"company_code": company_code})
+    tenant_row = result.fetchone()
+
+    if not tenant_row:
+        logger.warning(f"No tenant found for company code: {company_code}")
+        return WebhookResponse(
+            success=False,
+            message=f"No workspace tenant found for company code: {company_code}"
+        )
+
+    tenant_id = tenant_row.id
+    tenant_name = tenant_row.name
+
+    # Determine email to use (prefer work_email, fallback to personal_email)
+    email = payload.work_email or payload.personal_email
+    if not email:
+        return WebhookResponse(
+            success=False,
+            message="No email address provided for employee"
+        )
+
+    name = f"{payload.first_name} {payload.last_name}".strip()
+
+    # Map job title to role
+    role = "member"
+    if payload.job_title:
+        title_lower = payload.job_title.lower()
+        if any(x in title_lower for x in ["director", "ceo", "cto", "cfo", "coo", "head", "chief"]):
+            role = "admin"
+        elif any(x in title_lower for x in ["manager", "lead", "senior", "supervisor", "principal"]):
+            role = "manager"
+
+    try:
+        if payload.event == "employee.created":
+            # Check if user already exists
+            check_query = text("""
+                SELECT id FROM workspace.tenant_users
+                WHERE tenant_id = CAST(:tenant_id AS uuid) AND email = :email
+            """)
+            existing = await db.execute(check_query, {
+                "tenant_id": str(tenant_id),
+                "email": email
+            })
+
+            if existing.fetchone():
+                return WebhookResponse(
+                    success=True,
+                    message=f"User {email} already exists in workspace",
+                    email=email,
+                    tenant_id=str(tenant_id)
+                )
+
+            # Create new workspace user
+            # Helper to safely parse UUIDs
+            def safe_uuid(val):
+                if not val:
+                    return None
+                try:
+                    return str(uuid_module.UUID(val))
+                except (ValueError, AttributeError):
+                    return None
+
+            user_id = safe_uuid(payload.user_id) or str(uuid_module.uuid4())
+            erp_employee_id = safe_uuid(payload.employee_id)
+            erp_user_id = safe_uuid(payload.user_id)
+
+            insert_query = text("""
+                INSERT INTO workspace.tenant_users (
+                    id, tenant_id, user_id, email, name, role,
+                    erp_employee_id, erp_user_id, department, job_title,
+                    provisioned_by, is_active, created_at, updated_at
+                )
+                VALUES (
+                    gen_random_uuid(),
+                    CAST(:tenant_id AS uuid),
+                    CAST(:user_id AS uuid),
+                    :email,
+                    :name,
+                    :role,
+                    CAST(:erp_employee_id AS uuid),
+                    CAST(:erp_user_id AS uuid),
+                    :department,
+                    :job_title,
+                    'erp_hr',
+                    true,
+                    NOW(),
+                    NOW()
+                )
+                RETURNING id::text
+            """)
+
+            result = await db.execute(insert_query, {
+                "tenant_id": str(tenant_id),
+                "user_id": user_id,
+                "email": email,
+                "name": name,
+                "role": role,
+                "erp_employee_id": erp_employee_id,
+                "erp_user_id": erp_user_id,
+                "department": payload.department,
+                "job_title": payload.job_title
+            })
+            await db.commit()
+
+            row = result.fetchone()
+            logger.info(f"Created workspace user {email} in tenant {tenant_name} via ERP webhook")
+
+            return WebhookResponse(
+                success=True,
+                message=f"User {email} provisioned to workspace {tenant_name}",
+                user_id=row[0] if row else None,
+                email=email,
+                tenant_id=str(tenant_id)
+            )
+
+        elif payload.event == "employee.updated":
+            # Helper to safely parse UUIDs
+            def safe_uuid(val):
+                if not val:
+                    return None
+                try:
+                    return str(uuid_module.UUID(val))
+                except (ValueError, AttributeError):
+                    return None
+
+            erp_employee_id = safe_uuid(payload.employee_id)
+
+            # Update existing user - match by email only if employee_id is not a valid UUID
+            if erp_employee_id:
+                update_query = text("""
+                    UPDATE workspace.tenant_users
+                    SET
+                        name = :name,
+                        role = :role,
+                        department = :department,
+                        job_title = :job_title,
+                        updated_at = NOW()
+                    WHERE tenant_id = CAST(:tenant_id AS uuid)
+                      AND (email = :email OR erp_employee_id = CAST(:erp_employee_id AS uuid))
+                    RETURNING id::text
+                """)
+                params = {
+                    "tenant_id": str(tenant_id),
+                    "email": email,
+                    "name": name,
+                    "role": role,
+                    "department": payload.department,
+                    "job_title": payload.job_title,
+                    "erp_employee_id": erp_employee_id
+                }
+            else:
+                update_query = text("""
+                    UPDATE workspace.tenant_users
+                    SET
+                        name = :name,
+                        role = :role,
+                        department = :department,
+                        job_title = :job_title,
+                        updated_at = NOW()
+                    WHERE tenant_id = CAST(:tenant_id AS uuid)
+                      AND email = :email
+                    RETURNING id::text
+                """)
+                params = {
+                    "tenant_id": str(tenant_id),
+                    "email": email,
+                    "name": name,
+                    "role": role,
+                    "department": payload.department,
+                    "job_title": payload.job_title
+                }
+
+            result = await db.execute(update_query, params)
+            await db.commit()
+
+            row = result.fetchone()
+            if row:
+                logger.info(f"Updated workspace user {email} in tenant {tenant_name} via ERP webhook")
+                return WebhookResponse(
+                    success=True,
+                    message=f"User {email} updated in workspace {tenant_name}",
+                    user_id=row[0],
+                    email=email,
+                    tenant_id=str(tenant_id)
+                )
+            else:
+                return WebhookResponse(
+                    success=False,
+                    message=f"User {email} not found in workspace"
+                )
+
+        elif payload.event == "employee.deleted":
+            # Helper to safely parse UUIDs
+            def safe_uuid(val):
+                if not val:
+                    return None
+                try:
+                    return str(uuid_module.UUID(val))
+                except (ValueError, AttributeError):
+                    return None
+
+            erp_employee_id = safe_uuid(payload.employee_id)
+
+            # Deactivate user (soft delete) - match by email only if employee_id is not a valid UUID
+            if erp_employee_id:
+                deactivate_query = text("""
+                    UPDATE workspace.tenant_users
+                    SET is_active = false, updated_at = NOW()
+                    WHERE tenant_id = CAST(:tenant_id AS uuid)
+                      AND (email = :email OR erp_employee_id = CAST(:erp_employee_id AS uuid))
+                    RETURNING id::text
+                """)
+                params = {
+                    "tenant_id": str(tenant_id),
+                    "email": email,
+                    "erp_employee_id": erp_employee_id
+                }
+            else:
+                deactivate_query = text("""
+                    UPDATE workspace.tenant_users
+                    SET is_active = false, updated_at = NOW()
+                    WHERE tenant_id = CAST(:tenant_id AS uuid)
+                      AND email = :email
+                    RETURNING id::text
+                """)
+                params = {
+                    "tenant_id": str(tenant_id),
+                    "email": email
+                }
+
+            result = await db.execute(deactivate_query, params)
+            await db.commit()
+
+            row = result.fetchone()
+            if row:
+                logger.info(f"Deactivated workspace user {email} in tenant {tenant_name} via ERP webhook")
+                return WebhookResponse(
+                    success=True,
+                    message=f"User {email} deactivated in workspace {tenant_name}",
+                    user_id=row[0],
+                    email=email,
+                    tenant_id=str(tenant_id)
+                )
+            else:
+                return WebhookResponse(
+                    success=False,
+                    message=f"User {email} not found in workspace"
+                )
+
+        else:
+            return WebhookResponse(
+                success=False,
+                message=f"Unknown event type: {payload.event}"
+            )
+
+    except Exception as e:
+        logger.error(f"Error processing employee webhook: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process employee webhook: {str(e)}"
+        )

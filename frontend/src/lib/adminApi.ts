@@ -32,6 +32,10 @@ import type {
 
 // ==================== TENANTS ====================
 
+// Get current user's workspace (for external customers)
+export const getMyWorkspace = () =>
+  api.get<{ id: string; name: string; slug: string; plan: string; role: string; is_active: boolean; trial_ends_at: string | null }>('/tenants/my');
+
 export const listTenants = (params?: {
   skip?: number;
   limit?: number;
@@ -292,7 +296,7 @@ export const getSubscriptionStatus = (tenantId: string) =>
   api.get<SubscriptionStatus>(`/billing/subscription`, { params: { tenant_id: tenantId } });
 
 export const createCheckoutSession = (tenantId: string, data: CheckoutRequest) =>
-  api.post<CheckoutSession>('/billing/checkout', { ...data, tenant_id: tenantId });
+  api.post<CheckoutSession>('/billing/checkout', data);
 
 export const getCheckoutStatus = (orderId: string) =>
   api.get<{ status: string; subscription_id?: string }>(`/billing/checkout/${orderId}/status`);

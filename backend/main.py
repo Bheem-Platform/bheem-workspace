@@ -516,6 +516,14 @@ try:
 except Exception as e:
     print(f"Could not load migration router: {e}")
 
+# One-Click Migration API (Google Workspace / Microsoft 365)
+try:
+    from api.migration_v2 import router as migration_v2_router
+    app.include_router(migration_v2_router, prefix="/api/v1", tags=["One-Click Migration"])
+    logger.info("One-Click Migration API loaded", action="migration_v2_loaded")
+except Exception as e:
+    print(f"Could not load migration_v2 router: {e}")
+
 # Bulk Import API
 try:
     from api.bulk_import import router as bulk_import_router

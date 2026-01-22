@@ -14,6 +14,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
+import { BheemLogoSegmented, BheemLogoModern } from './BheemLogo';
 
 export type AppId = 'dashboard' | 'mail' | 'calendar' | 'meet' | 'docs' | 'drive';
 
@@ -97,7 +98,8 @@ export default function AppSwitcher({
 
   const handleLogout = async () => {
     await logout();
-    router.push('/login');
+    // Use window.location for full page reload to clear all state
+    window.location.href = '/login';
   };
 
   return (
@@ -109,9 +111,7 @@ export default function AppSwitcher({
       {/* Logo */}
       <div className="flex items-center h-16 px-4 border-b border-slate-800">
         <Link href="/dashboard" className="flex items-center gap-3">
-          <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-purple-600 rounded-xl flex items-center justify-center flex-shrink-0">
-            <span className="text-white font-bold text-lg">B</span>
-          </div>
+          <BheemLogoSegmented size={36} />
           {!collapsed && (
             <span className="text-white font-semibold text-lg">Bheem</span>
           )}

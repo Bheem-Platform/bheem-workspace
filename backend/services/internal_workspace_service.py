@@ -42,9 +42,14 @@ BHEEMVERSE_COMPANY_NAMES = {
 class InternalWorkspaceService:
     """Service for internal Bheemverse tenants with full ERP integration"""
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, user_token: Optional[str] = None):
         self.db = db
-        self.erp = erp_client
+        # Use user token if provided for authenticated ERP calls
+        if user_token:
+            from services.erp_client import ERPClient
+            self.erp = ERPClient(user_token=user_token)
+        else:
+            self.erp = erp_client
 
     def is_internal_company(self, company_code: str) -> bool:
         """Check if company code is a Bheemverse subsidiary"""
@@ -97,9 +102,45 @@ class InternalWorkspaceService:
 
         for emp in employees:
             try:
-                work_email = emp.get("work_email") or emp.get("email")
-                first_name = emp.get('first_name', '')
-                last_name = emp.get('last_name', '')
+                # Extract email from contacts array (ERP uses email_primary, email_secondary fields)
+                work_email = None
+                contacts = emp.get("contacts", [])
+                if isinstance(contacts, list):
+                    for contact in contacts:
+                        if isinstance(contact, dict):
+                            # ERP contact schema uses email_primary, email_secondary, phone_work etc.
+                            email = (
+                                contact.get("email_primary") or
+                                contact.get("email_secondary") or
+                                contact.get("phone_work")  # Sometimes work email is stored here
+                            )
+                            if email and "@" in str(email):
+                                work_email = email
+                                break
+
+                # Fallback to direct employee fields
+                if not work_email:
+                    work_email = (
+                        emp.get("work_email") or
+                        emp.get("email") or
+                        emp.get("email_primary") or
+                        emp.get("personal_email") or
+                        emp.get("workspace_email") or
+                        (emp.get("user", {}).get("email") if isinstance(emp.get("user"), dict) else None) or
+                        (emp.get("person", {}).get("email") if isinstance(emp.get("person"), dict) else None)
+                    )
+
+                # Get name from various possible fields
+                first_name = (
+                    emp.get('first_name') or
+                    (emp.get('person', {}).get('first_name') if isinstance(emp.get('person'), dict) else None) or
+                    (emp.get('name', '').split()[0] if emp.get('name') else '')
+                )
+                last_name = (
+                    emp.get('last_name') or
+                    (emp.get('person', {}).get('last_name') if isinstance(emp.get('person'), dict) else None) or
+                    (' '.join(emp.get('name', '').split()[1:]) if emp.get('name') else '')
+                )
 
                 # Get department and job title
                 department = emp.get("department", {})

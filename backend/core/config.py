@@ -130,6 +130,9 @@ class Settings(BaseSettings):
     BHEEMPAY_API_KEY: Optional[str] = None
     BHEEMPAY_WEBHOOK_SECRET: Optional[str] = None
 
+    # ERP Employee Webhook Secret (for receiving employee create/update/delete events)
+    ERP_WEBHOOK_SECRET: Optional[str] = None
+
     # Bheemverse Company Codes (internal mode tenants)
     BHEEMVERSE_COMPANY_CODES: str = "BHM001,BHM002,BHM003,BHM004,BHM005,BHM006,BHM007,BHM008"
 
@@ -167,6 +170,21 @@ class Settings(BaseSettings):
     ONLYOFFICE_JWT_ENABLED: bool = True  # JWT enabled
     ONLYOFFICE_JWT_HEADER: str = "Authorization"
     ONLYOFFICE_CALLBACK_URL: str = "https://workspace.bheem.cloud/api/v1/sheets"  # Callback base URL
+
+    # ============================================
+    # MIGRATION SERVICE CONFIGURATION (One-Click Migration)
+    # ============================================
+    # Google OAuth for migration (Gmail, Contacts, Drive)
+    GOOGLE_CLIENT_ID: Optional[str] = None
+    GOOGLE_CLIENT_SECRET: Optional[str] = None
+
+    # Microsoft OAuth for migration (Outlook, Contacts, OneDrive)
+    MICROSOFT_CLIENT_ID: Optional[str] = None
+    MICROSOFT_CLIENT_SECRET: Optional[str] = None
+
+    # Encryption key for storing OAuth tokens (Fernet key - 32 bytes, base64 encoded)
+    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    ENCRYPTION_KEY: str = "your-fernet-encryption-key-here"
 
     class Config:
         env_file = ".env"

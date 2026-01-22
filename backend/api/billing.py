@@ -6,7 +6,7 @@ Revenue flows to BHM001 (Bheemverse Innovation)
 from typing import Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.database import get_db
@@ -31,11 +31,19 @@ class CheckoutResponse(BaseModel):
     """Checkout session response"""
     checkout_id: Optional[str] = None
     order_id: str
-    amount: int
+    amount: float  # BheemPay returns amount as string, converted to float
     currency: str = "INR"
     plan_name: str
     key_id: str  # Razorpay public key for frontend
     gateway_response: Optional[dict] = None
+
+    @field_validator('amount', mode='before')
+    @classmethod
+    def parse_amount(cls, v):
+        """Convert string amount to float"""
+        if isinstance(v, str):
+            return float(v)
+        return v
 
 
 class CancelRequest(BaseModel):
@@ -89,14 +97,29 @@ async def get_current_tenant_id(
     """
     Get tenant ID for the current user.
     Users must be associated with a tenant to use billing.
+
+    Priority:
+    1. Find tenant via tenant_users table (works for external customers)
+    2. Fall back to company_code/company_id match (for internal employees)
     """
     from sqlalchemy import text
 
-    # Get company_id from JWT (this is the tenant's company code)
-    company_id = current_user.get("company_id")
+    # Priority 1: Find tenant where user is a member (works for external customers)
+    user_id = current_user.get("user_id") or current_user.get("sub")
+    if user_id:
+        query = text("""
+            SELECT tenant_id FROM workspace.tenant_users
+            WHERE user_id = CAST(:user_id AS uuid)
+            LIMIT 1
+        """)
+        result = await db.execute(query, {"user_id": user_id})
+        row = result.fetchone()
+        if row:
+            return row[0]
 
+    # Priority 2: Find tenant by ERP company code or ID (for internal employees)
+    company_id = current_user.get("company_id")
     if company_id:
-        # Find tenant by ERP company code or ID
         query = text("""
             SELECT id FROM workspace.tenants
             WHERE erp_company_code = :company_code
@@ -108,19 +131,6 @@ async def get_current_tenant_id(
             "company_code": current_user.get("company_code", ""),
             "company_id": company_id
         })
-        row = result.fetchone()
-        if row:
-            return row[0]
-
-    # Fallback: find tenant where user is a member
-    user_id = current_user.get("user_id") or current_user.get("sub")
-    if user_id:
-        query = text("""
-            SELECT tenant_id FROM workspace.tenant_users
-            WHERE user_id = CAST(:user_id AS uuid)
-            LIMIT 1
-        """)
-        result = await db.execute(query, {"user_id": user_id})
         row = result.fetchone()
         if row:
             return row[0]
@@ -207,16 +217,25 @@ async def create_checkout(
     Create a subscription checkout session.
     Returns Razorpay order details for the frontend to initiate payment.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+
     try:
+        logger.info(f"Creating checkout for tenant {tenant_id}, plan {request.plan_id}")
         result = await service.create_checkout_session(
             tenant_id=tenant_id,
             plan_id=request.plan_id,
             billing_cycle=request.billing_cycle
         )
+        logger.info(f"Checkout created successfully: {result.get('order_id')}")
         return CheckoutResponse(**result)
     except ValueError as e:
+        logger.error(f"Checkout validation error: {e}")
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        import traceback
+        logger.error(f"Checkout failed: {type(e).__name__}: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f"Failed to create checkout: {str(e)}")
 
 

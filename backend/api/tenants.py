@@ -13,7 +13,7 @@ from sqlalchemy import select
 from core.database import get_db
 from core.security import get_current_user
 from core.config import settings
-from models.admin_models import Tenant, TenantUser
+from models.admin_models import Tenant, TenantUser, OnboardingProgress
 from services.erp_client import erp_client
 
 router = APIRouter()
@@ -92,6 +92,15 @@ async def create_workspace(
     # Create the tenant
     trial_ends = datetime.utcnow() + timedelta(days=14) if plan == "trial" else None
 
+    # Map plan to SKU code for subscription tracking
+    plan_to_sku = {
+        "starter": "WORKSPACE-STARTER",
+        "professional": "WORKSPACE-PROFESSIONAL",
+        "enterprise": "WORKSPACE-ENTERPRISE",
+        "trial": "WORKSPACE-TRIAL",
+        "free": "WORKSPACE-FREE"
+    }
+
     new_tenant = Tenant(
         name=request.name,
         slug=request.slug,
@@ -104,7 +113,10 @@ async def create_workspace(
         mail_quota_mb=plan_config["mail_quota_mb"],
         recordings_quota_mb=plan_config["recordings_quota_mb"],
         trial_ends_at=trial_ends,
-        created_by=user_id
+        created_by=user_id,
+        # Set subscription status for billing API
+        subscription_status="active" if plan in ("starter", "free") else "trial",
+        subscription_plan=plan_to_sku.get(plan, f"WORKSPACE-{plan.upper()}")
     )
 
     db.add(new_tenant)
@@ -122,6 +134,17 @@ async def create_workspace(
     )
 
     db.add(tenant_user)
+
+    # ═══════════════════════════════════════════════════════════════════
+    # ONBOARDING: Create OnboardingProgress for new tenant
+    # ═══════════════════════════════════════════════════════════════════
+    onboarding_progress = OnboardingProgress(
+        tenant_id=new_tenant.id,
+        current_step="welcome"
+    )
+    db.add(onboarding_progress)
+    logger.info(f"Created OnboardingProgress for tenant: {new_tenant.slug}")
+
     await db.commit()
     await db.refresh(new_tenant)
 

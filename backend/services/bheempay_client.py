@@ -4,10 +4,13 @@ Handles subscription checkout and payment processing via BheemPay service
 """
 import hmac
 import hashlib
+import logging
 from typing import Optional, Dict, Any
 import httpx
 
 from core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class BheemPayClient:
@@ -25,15 +28,28 @@ class BheemPayClient:
             "Content-Type": "application/json"
         }
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.request(
-                method=method,
-                url=f"{self.base_url}/api/v1{endpoint}",
-                headers=headers,
-                **kwargs
-            )
-            response.raise_for_status()
-            return response.json()
+        url = f"{self.base_url}/api/v1{endpoint}"
+        logger.info(f"[BheemPay] {method} {url}")
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.request(
+                    method=method,
+                    url=url,
+                    headers=headers,
+                    **kwargs
+                )
+                logger.info(f"[BheemPay] Response: {response.status_code}")
+                if response.status_code >= 400:
+                    logger.error(f"[BheemPay] Error {response.status_code}: {response.text}")
+                response.raise_for_status()
+                return response.json()
+        except httpx.ConnectError as e:
+            logger.error(f"[BheemPay] Connection failed to {url}: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"[BheemPay] Request failed: {type(e).__name__}: {e}")
+            raise
 
     async def create_subscription_checkout(
         self,
@@ -77,6 +93,7 @@ class BheemPayClient:
                 "customer_email": customer_email,
                 "customer_phone": customer_phone,
                 "company_code": company_code,
+                "currency": "INR",  # Force INR for Indian payments
                 "success_url": success_url or f"{settings.WORKSPACE_URL}/billing/success",
                 "cancel_url": cancel_url or f"{settings.WORKSPACE_URL}/billing/cancel",
                 "metadata": {

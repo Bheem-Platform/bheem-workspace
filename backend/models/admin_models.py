@@ -348,7 +348,14 @@ class Developer(Base):
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    user_id = Column(UUID(as_uuid=True), nullable=False)
+    user_id = Column(UUID(as_uuid=True), nullable=True)  # Optional - can be external developer
+
+    # Developer info (for external developers without user_id)
+    name = Column(String(255))
+    email = Column(String(255))
+    company = Column(String(255))
+    website = Column(String(500))
+    api_key = Column(String(64))  # API key for external developers
 
     # Role
     role = Column(String(30), nullable=False)  # lead_developer, developer, junior_developer

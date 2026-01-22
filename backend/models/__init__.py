@@ -110,6 +110,12 @@ from .enterprise_models import (
     DLP_PREDEFINED_PATTERNS
 )
 
+from .migration_models import (
+    MigrationConnection,
+    MigrationJob,
+    Contact
+)
+
 __all__ = [
     # Admin models
     "Tenant",
@@ -191,5 +197,9 @@ __all__ = [
     "DevicePolicy",
     "AIConversation",
     "AIUsageLog",
-    "DLP_PREDEFINED_PATTERNS"
+    "DLP_PREDEFINED_PATTERNS",
+    # Migration models
+    "MigrationConnection",
+    "MigrationJob",
+    "Contact"
 ]

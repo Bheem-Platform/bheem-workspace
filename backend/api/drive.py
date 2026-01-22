@@ -66,11 +66,26 @@ async def get_user_from_token_string(token: str) -> Optional[Dict[str, Any]]:
 
 router = APIRouter(prefix="/drive", tags=["Drive"])
 
+# Main Bheem tenant for internal use (Bheemverse Innovation Company - BHM001)
+# All internal ERP users from BHM001 map to this single tenant
+MAIN_BHEEM_TENANT_ID = "79f70aef-17eb-48a8-b599-2879721e8796"
+INTERNAL_COMPANY_CODES = ["BHM001"]  # Add more subsidiary codes here if needed
+
 
 def get_user_ids(current_user: Dict[str, Any]) -> tuple:
-    """Extract tenant_id and user_id from current user context (matches forms.py pattern)"""
-    tenant_id = current_user.get("tenant_id") or current_user.get("company_id") or current_user.get("erp_company_id")
+    """Extract tenant_id and user_id from current user context.
+
+    For internal BHM001 users, always maps to the main Bheem tenant.
+    """
+    company_code = current_user.get("company_code")
     user_id = current_user.get("id") or current_user.get("user_id")
+
+    # Internal users (BHM001 and subsidiaries) always use the main Bheem tenant
+    if company_code and company_code.upper() in INTERNAL_COMPANY_CODES:
+        return MAIN_BHEEM_TENANT_ID, user_id
+
+    # External customers use their company_id as tenant_id
+    tenant_id = current_user.get("tenant_id") or current_user.get("company_id") or current_user.get("erp_company_id")
     return tenant_id, user_id
 
 
@@ -82,34 +97,20 @@ async def ensure_tenant_and_user_exist(
     user_email: str = None,
     user_name: str = None
 ):
-    """Ensure tenant and user exist in database (auto-create if needed)"""
-    # Ensure tenant exists
+    """Ensure user exists in tenant_users table. Tenant must already exist."""
+    # Verify tenant exists (NO auto-creation)
     try:
         result = await db.execute(text("""
             SELECT id FROM workspace.tenants WHERE id = CAST(:tenant_id AS uuid)
         """), {"tenant_id": tenant_id})
         if not result.fetchone():
-            org_name = f"Organization {company_code or tenant_id[:8]}"
-            await db.execute(text("""
-                INSERT INTO workspace.tenants (id, name, domain, created_at, updated_at)
-                VALUES (
-                    CAST(:tenant_id AS uuid),
-                    :name,
-                    :domain,
-                    NOW(),
-                    NOW()
-                )
-                ON CONFLICT (id) DO NOTHING
-            """), {
-                "tenant_id": tenant_id,
-                "name": org_name,
-                "domain": f"{(company_code or 'erp').lower()}.bheem.workspace"
-            })
-            await db.commit()
-            logger.info(f"Created tenant {tenant_id}")
+            logger.error(f"Tenant {tenant_id} not found. Tenants must be created manually.")
+            raise HTTPException(status_code=403, detail="Tenant not configured. Contact administrator.")
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error ensuring tenant exists: {e}")
-        await db.rollback()
+        logger.error(f"Error verifying tenant: {e}")
+        raise HTTPException(status_code=500, detail="Error verifying tenant")
 
     # Ensure user exists in tenant_users
     try:
@@ -178,6 +179,7 @@ class UpdateFileRequest(BaseModel):
 
 class MoveFileRequest(BaseModel):
     destination_folder_id: Optional[UUID] = None
+    new_parent_id: Optional[UUID] = None  # Frontend compatibility alias
 
 
 class CopyFileRequest(BaseModel):
@@ -186,8 +188,11 @@ class CopyFileRequest(BaseModel):
 
 
 class ShareFileRequest(BaseModel):
-    shared_with_email: str
+    shared_with_email: Optional[str] = None
+    user_email: Optional[str] = None  # Frontend compatibility alias
     permission: str = "view"  # view, comment, edit
+    is_link_share: bool = False
+    expires_at: Optional[datetime] = None
 
 
 class CreatePublicLinkRequest(BaseModel):
@@ -200,18 +205,32 @@ class FileResponse(BaseModel):
     id: UUID
     name: str
     file_type: str
-    mime_type: Optional[str]
-    size_bytes: Optional[int]
-    parent_id: Optional[UUID]
+    mime_type: Optional[str] = None
+    size_bytes: Optional[int] = None
+    parent_id: Optional[UUID] = None
     path: str
-    description: Optional[str]
-    is_starred: bool
-    is_trashed: bool
+    description: Optional[str] = None
+    is_starred: bool = False
+    is_trashed: bool = False
+    is_deleted: bool = False
+    thumbnail_url: Optional[str] = None
+    download_url: Optional[str] = None
+    created_by: Optional[UUID] = None
+    owner_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
     class Config:
         from_attributes = True
+
+    @property
+    def size(self) -> Optional[int]:
+        return self.size_bytes
+
+    def model_dump(self, **kwargs):
+        data = super().model_dump(**kwargs)
+        data['size'] = self.size_bytes  # Add size alias
+        return data
 
 
 class ShareResponse(BaseModel):
@@ -517,10 +536,12 @@ async def move_file(
     """Move a file to a different folder"""
     tenant_id, _ = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
+    # Use new_parent_id if destination_folder_id not provided (frontend compatibility)
+    target_folder = request.destination_folder_id or request.new_parent_id
     file = await service.move_file(
         file_id=file_id,
         tenant_id=tenant_id,
-        new_parent_id=request.destination_folder_id
+        new_parent_id=target_folder
     )
     if not file:
         raise HTTPException(status_code=404, detail="File not found")
@@ -689,26 +710,62 @@ async def empty_trash(
 # Sharing
 # =============================================
 
-@router.post("/files/{file_id}/share", response_model=ShareResponse)
+@router.post("/files/{file_id}/share")
 async def share_file(
     file_id: UUID,
     request: ShareFileRequest,
     current_user: Dict[str, Any] = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
-    """Share a file with another user"""
+    """Share a file with another user or create a public link"""
     tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
+
+    # Handle link share (public link)
+    if request.is_link_share:
+        share = await service.create_public_link(
+            file_id=file_id,
+            tenant_id=tenant_id,
+            shared_by=owner_id,
+            permission=request.permission,
+            expires_at=request.expires_at
+        )
+        if not share:
+            raise HTTPException(status_code=404, detail="File not found")
+        return {
+            "id": share.id if hasattr(share, 'id') else str(file_id),
+            "file_id": str(file_id),
+            "user_email": None,
+            "permission": request.permission,
+            "is_link_share": True,
+            "share_token": share.share_token if hasattr(share, 'share_token') else None,
+            "expires_at": request.expires_at,
+            "created_at": datetime.utcnow()
+        }
+
+    # Handle user share
+    email = request.shared_with_email or request.user_email
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required for user share")
+
     share = await service.share_file(
         file_id=file_id,
         tenant_id=tenant_id,
         shared_by=owner_id,
-        shared_with_email=request.shared_with_email,
+        shared_with_email=email,
         permission=request.permission
     )
     if not share:
         raise HTTPException(status_code=404, detail="File not found")
-    return share
+
+    return {
+        "id": str(share.id),
+        "file_id": str(file_id),
+        "user_email": email,
+        "permission": request.permission,
+        "is_link_share": False,
+        "created_at": share.created_at if hasattr(share, 'created_at') else datetime.utcnow()
+    }
 
 
 @router.get("/files/{file_id}/shares")
@@ -721,7 +778,8 @@ async def list_file_shares(
     tenant_id, _ = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     shares = await service.get_file_shares(file_id, tenant_id)
-    return {"shares": shares}
+    # Return array directly for frontend compatibility
+    return shares if isinstance(shares, list) else []
 
 
 @router.delete("/files/{file_id}/shares/{share_id}")

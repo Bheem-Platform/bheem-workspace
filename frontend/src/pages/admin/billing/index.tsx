@@ -33,13 +33,30 @@ declare global {
   }
 }
 
+// Helper to extract error message from various error formats
+const getErrorMessage = (err: any, fallback: string): string => {
+  const detail = err?.response?.data?.detail;
+  if (!detail) return fallback;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    // Pydantic validation errors are arrays of objects with msg field
+    return detail.map((e: any) => e.msg || e.message || JSON.stringify(e)).join(', ');
+  }
+  if (typeof detail === 'object') {
+    // Single validation error object
+    return detail.msg || detail.message || JSON.stringify(detail);
+  }
+  return fallback;
+};
+
 export default function BillingPage() {
-  const tenantId = useCurrentTenantId();
+  const storeTenantId = useCurrentTenantId();
   const { user } = useAuthStore();
 
   // State
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [effectiveTenantId, setEffectiveTenantId] = useState<string | null>(null);
   const [tenant, setTenant] = useState<Tenant | null>(null);
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
   const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
@@ -58,12 +75,29 @@ export default function BillingPage() {
 
   // Load data
   const loadData = useCallback(async () => {
-    if (!tenantId) return;
-
     setLoading(true);
     setError(null);
 
     try {
+      // Determine tenant ID - use store value or fetch from /tenants/my
+      let tenantId = storeTenantId;
+
+      if (!tenantId) {
+        // External customer - fetch their workspace
+        try {
+          const myWorkspace = await adminApi.getMyWorkspace();
+          tenantId = myWorkspace.data.id;
+          setEffectiveTenantId(tenantId);
+        } catch (e: any) {
+          // User doesn't have a workspace yet
+          setError('No workspace found. Please create a workspace first.');
+          setLoading(false);
+          return;
+        }
+      } else {
+        setEffectiveTenantId(tenantId);
+      }
+
       // Fetch tenant details
       const tenantRes = await adminApi.getTenant(tenantId);
       setTenant(tenantRes.data);
@@ -91,11 +125,11 @@ export default function BillingPage() {
         }
       }
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to load billing data');
+      setError(getErrorMessage(err, 'Failed to load billing data'));
     } finally {
       setLoading(false);
     }
-  }, [tenantId]);
+  }, [storeTenantId]);
 
   useEffect(() => {
     loadData();
@@ -116,14 +150,14 @@ export default function BillingPage() {
 
   // Handle checkout
   const handleCheckout = async (plan: SubscriptionPlan) => {
-    if (!tenantId) return;
+    if (!effectiveTenantId) return;
 
     setCheckoutLoading(true);
     setSelectedPlan(plan);
 
     try {
-      const response = await adminApi.createCheckoutSession(tenantId, {
-        plan_id: plan.sku_id,
+      const response = await adminApi.createCheckoutSession(effectiveTenantId, {
+        plan_id: plan.plan_id || plan.sku_code,  // Use UUID plan_id (BheemPay expects UUID)
         billing_cycle: billingCycle,
       });
 
@@ -167,7 +201,7 @@ export default function BillingPage() {
       const razorpay = new window.Razorpay(options);
       razorpay.open();
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to create checkout session');
+      setError(getErrorMessage(err, 'Failed to create checkout session'));
     } finally {
       setCheckoutLoading(false);
     }
@@ -175,24 +209,49 @@ export default function BillingPage() {
 
   // Handle cancel subscription
   const handleCancelSubscription = async () => {
-    if (!tenantId) return;
+    if (!effectiveTenantId) return;
 
     try {
-      await adminApi.cancelSubscription(tenantId, cancelReason);
+      await adminApi.cancelSubscription(effectiveTenantId, cancelReason);
       setShowCancelModal(false);
       setCancelReason('');
       await loadData();
       alert('Subscription cancellation scheduled');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to cancel subscription');
+      setError(getErrorMessage(err, 'Failed to cancel subscription'));
     }
   };
 
   // Get plan icon
-  const getPlanIcon = (skuId: string) => {
+  const getPlanIcon = (skuId: string | undefined | null) => {
+    if (!skuId) return Building2;
     if (skuId.includes('ENTERPRISE')) return Crown;
     if (skuId.includes('PROFESSIONAL')) return Zap;
     return Building2;
+  };
+
+  // Convert features object to readable array
+  const getFeaturesList = (features: any): string[] => {
+    if (!features) return [];
+    if (Array.isArray(features)) return features;
+
+    // Convert object to readable strings (support both old and ERP formats)
+    const featuresList: string[] = [];
+    if (features.max_users) featuresList.push(`${features.max_users === -1 ? 'Unlimited' : features.max_users} users`);
+    if (features.storage_gb) featuresList.push(`${features.storage_gb}GB storage`);
+    if (features.meet_hours) featuresList.push(`${features.meet_hours === -1 ? 'Unlimited' : features.meet_hours} meeting hours`);
+    if (features.ai_actions) featuresList.push(`${features.ai_actions === -1 ? 'Unlimited' : features.ai_actions} AI actions`);
+    // Support both old format (mail_enabled) and ERP format (email)
+    if (features.mail_enabled || features.email) featuresList.push('Email included');
+    if (features.docs_enabled || features.docs) featuresList.push('Docs included');
+    if (features.meet_enabled || features.meet) featuresList.push('Video meetings');
+    if (features.chat_enabled || features.chat) featuresList.push('Team chat');
+    if (features.calendar_enabled || features.calendar) featuresList.push('Calendar');
+    if (features.flow_automation) featuresList.push('Flow automation');
+    if (features.priority_support) featuresList.push('Priority support');
+    if (features.sso || features.sso_enabled) featuresList.push('SSO/SAML');
+    if (features.audit_logs) featuresList.push('Audit logs');
+    return featuresList;
   };
 
   // Format price
@@ -452,7 +511,7 @@ export default function BillingPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {plans.map((plan) => {
-              const Icon = getPlanIcon(plan.sku_id);
+              const Icon = getPlanIcon(plan.sku_code);
               const isCurrentPlan = subscription?.plan === plan.name;
               const price = billingCycle === 'annual'
                 ? Math.round((plan.offer_price || plan.base_price) * 10) // 2 months free
@@ -460,7 +519,7 @@ export default function BillingPage() {
 
               return (
                 <div
-                  key={plan.sku_id}
+                  key={plan.sku_code}
                   className={`relative rounded-xl border-2 p-6 ${
                     isCurrentPlan
                       ? 'border-blue-500 bg-blue-50'
@@ -503,7 +562,7 @@ export default function BillingPage() {
                   <p className="text-sm text-gray-500 mb-4">{plan.description}</p>
 
                   <ul className="space-y-2 mb-6">
-                    {plan.features.map((feature, idx) => (
+                    {getFeaturesList(plan.features).map((feature, idx) => (
                       <li key={idx} className="flex items-center gap-2 text-sm">
                         <Check className="h-4 w-4 text-green-500" />
                         <span className="text-gray-600">{feature}</span>
@@ -522,7 +581,7 @@ export default function BillingPage() {
                           : 'bg-blue-600 text-white hover:bg-blue-700'
                     }`}
                   >
-                    {checkoutLoading && selectedPlan?.sku_id === plan.sku_id ? (
+                    {checkoutLoading && selectedPlan?.sku_code === plan.sku_code ? (
                       <Loader2 className="h-5 w-5 animate-spin mx-auto" />
                     ) : isCurrentPlan ? (
                       'Current Plan'

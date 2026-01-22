@@ -142,11 +142,13 @@ async def get_current_user(
         user_id = payload.get("sub") or payload.get("user_id")
         if user_id:
             # Token decoded successfully with local secret
+            # Use email if available, otherwise fallback to username (which is often the email)
+            email = payload.get("email") or payload.get("username")
             return {
                 "id": user_id,
                 "user_id": user_id,
                 "username": payload.get("username"),
-                "email": payload.get("email"),
+                "email": email,
                 "role": payload.get("role"),
                 "company_id": payload.get("company_id"),
                 "company_code": payload.get("company_code"),
@@ -159,11 +161,13 @@ async def get_current_user(
 
         if passport_payload is not None:
             user_id = passport_payload.get("user_id") or passport_payload.get("sub")
+            # Use email if available, otherwise fallback to username (which is often the email)
+            email = passport_payload.get("email") or passport_payload.get("username")
             return {
                 "id": user_id,
                 "user_id": user_id,
                 "username": passport_payload.get("username"),
-                "email": passport_payload.get("email"),
+                "email": email,
                 "role": passport_payload.get("role"),
                 "company_id": passport_payload.get("company_id"),
                 "company_code": passport_payload.get("company_code"),
@@ -176,11 +180,13 @@ async def get_current_user(
 
         if user_info is not None:
             user_id = user_info.get("user_id") or user_info.get("sub")
+            # Use email if available, otherwise fallback to username (which is often the email)
+            email = user_info.get("email") or user_info.get("username")
             return {
                 "id": user_id,
                 "user_id": user_id,
                 "username": user_info.get("username"),
-                "email": user_info.get("email"),
+                "email": email,
                 "role": user_info.get("role"),
                 "company_id": user_info.get("company_id"),
                 "company_code": user_info.get("company_code"),
@@ -387,7 +393,124 @@ def require_permission(permission: str):
     return permission_checker
 
 
-async def get_user_tenant_role(user_id: str, db: AsyncSession) -> Optional[Dict[str, Any]]:
+# ═══════════════════════════════════════════════════════════════════
+# INTERNAL ADMIN ACCESS CONTROL
+# Bheemverse internal employees (BHM001-BHM008) can view all tenants
+# ═══════════════════════════════════════════════════════════════════
+
+# Bheemverse internal company codes
+BHEEMVERSE_COMPANY_CODES = {
+    "BHM001": "Bheemverse Innovation Company",
+    "BHM002": "Bheem Technologies",
+    "BHM003": "Bheem Digital Services",
+    "BHM004": "Bheem Cloud Solutions",
+    "BHM005": "Bheem AI Labs",
+    "BHM006": "Bheem Security",
+    "BHM007": "Bheem Analytics",
+    "BHM008": "Bheem Consulting"
+}
+
+
+def is_internal_user(user: Dict[str, Any]) -> bool:
+    """
+    Check if user belongs to a Bheemverse company.
+
+    All users with company_code BHM001-BHM008 can access Bheem platforms.
+    This includes both employees AND customers who use Bheem SSO.
+
+    Bheem Passport provides single sign-on across all Bheem products:
+    - ERP, Workspace, BheemFlow, etc.
+    - Access to specific features is controlled by licenses/subscriptions
+
+    Args:
+        user: User context from JWT
+
+    Returns:
+        True if user is part of Bheem ecosystem (employee or customer)
+    """
+    company_code = user.get("company_code") or user.get("company_id", "")
+    if not company_code:
+        return False
+    return str(company_code).upper() in BHEEMVERSE_COMPANY_CODES
+
+
+async def is_internal_admin(user: Dict[str, Any], db: AsyncSession) -> bool:
+    """
+    Check if user is an admin from a Bheemverse internal tenant.
+
+    Internal admins can:
+    - View ALL tenants (internal + external)
+    - Manage internal tenants they belong to
+    - View (read-only) external customer tenants
+
+    Args:
+        user: User context from JWT
+        db: Database session
+
+    Returns:
+        True if user is an internal admin
+    """
+    # Must be from internal company
+    if not is_internal_user(user):
+        return False
+
+    # Check JWT role first
+    jwt_role = user.get("role", "")
+    if jwt_role in ["SuperAdmin", "Admin"]:
+        return True
+
+    # Check tenant_users role
+    user_id = user.get("id") or user.get("user_id")
+    user_email = user.get("email")
+    if not user_id:
+        return False
+
+    tenant_info = await get_user_tenant_role(user_id, db, email=user_email)
+    if tenant_info:
+        tenant_role = tenant_info.get("tenant_role", "").lower()
+        tenant_mode = tenant_info.get("tenant_mode", "")
+        # Must be admin in an internal tenant
+        if tenant_role == "admin" and tenant_mode == "internal":
+            return True
+
+    return False
+
+
+def require_internal_admin_or_superadmin():
+    """
+    Dependency to require internal admin or SuperAdmin role.
+
+    This allows:
+    - SuperAdmin: Full access to all tenants
+    - Internal Admin: View all tenants, manage internal tenants
+
+    Usage: current_user: dict = Depends(require_internal_admin_or_superadmin())
+    """
+    async def internal_admin_checker(
+        current_user: Dict[str, Any] = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db)
+    ) -> Dict[str, Any]:
+        # SuperAdmin always passes
+        if current_user.get("role") == "SuperAdmin":
+            current_user["is_superadmin"] = True
+            current_user["is_internal_admin"] = True
+            return current_user
+
+        # Check if internal admin
+        if await is_internal_admin(current_user, db):
+            current_user["is_superadmin"] = False
+            current_user["is_internal_admin"] = True
+            return current_user
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Internal admin or SuperAdmin access required"
+        )
+
+    return internal_admin_checker
+
+
+async def get_user_tenant_role(user_id: str, db: AsyncSession, email: str = None) -> Optional[Dict[str, Any]]:
     """
     Get user's tenant role and tenant_id from tenant_users table.
     This is separate from JWT role - it's the workspace-specific role.
@@ -395,14 +518,17 @@ async def get_user_tenant_role(user_id: str, db: AsyncSession) -> Optional[Dict[
     Args:
         user_id: User ID from JWT
         db: Database session
+        email: Optional email to match (fallback if user_id doesn't match)
 
     Returns:
         Dict with tenant_id and role, or None if not found
     """
+    # First try to find by user_id
     query = text("""
         SELECT
             tu.id as tenant_user_id,
             tu.tenant_id,
+            tu.user_id,
             tu.role,
             tu.email,
             t.name as tenant_name,
@@ -411,10 +537,45 @@ async def get_user_tenant_role(user_id: str, db: AsyncSession) -> Optional[Dict[
         JOIN workspace.tenants t ON tu.tenant_id = t.id
         WHERE tu.user_id = CAST(:user_id AS uuid)
         AND t.is_suspended = false
+        AND tu.is_active = true
         LIMIT 1
     """)
     result = await db.execute(query, {"user_id": user_id})
     row = result.fetchone()
+
+    # If not found by user_id and email is provided, try matching by email
+    if not row and email:
+        email_query = text("""
+            SELECT
+                tu.id as tenant_user_id,
+                tu.tenant_id,
+                tu.user_id,
+                tu.role,
+                tu.email,
+                t.name as tenant_name,
+                t.tenant_mode
+            FROM workspace.tenant_users tu
+            JOIN workspace.tenants t ON tu.tenant_id = t.id
+            WHERE LOWER(tu.email) = LOWER(:email)
+            AND t.is_suspended = false
+            AND tu.is_active = true
+            LIMIT 1
+        """)
+        result = await db.execute(email_query, {"email": email})
+        row = result.fetchone()
+
+        # If found by email, update the user_id to match the JWT
+        if row and str(row.user_id) != user_id:
+            update_query = text("""
+                UPDATE workspace.tenant_users
+                SET user_id = CAST(:new_user_id AS uuid), updated_at = NOW()
+                WHERE id = CAST(:tenant_user_id AS uuid)
+            """)
+            await db.execute(update_query, {
+                "new_user_id": user_id,
+                "tenant_user_id": str(row.tenant_user_id)
+            })
+            await db.commit()
 
     if row:
         return {
@@ -449,14 +610,16 @@ def require_tenant_admin():
 
         # For other users (e.g., Customer), check tenant_users table
         user_id = current_user.get("id") or current_user.get("user_id")
+        user_email = current_user.get("email")
+
         if not user_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User ID not found in token"
             )
 
-        # Get tenant role from database
-        tenant_info = await get_user_tenant_role(user_id, db)
+        # Get tenant role from database (with email fallback for user_id matching)
+        tenant_info = await get_user_tenant_role(user_id, db, email=user_email)
 
         if not tenant_info:
             raise HTTPException(
@@ -494,14 +657,16 @@ def require_tenant_member():
         db: AsyncSession = Depends(get_db)
     ) -> Dict[str, Any]:
         user_id = current_user.get("id") or current_user.get("user_id")
+        user_email = current_user.get("email")
+
         if not user_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="User ID not found in token"
             )
 
-        # Get tenant role from database
-        tenant_info = await get_user_tenant_role(user_id, db)
+        # Get tenant role from database (with email fallback for user_id matching)
+        tenant_info = await get_user_tenant_role(user_id, db, email=user_email)
 
         if not tenant_info:
             raise HTTPException(

@@ -33,13 +33,14 @@ interface OnboardingStep {
 interface OnboardingProgress {
   current_step: string;
   completed: {
+    welcome: boolean;
     profile: boolean;
     domain: boolean;
     invite: boolean;
-    meeting: boolean;
-    document: boolean;
+    tour: boolean;
   };
   is_complete: boolean;
+  percent_complete: number;
 }
 
 const STEPS: OnboardingStep[] = [

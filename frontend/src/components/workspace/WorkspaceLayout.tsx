@@ -57,7 +57,8 @@ export default function WorkspaceLayout({ children, title }: WorkspaceLayoutProp
 
   const handleLogout = async () => {
     await logout();
-    router.push('/login');
+    // Use window.location for full page reload to clear all state
+    window.location.href = '/login';
   };
 
   const handleSearch = (e: React.FormEvent) => {

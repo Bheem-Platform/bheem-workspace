@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════════════
 FALLBACK_PLANS = {
     "WORKSPACE-STARTER": {
-        "plan_id": "00000000-0000-0000-0000-000000000001",
+        "plan_id": "a15aa603-b3b6-42fe-8237-a2eec5339aa4",  # Real UUID from ERP database
         "sku_code": "WORKSPACE-STARTER",
         "name": "Starter",
         "description": "For small teams getting started",
@@ -49,7 +49,7 @@ FALLBACK_PLANS = {
         }]
     },
     "WORKSPACE-PROFESSIONAL": {
-        "plan_id": "00000000-0000-0000-0000-000000000002",
+        "plan_id": "8b2eee85-e74b-4397-895a-dff7f8a098c7",  # Real UUID from ERP database
         "sku_code": "WORKSPACE-PROFESSIONAL",
         "name": "Professional",
         "description": "For growing teams",
@@ -125,18 +125,25 @@ FALLBACK_PLANS = {
 class ERPClient:
     """Client for Bheem Core ERP API interactions"""
 
-    def __init__(self):
+    def __init__(self, user_token: Optional[str] = None):
         self.base_url = settings.ERP_SERVICE_URL
         self.passport_url = getattr(settings, 'BHEEM_PASSPORT_URL', 'https://platform.bheem.co.uk')
         self._cached_token: Optional[str] = None
         self._token_expiry: Optional[datetime] = None
+        self._user_token: Optional[str] = user_token  # User's auth token for authenticated requests
 
     async def _get_service_token(self) -> str:
         """
         Get a valid service token for ERP API calls.
-        Uses Bheem Passport to authenticate with service account credentials.
-        Caches token and refreshes when expired.
+        Priority:
+        1. User token (if provided) - for user-initiated actions like sync
+        2. Service account credentials via Bheem Passport
+        3. Fallback: Generate token using shared JWT secret
         """
+        # Priority 1: Use user token if available (passed from frontend)
+        if self._user_token:
+            return self._user_token
+
         # Check if we have a valid cached token
         if self._cached_token and self._token_expiry:
             # Refresh if less than 5 minutes remaining
@@ -221,13 +228,22 @@ class ERPClient:
         }
 
         # ERP API uses /api prefix without /v1
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        # Ensure endpoint has trailing slash to avoid 307 redirects
+        if not endpoint.endswith('/') and '?' not in endpoint:
+            endpoint = f"{endpoint}/"
+
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            url = f"{self.base_url}/api{endpoint}"
+            print(f"[ERP] Request: {method} {url}")
             response = await client.request(
                 method=method,
-                url=f"{self.base_url}/api{endpoint}",
+                url=url,
                 headers=headers,
                 **kwargs
             )
+            print(f"[ERP] Response: {response.status_code}")
+            if response.status_code >= 400:
+                print(f"[ERP] Error {response.status_code}: {response.text[:1000]}")
             response.raise_for_status()
             return response.json()
 
@@ -239,7 +255,7 @@ class ERPClient:
         """
         Get available workspace subscription plans from ERP.
         Uses the UserSubscriptionService.get_available_plans() method.
-        Falls back to local FALLBACK_PLANS if ERP is unavailable.
+        Falls back to direct database query if ERP API is unavailable.
 
         Args:
             plan_prefix: SKU prefix to filter (default: WORKSPACE-)
@@ -247,6 +263,7 @@ class ERPClient:
         Returns:
             List of available plans with tiers
         """
+        # Try ERP API first
         try:
             result = await self._request(
                 "GET",
@@ -257,13 +274,112 @@ class ERPClient:
             if plans:
                 return plans
         except Exception as e:
-            logger.warning(f"ERP plans fetch failed, using fallback: {e}")
+            logger.warning(f"ERP API plans fetch failed: {e}")
 
-        # Return fallback plans if ERP unavailable or no plans found
+        # Fallback: Query ERP database directly
+        try:
+            plans = await self._fetch_plans_from_database(plan_prefix)
+            if plans:
+                logger.info(f"Fetched {len(plans)} plans from ERP database")
+                return plans
+        except Exception as e:
+            logger.warning(f"ERP database plans fetch failed: {e}")
+
+        # Final fallback to hardcoded plans
         return [
             plan for sku_code, plan in FALLBACK_PLANS.items()
             if sku_code.startswith(plan_prefix)
         ]
+
+    async def _fetch_plans_from_database(self, plan_prefix: str = "WORKSPACE-") -> list:
+        """
+        Fetch subscription plans directly from ERP database.
+
+        Args:
+            plan_prefix: SKU prefix to filter (default: WORKSPACE-)
+
+        Returns:
+            List of plans from database
+        """
+        import asyncpg
+        import asyncio
+
+        try:
+            conn = await asyncio.wait_for(
+                asyncpg.connect(
+                    host=settings.ERP_DB_HOST,
+                    port=getattr(settings, 'ERP_DB_PORT', 5432),
+                    user=getattr(settings, 'ERP_DB_USER', 'postgres'),
+                    password=getattr(settings, 'ERP_DB_PASSWORD', ''),
+                    database=settings.ERP_DB_NAME,
+                    timeout=10,
+                    command_timeout=10
+                ),
+                timeout=15
+            )
+
+            try:
+                # Only fetch SKUs that have active subscription configs (required for BheemPay checkout)
+                rows = await conn.fetch("""
+                    SELECT
+                        s.sku_id::text as plan_id,
+                        s.sku_code,
+                        s.name,
+                        s.description,
+                        COALESCE(ss.base_price, s.base_price, 0) as base_price,
+                        ss.offer_price,
+                        COALESCE(ss.billing_cycle, s.billing_type::text, 'monthly') as billing_cycle,
+                        ss.trial_period_days,
+                        st.max_users,
+                        st.max_storage_gb,
+                        st.features_included as tier_features
+                    FROM public.sku s
+                    INNER JOIN public.sku_subscriptions ss ON s.sku_id = ss.sku_id AND ss.is_active = true
+                    LEFT JOIN public.sku_subscription_tiers st ON ss.id = st.subscription_id AND st.is_active = true
+                    WHERE s.sku_code LIKE $1 AND s.status = 'ACTIVE'
+                    ORDER BY COALESCE(ss.base_price, s.base_price, 0) ASC
+                """, f"{plan_prefix}%")
+
+                plans = []
+                for row in rows:
+                    # Build features from tier_features or defaults
+                    features = {}
+                    if row['tier_features']:
+                        # Handle jsonb which comes as dict already
+                        if isinstance(row['tier_features'], dict):
+                            features = row['tier_features']
+                        elif isinstance(row['tier_features'], str):
+                            import json
+                            try:
+                                features = json.loads(row['tier_features'])
+                            except:
+                                pass
+                    if row['max_users']:
+                        features['max_users'] = row['max_users']
+                    if row['max_storage_gb']:
+                        features['storage_gb'] = row['max_storage_gb']
+
+                    plans.append({
+                        "plan_id": row['plan_id'],
+                        "sku_code": row['sku_code'],
+                        "name": row['name'],
+                        "description": row['description'] or "",
+                        "base_price": float(row['base_price']) if row['base_price'] else 0,
+                        "offer_price": float(row['offer_price']) if row['offer_price'] else None,
+                        "billing_cycle": row['billing_cycle'] or "monthly",
+                        "features": features,
+                        "trial_period_days": row['trial_period_days']
+                    })
+
+                return plans
+            finally:
+                await conn.close()
+
+        except Exception as e:
+            logger.error(f"Failed to fetch plans from ERP database: {e}")
+            raise
+
+        return []
 
     async def get_plan_details(self, sku_id: str) -> dict:
         """
@@ -298,7 +414,7 @@ class ERPClient:
     async def get_plan_by_sku_code(self, sku_code: str) -> Optional[dict]:
         """
         Look up plan by SKU code (e.g., WORKSPACE-STARTER) and return the plan_id (UUID).
-        Falls back to local FALLBACK_PLANS if ERP is unavailable.
+        Fetches dynamically from ERP database if API is unavailable.
 
         Args:
             sku_code: SKU code string (e.g., WORKSPACE-STARTER)
@@ -306,6 +422,7 @@ class ERPClient:
         Returns:
             Plan details with plan_id (UUID) or None if not found
         """
+        # Try ERP API first
         try:
             result = await self._request("GET", "/subscriptions/plans")
             plans = result.get("plans", [])
@@ -313,10 +430,79 @@ class ERPClient:
                 if plan.get("sku_code") == sku_code:
                     return plan
         except Exception as e:
-            logger.warning(f"ERP plan lookup failed, using fallback: {e}")
+            logger.warning(f"ERP API plan lookup failed: {e}")
 
-        # Return fallback plan if ERP unavailable or plan not found
+        # Fallback: Query ERP database directly for SKU UUID
+        try:
+            plan_data = await self._fetch_sku_from_database(sku_code)
+            if plan_data:
+                logger.info(f"Fetched SKU {sku_code} from ERP database: {plan_data.get('plan_id')}")
+                return plan_data
+        except Exception as e:
+            logger.warning(f"ERP database SKU lookup failed: {e}")
+
+        # Final fallback to hardcoded plans (should rarely happen)
         return FALLBACK_PLANS.get(sku_code)
+
+    async def _fetch_sku_from_database(self, sku_code: str) -> Optional[dict]:
+        """
+        Fetch SKU details directly from ERP database.
+
+        Args:
+            sku_code: SKU code string (e.g., WORKSPACE-STARTER)
+
+        Returns:
+            Plan details with plan_id (UUID) or None if not found
+        """
+        import asyncpg
+        import asyncio
+
+        try:
+            conn = await asyncio.wait_for(
+                asyncpg.connect(
+                    host=settings.ERP_DB_HOST,
+                    port=getattr(settings, 'ERP_DB_PORT', 5432),
+                    user=getattr(settings, 'ERP_DB_USER', 'postgres'),
+                    password=getattr(settings, 'ERP_DB_PASSWORD', ''),
+                    database=settings.ERP_DB_NAME,
+                    timeout=10,
+                    command_timeout=10
+                ),
+                timeout=15
+            )
+
+            try:
+                row = await conn.fetchrow("""
+                    SELECT
+                        s.sku_id::text as plan_id,
+                        s.sku_code,
+                        s.name,
+                        s.description,
+                        ss.base_price,
+                        ss.billing_cycle
+                    FROM public.sku s
+                    LEFT JOIN public.sku_subscriptions ss ON s.sku_id = ss.sku_id AND ss.is_active = true
+                    WHERE s.sku_code = $1 AND s.status = 'ACTIVE'
+                    LIMIT 1
+                """, sku_code)
+
+                if row:
+                    return {
+                        "plan_id": row['plan_id'],
+                        "sku_code": row['sku_code'],
+                        "name": row['name'],
+                        "description": row['description'],
+                        "base_price": float(row['base_price']) if row['base_price'] else 0,
+                        "billing_cycle": row['billing_cycle'] or "monthly"
+                    }
+            finally:
+                await conn.close()
+
+        except Exception as e:
+            logger.error(f"Failed to fetch SKU from ERP database: {e}")
+            raise
+
+        return None
 
     async def get_user_subscription(self, user_id: str) -> Optional[dict]:
         """
@@ -795,17 +981,53 @@ class ERPClient:
         Returns:
             List of employees
         """
-        result = await self._request(
-            "GET",
-            "/hr/employees",
-            source="internal",
-            params={
-                "company_id": company_id,
-                "status": status,
-                "limit": limit
-            }
-        )
-        return result.get("items", [])
+        # ERP uses /hr/persons/employees for listing employees
+        # The endpoint may not accept query params, so we fetch all and filter locally
+        try:
+            result = await self._request(
+                "GET",
+                "/hr/persons/employees",
+                source="internal"
+            )
+        except Exception as e:
+            # If the endpoint fails, try the alternative endpoint
+            print(f"[ERP] Primary endpoint failed: {e}, trying alternative...")
+            try:
+                result = await self._request(
+                    "GET",
+                    "/hr/employees",
+                    source="internal"
+                )
+            except Exception as e2:
+                print(f"[ERP] Alternative endpoint also failed: {e2}")
+                raise e  # Raise original error
+
+        # Handle different response formats
+        if isinstance(result, list):
+            employees = result
+        else:
+            employees = result.get("items", result.get("employees", result.get("data", [])))
+
+        # Filter by company_id and status locally if needed
+        filtered = []
+        for emp in employees:
+            emp_company = emp.get("company_id") or emp.get("company", {}).get("id")
+            emp_status = emp.get("status", "").upper()
+
+            # Match company_id
+            if company_id and emp_company and str(emp_company) != str(company_id):
+                continue
+
+            # Match status
+            if status and emp_status and emp_status != status.upper():
+                continue
+
+            filtered.append(emp)
+
+            if len(filtered) >= limit:
+                break
+
+        return filtered
 
     async def get_employee(self, employee_id: str) -> Optional[dict]:
         """
