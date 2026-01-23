@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { motion } from 'framer-motion';
 import {
   Reply,
   ReplyAll,
@@ -19,6 +20,7 @@ import {
   Sparkles,
   FileText,
   Loader2,
+  MousePointerClick,
 } from 'lucide-react';
 import * as mailApi from '@/lib/mailApi';
 import { useMailStore } from '@/stores/mailStore';
@@ -26,6 +28,14 @@ import EmptyState from '@/components/shared/EmptyState';
 import CalendarEventDetector, { ICSAttachment } from './CalendarEventDetector';
 import AttachmentPreview from './AttachmentPreview';
 import type { Email, Attachment } from '@/types/mail';
+
+// Brand Colors
+const BRAND = {
+  pink: '#FFCCF2',
+  purple: '#977DFF',
+  blue: '#0033FF',
+  gradient: 'from-[#FFCCF2] via-[#977DFF] to-[#0033FF]',
+};
 
 interface MailViewerProps {
   email: Email | null;
@@ -141,12 +151,54 @@ export default function MailViewer({ email }: MailViewerProps) {
 
   if (!email) {
     return (
-      <div className="h-full flex items-center justify-center bg-gray-50">
-        <EmptyState
-          icon={Mail}
-          title="Select an email"
-          description="Choose an email from the list to view its contents"
-        />
+      <div className="h-full w-full flex flex-col items-center justify-center bg-gray-50 p-8">
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="text-center max-w-sm"
+        >
+          {/* Icon */}
+          <motion.div
+            initial={{ scale: 0.8 }}
+            animate={{ scale: 1 }}
+            transition={{ delay: 0.1 }}
+            className={`w-20 h-20 mx-auto mb-6 rounded-2xl bg-gradient-to-br ${BRAND.gradient} flex items-center justify-center shadow-lg`}
+            style={{ boxShadow: `0 10px 30px ${BRAND.purple}30` }}
+          >
+            <Mail size={36} className="text-white" />
+          </motion.div>
+
+          {/* Title */}
+          <motion.h3
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.2 }}
+            className="text-xl font-semibold text-gray-900 mb-2"
+          >
+            Select an email
+          </motion.h3>
+
+          {/* Description */}
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.3 }}
+            className="text-gray-500 mb-6"
+          >
+            Choose an email from the list to view its contents
+          </motion.p>
+
+          {/* Hint */}
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.4 }}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-white rounded-xl border border-gray-200 text-sm text-gray-500"
+          >
+            <MousePointerClick size={16} className="text-[#977DFF]" />
+            <span>Click on an email to get started</span>
+          </motion.div>
+        </motion.div>
       </div>
     );
   }
@@ -576,7 +628,7 @@ function AttachmentCard({ attachment, onClick }: { attachment: Attachment; onCli
       </div>
       <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <button
-          className="p-1.5 text-gray-400 hover:text-orange-500"
+          className="p-1.5 text-gray-400 hover:text-[#977DFF]"
           title="Preview"
           onClick={(e) => {
             e.stopPropagation();
