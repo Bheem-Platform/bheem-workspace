@@ -2246,3 +2246,29 @@ export const aiGetStatus = async (): Promise<{
   const response = await api.get('/mail/ai/status');
   return response.data;
 };
+
+// ===========================================
+// Category Management
+// ===========================================
+
+/**
+ * Bulk categorize emails
+ */
+export const bulkCategorizeEmails = async (
+  emails: Array<{ id: string; from: string; subject: string; headers?: Record<string, string> }>
+): Promise<{ success: boolean; categorized: Record<string, string[]>; total: number }> => {
+  const response = await api.post('/mail/categories/bulk-categorize', { emails });
+  return response.data;
+};
+
+/**
+ * Get emails by category
+ */
+export const getEmailsByCategory = async (
+  category: string,
+  limit: number = 50,
+  offset: number = 0
+): Promise<{ category: string; count: number; message_ids: string[] }> => {
+  const response = await api.get(`/mail/categories/${category}`, { params: { limit, offset } });
+  return response.data;
+};

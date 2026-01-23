@@ -239,6 +239,18 @@ export const useMailStore = create<MailState>((set, get) => ({
           hasMore: response.hasMore ?? emails.length >= 50,
         },
       });
+
+      // Auto-categorize emails in the background (don't block UI)
+      if (emails.length > 0 && targetFolder === 'INBOX') {
+        const emailsToCategeorize = emails.map(e => ({
+          id: e.id,
+          from: typeof e.from === 'string' ? e.from : e.from.email,
+          subject: e.subject,
+        }));
+        mailApi.bulkCategorizeEmails(emailsToCategeorize).catch(err => {
+          console.warn('[Mail] Auto-categorization failed:', err);
+        });
+      }
     } catch (error: any) {
       const message = error.response?.data?.detail || 'Failed to fetch emails';
 
