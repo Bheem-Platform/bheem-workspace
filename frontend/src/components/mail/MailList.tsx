@@ -95,23 +95,29 @@ export default function MailList({
   const [categoryMessageIds, setCategoryMessageIds] = useState<string[]>([]);
   const [labelMessageIds, setLabelMessageIds] = useState<string[]>([]);
   const [loadingCategory, setLoadingCategory] = useState(false);
+  const [categoryFetched, setCategoryFetched] = useState(false);
+  const [labelFetched, setLabelFetched] = useState(false);
 
   // Fetch category/label message IDs when they change
   useEffect(() => {
     const fetchCategoryEmails = async () => {
       if (activeCategory && activeCategory !== 'all') {
         setLoadingCategory(true);
+        setCategoryFetched(false);
         try {
           const response = await api.get(`/mail/categories/${activeCategory}`);
           setCategoryMessageIds(response.data.message_ids || []);
+          setCategoryFetched(true);
         } catch (error) {
           console.error('Failed to fetch category emails:', error);
           setCategoryMessageIds([]);
+          setCategoryFetched(true);
         } finally {
           setLoadingCategory(false);
         }
       } else {
         setCategoryMessageIds([]);
+        setCategoryFetched(false);
       }
     };
 
@@ -122,11 +128,13 @@ export default function MailList({
         if (labelConfig?.isFolder) {
           // Folder-based labels - emails come from the folder, no API filtering needed
           setLabelMessageIds([]);
+          setLabelFetched(false);
           setLoadingCategory(false);
           return;
         }
 
         setLoadingCategory(true);
+        setLabelFetched(false);
         try {
           let response;
           if (activeLabel === 'starred') {
@@ -141,14 +149,17 @@ export default function MailList({
           } else {
             setLabelMessageIds([]);
           }
+          setLabelFetched(true);
         } catch (error) {
           console.error('Failed to fetch label emails:', error);
           setLabelMessageIds([]);
+          setLabelFetched(true);
         } finally {
           setLoadingCategory(false);
         }
       } else {
         setLabelMessageIds([]);
+        setLabelFetched(false);
       }
     };
 
@@ -172,11 +183,11 @@ export default function MailList({
     const isLabelFolderBased = activeLabel && LABEL_CONFIG[activeLabel]?.isFolder;
 
     // If label is active and NOT folder-based, filter by label message IDs
-    if (activeLabel && !isLabelFolderBased && labelMessageIds.length > 0) {
+    if (activeLabel && !isLabelFolderBased && labelFetched) {
       result = result.filter(e => labelMessageIds.includes(e.id));
     }
     // If no active label (or folder-based label), filter by category (if not 'all')
-    else if (!activeLabel && activeCategory && activeCategory !== 'all' && categoryMessageIds.length > 0) {
+    else if (!activeLabel && activeCategory && activeCategory !== 'all' && categoryFetched) {
       result = result.filter(e => categoryMessageIds.includes(e.id));
     }
     // For folder-based labels, show all emails from the current folder (no filtering)
@@ -193,7 +204,7 @@ export default function MailList({
     }
 
     return result;
-  }, [emails, activeCategory, activeLabel, categoryMessageIds, labelMessageIds, searchQuery]);
+  }, [emails, activeCategory, activeLabel, categoryMessageIds, labelMessageIds, categoryFetched, labelFetched, searchQuery]);
 
 
   const handleSelectAll = () => {
