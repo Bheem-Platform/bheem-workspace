@@ -300,7 +300,7 @@ export default function MailPage() {
           {/* Email Viewer / Conversation View */}
           <AnimatePresence mode="wait">
             {/* Desktop: Always show viewer panel */}
-            <div className="hidden lg:flex flex-1 min-w-0 h-full overflow-hidden">
+            <div className="hidden lg:block flex-1 min-w-0 h-full overflow-hidden">
               {viewMode === 'threaded' && selectedConversation ? (
                 <ConversationView
                   conversation={selectedConversation}

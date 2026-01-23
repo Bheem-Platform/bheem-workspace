@@ -151,11 +151,11 @@ export default function MailViewer({ email }: MailViewerProps) {
 
   if (!email) {
     return (
-      <div className="h-full w-full flex flex-col items-center justify-center bg-gray-50 p-8">
+      <div className="h-full w-full flex flex-col items-center justify-center bg-gray-50 p-4 sm:p-8">
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-center max-w-sm"
+          className="text-center w-full max-w-sm mx-auto"
         >
           {/* Icon */}
           <motion.div
@@ -265,7 +265,7 @@ export default function MailViewer({ email }: MailViewerProps) {
   const hasRemoteImages = email.bodyHtml?.includes('src="http');
 
   return (
-    <div className="h-full flex flex-col bg-white">
+    <div className="h-full w-full flex flex-col bg-white">
       {/* Toolbar */}
       <div className="flex-shrink-0 flex items-center justify-between px-6 py-3 border-b border-gray-200">
         <div className="flex items-center gap-1">
