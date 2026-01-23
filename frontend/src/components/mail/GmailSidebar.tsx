@@ -1,8 +1,10 @@
 /**
  * Gmail-like Mail Sidebar
  * Features: Tabs (Primary, Social, Updates), Labels, Bheem Apps section
+ * Updated with brand colors and responsive design
  */
 import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Inbox,
   Users,
@@ -24,27 +26,36 @@ import {
   RefreshCw,
   ShoppingCart,
   MessageCircle,
+  X,
 } from 'lucide-react';
 import { useMailStore } from '@/stores/mailStore';
 import { api } from '@/lib/api';
 
+// Brand Colors
+const BRAND = {
+  pink: '#FFCCF2',
+  purple: '#977DFF',
+  blue: '#0033FF',
+  gradient: 'from-[#FFCCF2] via-[#977DFF] to-[#0033FF]',
+};
+
 // Category tabs configuration
 const CATEGORY_TABS = [
-  { id: 'all', name: 'All Inboxes', icon: Inbox, color: 'text-blue-600 bg-blue-50' },
-  { id: 'primary', name: 'Primary', icon: Inbox, color: 'text-gray-700 bg-gray-50' },
-  { id: 'social', name: 'Social', icon: Users, color: 'text-pink-600 bg-pink-50' },
-  { id: 'updates', name: 'Updates', icon: Bell, color: 'text-purple-600 bg-purple-50' },
-  { id: 'promotions', name: 'Promotions', icon: Tag, color: 'text-green-600 bg-green-50' },
-  { id: 'forums', name: 'Forums', icon: MessageCircle, color: 'text-cyan-600 bg-cyan-50' },
+  { id: 'all', name: 'All Inboxes', icon: Inbox, color: 'text-[#977DFF]' },
+  { id: 'primary', name: 'Primary', icon: Inbox, color: 'text-gray-600' },
+  { id: 'social', name: 'Social', icon: Users, color: 'text-pink-500' },
+  { id: 'updates', name: 'Updates', icon: Bell, color: 'text-[#977DFF]' },
+  { id: 'promotions', name: 'Promotions', icon: Tag, color: 'text-emerald-500' },
+  { id: 'forums', name: 'Forums', icon: MessageCircle, color: 'text-cyan-500' },
 ];
 
 // Labels configuration
 const SYSTEM_LABELS = [
   { id: 'starred', name: 'Starred', icon: Star, color: 'text-amber-500' },
-  { id: 'snoozed', name: 'Snoozed', icon: Clock, color: 'text-orange-500' },
-  { id: 'important', name: 'Important', icon: AlertCircle, color: 'text-yellow-600' },
-  { id: 'purchase', name: 'Purchase', icon: ShoppingCart, color: 'text-emerald-600' },
-  { id: 'sent', name: 'Sent', icon: Send, color: 'text-blue-500' },
+  { id: 'snoozed', name: 'Snoozed', icon: Clock, color: 'text-[#977DFF]' },
+  { id: 'important', name: 'Important', icon: AlertCircle, color: 'text-yellow-500' },
+  { id: 'purchase', name: 'Purchase', icon: ShoppingCart, color: 'text-emerald-500' },
+  { id: 'sent', name: 'Sent', icon: Send, color: 'text-[#0033FF]' },
   { id: 'scheduled', name: 'Scheduled', icon: CalendarClock, color: 'text-indigo-500' },
   { id: 'outbox', name: 'Outbox', icon: Send, color: 'text-cyan-500' },
   { id: 'drafts', name: 'Drafts', icon: FileText, color: 'text-gray-500' },
@@ -69,6 +80,8 @@ interface GmailSidebarProps {
   onCategoryChange: (category: string) => void;
   activeLabel: string | null;
   onLabelChange: (label: string | null) => void;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 interface Counts {
@@ -90,6 +103,8 @@ export default function GmailSidebar({
   onCategoryChange,
   activeLabel,
   onLabelChange,
+  isOpen = true,
+  onClose,
 }: GmailSidebarProps) {
   const { folders, fetchFolders, loading, currentFolder, setCurrentFolder } = useMailStore();
   const [labelsExpanded, setLabelsExpanded] = useState(true);
@@ -133,29 +148,31 @@ export default function GmailSidebar({
     'all-mail': 'INBOX',
     'outbox': 'Outbox',
     'scheduled': 'Scheduled',
-    'purchase': 'INBOX', // Show inbox but filter by purchase category
+    'purchase': 'INBOX',
   };
 
   const handleLabelClick = (labelId: string) => {
     console.log('[GmailSidebar] Label clicked:', labelId);
 
-    // Special labels handled via API (starred, snoozed, important)
     if (['starred', 'snoozed', 'important'].includes(labelId)) {
       onLabelChange(labelId);
-      // Don't call onCategoryChange here - it will reset the label
-    }
-    // Folder-based labels (sent, drafts, spam, bin, etc.)
-    else if (labelToFolder[labelId]) {
+    } else if (labelToFolder[labelId]) {
       const folder = labelToFolder[labelId];
       console.log('[GmailSidebar] Switching to folder:', folder);
       setCurrentFolder(folder);
-      onLabelChange(labelId); // Set the label so header shows correct title
-      // Don't call onCategoryChange - it clears the label we just set
-    }
-    // Subscriptions - special handling
-    else if (labelId === 'subscriptions') {
+      onLabelChange(labelId);
+    } else if (labelId === 'subscriptions') {
       onLabelChange(labelId);
     }
+
+    // Close sidebar on mobile after selection
+    onClose?.();
+  };
+
+  const handleCategoryClick = (categoryId: string) => {
+    onCategoryChange(categoryId);
+    onLabelChange(null);
+    onClose?.();
   };
 
   // Get count for each label
@@ -168,22 +185,44 @@ export default function GmailSidebar({
       case 'drafts': return getFolderCount('drafts');
       case 'spam': return getFolderCount('spam');
       case 'bin': return getFolderCount('trash');
-      case 'scheduled': return 0; // TODO: fetch from scheduled emails
+      case 'scheduled': return 0;
       default: return 0;
     }
   };
 
-  return (
+  const sidebarContent = (
     <div className="h-full flex flex-col bg-white">
-      {/* Compose Button */}
-      <div className="p-4">
+      {/* Mobile Header */}
+      <div className="lg:hidden flex items-center justify-between px-4 py-3 border-b border-gray-200">
+        <div className="flex items-center gap-2">
+          <div className={`w-8 h-8 bg-gradient-to-br ${BRAND.gradient} rounded-lg flex items-center justify-center`}>
+            <Mail size={16} className="text-white" />
+          </div>
+          <span className="font-semibold text-gray-900">Mail</span>
+        </div>
         <button
-          onClick={onCompose}
-          className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-white border-2 border-gray-200 rounded-2xl hover:bg-gray-50 hover:border-gray-300 hover:shadow-md transition-all group"
+          onClick={onClose}
+          className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
         >
-          <Plus size={20} className="text-gray-600 group-hover:text-orange-500" />
-          <span className="font-medium text-gray-700 group-hover:text-gray-900">Compose</span>
+          <X size={20} className="text-gray-500" />
         </button>
+      </div>
+
+      {/* Compose Button */}
+      <div className="p-3 sm:p-4">
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          onClick={() => {
+            onCompose();
+            onClose?.();
+          }}
+          className={`w-full flex items-center justify-center gap-2 px-4 sm:px-6 py-3 bg-gradient-to-r ${BRAND.gradient} rounded-2xl hover:shadow-lg transition-all group text-white font-medium`}
+          style={{ boxShadow: `0 4px 15px ${BRAND.purple}40` }}
+        >
+          <Plus size={20} />
+          <span>Compose</span>
+        </motion.button>
       </div>
 
       {/* Category Tabs */}
@@ -197,30 +236,29 @@ export default function GmailSidebar({
               : counts.categories[tab.id as keyof typeof counts.categories] || 0;
 
             return (
-              <button
+              <motion.button
                 key={tab.id}
-                onClick={() => {
-                  onCategoryChange(tab.id);
-                  onLabelChange(null);
-                }}
+                whileHover={{ x: 2 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => handleCategoryClick(tab.id)}
                 className={`
-                  w-full flex items-center gap-3 px-3 py-2 rounded-r-full transition-all
+                  w-full flex items-center gap-3 px-3 py-2.5 rounded-r-full transition-all
                   ${isActive
-                    ? 'bg-orange-100 text-orange-800 font-medium'
+                    ? 'bg-gradient-to-r from-[#FFCCF2]/30 via-[#977DFF]/20 to-transparent text-gray-900 font-medium'
                     : 'text-gray-700 hover:bg-gray-100'
                   }
                 `}
               >
-                <div className={`w-6 h-6 flex items-center justify-center`}>
-                  <Icon size={18} className={isActive ? 'text-orange-600' : tab.color.split(' ')[0]} />
+                <div className="w-6 h-6 flex items-center justify-center">
+                  <Icon size={18} className={isActive ? 'text-[#977DFF]' : tab.color} />
                 </div>
                 <span className="flex-1 text-left text-sm">{tab.name}</span>
                 {count > 0 && (
-                  <span className={`text-xs font-medium ${isActive ? 'text-orange-700' : 'text-gray-500'}`}>
+                  <span className={`text-xs font-medium ${isActive ? 'text-[#977DFF]' : 'text-gray-500'}`}>
                     {count}
                   </span>
                 )}
-              </button>
+              </motion.button>
             );
           })}
         </div>
@@ -233,43 +271,54 @@ export default function GmailSidebar({
       <div className="flex-1 overflow-y-auto px-2 mail-scrollbar">
         <button
           onClick={() => setLabelsExpanded(!labelsExpanded)}
-          className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider hover:bg-gray-50 rounded-lg"
+          className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider hover:bg-gray-50 rounded-lg transition-colors"
         >
-          {labelsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          <motion.div animate={{ rotate: labelsExpanded ? 0 : -90 }} transition={{ duration: 0.2 }}>
+            <ChevronDown size={14} />
+          </motion.div>
           Labels
         </button>
 
-        {labelsExpanded && (
-          <div className="space-y-0.5 mt-1">
-            {SYSTEM_LABELS.map((label) => {
-              const Icon = label.icon;
-              const isActive = activeLabel === label.id;
-              const count = getLabelCount(label.id);
+        <AnimatePresence>
+          {labelsExpanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="space-y-0.5 mt-1 overflow-hidden"
+            >
+              {SYSTEM_LABELS.map((label) => {
+                const Icon = label.icon;
+                const isActive = activeLabel === label.id;
+                const count = getLabelCount(label.id);
 
-              return (
-                <button
-                  key={label.id}
-                  onClick={() => handleLabelClick(label.id)}
-                  className={`
-                    w-full flex items-center gap-3 px-3 py-2 rounded-r-full transition-all
-                    ${isActive
-                      ? 'bg-orange-100 text-orange-800 font-medium'
-                      : 'text-gray-600 hover:bg-gray-100'
-                    }
-                  `}
-                >
-                  <Icon size={16} className={isActive ? 'text-orange-600' : label.color} />
-                  <span className="flex-1 text-left text-sm">{label.name}</span>
-                  {count > 0 && (
-                    <span className={`text-xs ${isActive ? 'text-orange-700' : 'text-gray-400'}`}>
-                      {count}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        )}
+                return (
+                  <motion.button
+                    key={label.id}
+                    whileHover={{ x: 2 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => handleLabelClick(label.id)}
+                    className={`
+                      w-full flex items-center gap-3 px-3 py-2 rounded-r-full transition-all
+                      ${isActive
+                        ? 'bg-gradient-to-r from-[#FFCCF2]/30 via-[#977DFF]/20 to-transparent text-gray-900 font-medium'
+                        : 'text-gray-600 hover:bg-gray-100'
+                      }
+                    `}
+                  >
+                    <Icon size={16} className={isActive ? 'text-[#977DFF]' : label.color} />
+                    <span className="flex-1 text-left text-sm">{label.name}</span>
+                    {count > 0 && (
+                      <span className={`text-xs ${isActive ? 'text-[#977DFF]' : 'text-gray-400'}`}>
+                        {count}
+                      </span>
+                    )}
+                  </motion.button>
+                );
+              })}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {/* Divider */}
         <div className="my-3 mx-2 border-t border-gray-200" />
@@ -277,26 +326,36 @@ export default function GmailSidebar({
         {/* Bheem Apps Section */}
         <button
           onClick={() => setAppsExpanded(!appsExpanded)}
-          className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider hover:bg-gray-50 rounded-lg"
+          className="w-full flex items-center gap-2 px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider hover:bg-gray-50 rounded-lg transition-colors"
         >
-          {appsExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          <motion.div animate={{ rotate: appsExpanded ? 0 : -90 }} transition={{ duration: 0.2 }}>
+            <ChevronDown size={14} />
+          </motion.div>
           Bheem Apps
         </button>
 
-        {appsExpanded && (
-          <div className="space-y-0.5 mt-1">
-            {BHEEM_APPS.map((app) => (
-              <a
-                key={app.id}
-                href={app.href}
-                className="w-full flex items-center gap-3 px-3 py-2 rounded-r-full text-gray-600 hover:bg-gray-100 transition-all"
-              >
-                <span className="text-base w-6 text-center">{app.icon}</span>
-                <span className="flex-1 text-left text-sm">{app.name}</span>
-              </a>
-            ))}
-          </div>
-        )}
+        <AnimatePresence>
+          {appsExpanded && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="space-y-0.5 mt-1 overflow-hidden"
+            >
+              {BHEEM_APPS.map((app) => (
+                <motion.a
+                  key={app.id}
+                  href={app.href}
+                  whileHover={{ x: 2 }}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-r-full text-gray-600 hover:bg-gray-100 transition-all"
+                >
+                  <span className="text-base w-6 text-center">{app.icon}</span>
+                  <span className="flex-1 text-left text-sm">{app.name}</span>
+                </motion.a>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Refresh Button */}
@@ -304,12 +363,47 @@ export default function GmailSidebar({
         <button
           onClick={() => fetchFolders()}
           disabled={loading.folders}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2 text-gray-500 hover:bg-gray-100 rounded-lg transition-colors text-sm"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 text-gray-500 hover:bg-gray-100 rounded-xl transition-colors text-sm"
         >
           <RefreshCw size={14} className={loading.folders ? 'animate-spin' : ''} />
           Refresh
         </button>
       </div>
     </div>
+  );
+
+  return (
+    <>
+      {/* Desktop Sidebar */}
+      <div className="hidden lg:block h-full">
+        {sidebarContent}
+      </div>
+
+      {/* Mobile Sidebar Overlay */}
+      <AnimatePresence>
+        {isOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={onClose}
+              className="lg:hidden fixed inset-0 bg-black/50 z-40"
+            />
+            {/* Sidebar */}
+            <motion.div
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="lg:hidden fixed inset-y-0 left-0 w-72 z-50 shadow-2xl"
+            >
+              {sidebarContent}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </>
   );
 }

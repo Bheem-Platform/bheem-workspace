@@ -1,9 +1,11 @@
 /**
  * Bheem Mail - Main Page
  * Gmail-like UI with Categories, Tabs, Snooze, and more
+ * Updated with brand colors and responsive design
  */
 import { useEffect, useState, useCallback } from 'react';
 import Head from 'next/head';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useHotkeys } from 'react-hotkeys-hook';
 import WorkspaceLayout from '@/components/workspace/WorkspaceLayout';
 import MailHeader from '@/components/mail/MailHeader';
@@ -23,6 +25,14 @@ import { useRequireAuth } from '@/stores/authStore';
 import { useMailWebSocket } from '@/hooks/useMailWebSocket';
 import * as mailApi from '@/lib/mailApi';
 import type { Email } from '@/types/mail';
+
+// Brand Colors
+const BRAND = {
+  pink: '#FFCCF2',
+  purple: '#977DFF',
+  blue: '#0033FF',
+  gradient: 'from-[#FFCCF2] via-[#977DFF] to-[#0033FF]',
+};
 
 export default function MailPage() {
   const { isAuthenticated: isLoggedIn, isLoading: authLoading } = useRequireAuth();
@@ -58,6 +68,8 @@ export default function MailPage() {
   const [showSharedMailbox, setShowSharedMailbox] = useState(false);
   const [settingsTab, setSettingsTab] = useState<'labels' | 'filters' | 'signatures' | 'templates' | 'vacation'>('labels');
   const [sessionVerified, setSessionVerified] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showEmailViewer, setShowEmailViewer] = useState(false);
 
   // Gmail-like category and label state
   const [activeCategory, setActiveCategory] = useState('all');
@@ -66,14 +78,11 @@ export default function MailPage() {
   // Handle category change - fetch emails for the selected category
   const handleCategoryChange = useCallback(async (category: string, preserveLabel: boolean = false) => {
     setActiveCategory(category);
-    // Only clear label if not preserving it (e.g., when user clicks category tab directly)
     if (!preserveLabel) {
       setActiveLabel(null);
     }
     console.log('[Mail] Category changed to:', category);
 
-    // For 'all', fetch all inbox emails
-    // For specific categories, we'll filter in MailList
     if (category === 'all') {
       setCurrentFolder('INBOX');
     }
@@ -85,7 +94,6 @@ export default function MailPage() {
     setActiveLabel(label);
     if (label) {
       console.log('[Mail] Label changed to:', label);
-      // Fetch emails for the new view
       fetchEmails();
     } else {
       console.log('[Mail] Label cleared');
@@ -95,14 +103,12 @@ export default function MailPage() {
   // WebSocket for real-time updates
   const { isConnected, subscribeFolder, unsubscribeFolder } = useMailWebSocket({
     onNewEmail: (folder) => {
-      // Refresh the email list when new email arrives
       fetchEmails();
     },
     onEmailUpdated: (emailId, updateType) => {
       // Handle email updates (read status, star, etc.)
     },
     onFolderUpdated: (folder, unreadCount) => {
-      // Handle folder count updates
       fetchFolders();
     },
   });
@@ -111,20 +117,16 @@ export default function MailPage() {
   useEffect(() => {
     const verifySession = async () => {
       if (!authLoading && isLoggedIn) {
-        // Always check backend for active session first (may have been created during login)
         try {
           const status = await mailApi.getMailSessionStatus();
 
           if (status.active && status.email && status.session_id) {
-            // Backend has active session - sync with frontend store
             console.log('[Mail] Found active backend session for:', status.email);
 
-            // Update the credentials store with the session info
             const expiresAt = new Date(
               Date.now() + (status.expires_in_seconds || 86400) * 1000
             ).toISOString();
 
-            // Manually update the store state (since we're not going through createMailSession)
             useCredentialsStore.setState({
               mailSession: {
                 email: status.email,
@@ -136,20 +138,16 @@ export default function MailPage() {
               error: null,
             });
 
-            // Session is valid, fetch data
             fetchFolders();
             fetchEmails();
-            // Subscribe to INBOX for real-time updates
             subscribeFolder('INBOX');
             setShowLoginOverlay(false);
           } else {
-            // No active backend session
             console.log('[Mail] No active backend session, showing login');
             setShowLoginOverlay(true);
           }
         } catch (error) {
           console.error('[Mail] Session check failed:', error);
-          // Clear any stale frontend session and show login
           destroyMailSession();
           setShowLoginOverlay(true);
         }
@@ -167,7 +165,10 @@ export default function MailPage() {
   useHotkeys('r', () => handleReply(), { enabled: !!selectedEmail && !isComposeOpen });
   useHotkeys('s', () => selectedEmail && toggleStar(selectedEmail.id), { enabled: !!selectedEmail });
   useHotkeys('delete', () => selectedEmail && deleteEmail(selectedEmail.id), { enabled: !!selectedEmail });
-  useHotkeys('escape', () => closeCompose(), { enabled: isComposeOpen });
+  useHotkeys('escape', () => {
+    if (isComposeOpen) closeCompose();
+    else if (showEmailViewer) setShowEmailViewer(false);
+  }, { enabled: isComposeOpen || showEmailViewer });
   useHotkeys('/', () => setShowAdvancedSearch(true), { enabled: !isComposeOpen });
   useHotkeys('g+s', () => setShowSettings(true), { enabled: !isComposeOpen });
   useHotkeys('g+t', () => setShowSharedMailbox(true), { enabled: !isComposeOpen });
@@ -200,6 +201,10 @@ export default function MailPage() {
 
   const handleSelectEmail = (email: Email) => {
     selectEmail(email);
+    // On mobile, show email viewer
+    if (window.innerWidth < 1024) {
+      setShowEmailViewer(true);
+    }
   };
 
   const handleLoginSuccess = () => {
@@ -219,10 +224,17 @@ export default function MailPage() {
   // Show loading while checking auth or verifying session
   if (authLoading || (!sessionVerified && isMailAuthenticated)) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-500 mx-auto" />
-          <p className="mt-4 text-gray-600 text-sm">Verifying mail session...</p>
+          <motion.div
+            className={`w-12 h-12 rounded-full border-2 border-transparent bg-gradient-to-r ${BRAND.gradient} mx-auto mb-4`}
+            style={{ padding: '2px' }}
+            animate={{ rotate: 360 }}
+            transition={{ duration: 1.5, repeat: Infinity, ease: 'linear' }}
+          >
+            <div className="w-full h-full rounded-full bg-gray-50" />
+          </motion.div>
+          <p className="text-gray-600 text-sm">Verifying mail session...</p>
         </div>
       </div>
     );
@@ -241,6 +253,8 @@ export default function MailPage() {
       onCategoryChange={handleCategoryChange}
       activeLabel={activeLabel}
       onLabelChange={handleLabelChange}
+      isOpen={sidebarOpen}
+      onClose={() => setSidebarOpen(false)}
     />
   );
 
@@ -251,6 +265,7 @@ export default function MailPage() {
       onOpenSettings={() => setShowSettings(true)}
       onOpenSharedMailbox={() => setShowSharedMailbox(true)}
       onToggleViewMode={handleToggleViewMode}
+      onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
       viewMode={viewMode}
     />
   );
@@ -268,9 +283,12 @@ export default function MailPage() {
         customHeader={mailHeader}
       >
         {/* Main Content - Email List + Viewer */}
-        <div className="flex h-full">
-          {/* Email List */}
-          <div className="w-[400px] flex-shrink-0 bg-white border-r border-gray-200 h-full overflow-hidden">
+        <div className="flex h-full bg-gray-50">
+          {/* Email List - Full width on mobile, fixed width on desktop */}
+          <div className={`
+            ${showEmailViewer ? 'hidden lg:block' : 'w-full'}
+            lg:w-[380px] xl:w-[420px] flex-shrink-0 bg-white border-r border-gray-200 h-full overflow-hidden
+          `}>
             <MailList
               onSelectEmail={handleSelectEmail}
               selectedEmailId={selectedEmail?.id}
@@ -280,16 +298,58 @@ export default function MailPage() {
           </div>
 
           {/* Email Viewer / Conversation View */}
-          <div className="flex-1 min-w-0 bg-gray-50 h-full overflow-hidden">
-            {viewMode === 'threaded' && selectedConversation ? (
-              <ConversationView
-                conversation={selectedConversation}
-                onClose={() => selectConversation(null)}
-              />
-            ) : (
-              <MailViewer email={selectedEmail} />
+          <AnimatePresence mode="wait">
+            {/* Desktop: Always show viewer panel */}
+            <div className="hidden lg:flex flex-1 min-w-0 h-full overflow-hidden">
+              {viewMode === 'threaded' && selectedConversation ? (
+                <ConversationView
+                  conversation={selectedConversation}
+                  onClose={() => selectConversation(null)}
+                />
+              ) : (
+                <MailViewer email={selectedEmail} />
+              )}
+            </div>
+
+            {/* Mobile: Show viewer as overlay */}
+            {showEmailViewer && (
+              <motion.div
+                initial={{ x: '100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '100%' }}
+                transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                className="lg:hidden fixed inset-0 z-30 bg-white"
+              >
+                {/* Mobile viewer header */}
+                <div className="sticky top-0 z-10 bg-white border-b border-gray-200 px-4 py-3 flex items-center gap-3">
+                  <button
+                    onClick={() => setShowEmailViewer(false)}
+                    className="p-2 -ml-2 rounded-lg hover:bg-gray-100 transition-colors"
+                  >
+                    <svg className="w-5 h-5 text-gray-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                    </svg>
+                  </button>
+                  <span className="text-sm font-medium text-gray-900 truncate flex-1">
+                    {selectedEmail?.subject || 'Email'}
+                  </span>
+                </div>
+                <div className="h-[calc(100%-57px)] overflow-auto">
+                  {viewMode === 'threaded' && selectedConversation ? (
+                    <ConversationView
+                      conversation={selectedConversation}
+                      onClose={() => {
+                        selectConversation(null);
+                        setShowEmailViewer(false);
+                      }}
+                    />
+                  ) : (
+                    <MailViewer email={selectedEmail} />
+                  )}
+                </div>
+              </motion.div>
             )}
-          </div>
+          </AnimatePresence>
         </div>
 
         {/* Compose Modal */}

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search,
   ChevronDown,
@@ -24,6 +25,14 @@ import { SkeletonList } from '@/components/shared/LoadingOverlay';
 import EmptyState from '@/components/shared/EmptyState';
 import type { Email } from '@/types/mail';
 import { api } from '@/lib/api';
+
+// Brand Colors
+const BRAND = {
+  pink: '#FFCCF2',
+  purple: '#977DFF',
+  blue: '#0033FF',
+  gradient: 'from-[#FFCCF2] via-[#977DFF] to-[#0033FF]',
+};
 
 interface MailListProps {
   onSelectEmail: (email: Email) => void;
@@ -246,22 +255,29 @@ export default function MailList({
   return (
     <div className="h-full flex flex-col bg-white">
       {/* Header */}
-      <div className="flex-shrink-0 px-4 py-3 border-b border-gray-200">
+      <div className="flex-shrink-0 px-3 sm:px-4 py-3 border-b border-gray-200">
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <ViewIcon size={20} className={viewConfig.color} />
-            <h2 className="text-lg font-semibold text-gray-900">
-              {viewConfig.title}
-            </h2>
+            <div className={`w-8 h-8 rounded-lg bg-gradient-to-br ${BRAND.gradient} bg-opacity-10 flex items-center justify-center`}>
+              <ViewIcon size={16} className="text-[#977DFF]" />
+            </div>
+            <div>
+              <h2 className="text-base sm:text-lg font-semibold text-gray-900">
+                {viewConfig.title}
+              </h2>
+              <p className="text-xs text-gray-500 sm:hidden">
+                {pagination.total} emails
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-500">
+            <span className="hidden sm:block text-sm text-gray-500">
               {pagination.total} emails
             </span>
             <button
               onClick={() => fetchEmails()}
               disabled={loading.emails}
-              className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
+              className="p-2 text-gray-500 hover:text-[#977DFF] hover:bg-[#977DFF]/10 rounded-lg transition-colors"
             >
               <RefreshCw size={18} className={loading.emails ? 'animate-spin' : ''} />
             </button>
@@ -276,64 +292,71 @@ export default function MailList({
             placeholder="Search emails..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 bg-gray-100 border-0 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 focus:bg-white transition-colors"
+            className="w-full pl-10 pr-4 py-2.5 bg-gray-100 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-[#977DFF]/50 focus:bg-white focus:border-[#977DFF] transition-all"
           />
         </div>
       </div>
 
       {/* Bulk Actions Bar */}
-      {selectedEmails.length > 0 && (
-        <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-orange-50 border-b border-orange-100">
-          <button
-            onClick={handleSelectAll}
-            className="p-1.5 text-orange-600 hover:bg-orange-100 rounded"
+      <AnimatePresence>
+        {selectedEmails.length > 0 && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="flex-shrink-0 flex items-center gap-2 px-3 sm:px-4 py-2 bg-gradient-to-r from-[#FFCCF2]/20 via-[#977DFF]/10 to-transparent border-b border-[#977DFF]/20 overflow-hidden"
           >
-            {selectedEmails.length === filteredEmails.length ? (
-              <CheckSquare size={18} />
-            ) : (
-              <Square size={18} />
-            )}
-          </button>
-          <span className="text-sm font-medium text-orange-700">
-            {selectedEmails.length} selected
-          </span>
-          <div className="flex-1" />
-          <button
-            onClick={() => handleBulkMarkRead(true)}
-            className="p-1.5 text-gray-600 hover:bg-orange-100 rounded"
-            title="Mark as read"
-          >
-            <MailOpen size={18} />
-          </button>
-          <button
-            onClick={() => handleBulkMarkRead(false)}
-            className="p-1.5 text-gray-600 hover:bg-orange-100 rounded"
-            title="Mark as unread"
-          >
-            <Mail size={18} />
-          </button>
-          <button
-            onClick={handleBulkArchive}
-            className="p-1.5 text-gray-600 hover:bg-orange-100 rounded"
-            title="Archive"
-          >
-            <Archive size={18} />
-          </button>
-          <button
-            onClick={handleBulkDelete}
-            className="p-1.5 text-red-600 hover:bg-red-100 rounded"
-            title="Delete"
-          >
-            <Trash2 size={18} />
-          </button>
-          <button
-            onClick={clearSelection}
-            className="px-3 py-1 text-sm text-orange-600 hover:bg-orange-100 rounded"
-          >
-            Cancel
-          </button>
-        </div>
-      )}
+            <button
+              onClick={handleSelectAll}
+              className="p-1.5 text-[#977DFF] hover:bg-[#977DFF]/10 rounded-lg transition-colors"
+            >
+              {selectedEmails.length === filteredEmails.length ? (
+                <CheckSquare size={18} />
+              ) : (
+                <Square size={18} />
+              )}
+            </button>
+            <span className="text-sm font-medium text-[#977DFF]">
+              {selectedEmails.length} selected
+            </span>
+            <div className="flex-1" />
+            <button
+              onClick={() => handleBulkMarkRead(true)}
+              className="p-1.5 text-gray-600 hover:bg-[#977DFF]/10 rounded-lg transition-colors"
+              title="Mark as read"
+            >
+              <MailOpen size={18} />
+            </button>
+            <button
+              onClick={() => handleBulkMarkRead(false)}
+              className="p-1.5 text-gray-600 hover:bg-[#977DFF]/10 rounded-lg transition-colors"
+              title="Mark as unread"
+            >
+              <Mail size={18} />
+            </button>
+            <button
+              onClick={handleBulkArchive}
+              className="p-1.5 text-gray-600 hover:bg-[#977DFF]/10 rounded-lg transition-colors"
+              title="Archive"
+            >
+              <Archive size={18} />
+            </button>
+            <button
+              onClick={handleBulkDelete}
+              className="p-1.5 text-red-500 hover:bg-red-100 rounded-lg transition-colors"
+              title="Delete"
+            >
+              <Trash2 size={18} />
+            </button>
+            <button
+              onClick={clearSelection}
+              className="px-3 py-1 text-sm text-[#977DFF] hover:bg-[#977DFF]/10 rounded-lg transition-colors"
+            >
+              Cancel
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Email List */}
       <div className="flex-1 overflow-y-auto mail-scrollbar">
@@ -373,13 +396,15 @@ export default function MailList({
             {/* Load More */}
             {pagination.hasMore && (
               <div className="p-4 text-center">
-                <button
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
                   onClick={() => fetchEmails(currentFolder, pagination.page + 1)}
                   disabled={loading.emails}
-                  className="px-4 py-2 text-sm text-orange-600 hover:bg-orange-50 rounded-lg"
+                  className="px-4 py-2 text-sm text-[#977DFF] hover:bg-[#977DFF]/10 rounded-xl font-medium transition-colors"
                 >
                   {loading.emails ? 'Loading...' : 'Load more'}
-                </button>
+                </motion.button>
               </div>
             )}
           </div>
