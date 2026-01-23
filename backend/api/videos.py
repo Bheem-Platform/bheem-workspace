@@ -12,7 +12,7 @@ from pydantic import BaseModel
 import logging
 
 from core.database import get_db
-from core.security import get_current_user
+from core.security import get_current_user, require_tenant_member
 from core.config import settings
 from models.productivity_models import Video, VideoShare
 from services.nextcloud_service import nextcloud_service
@@ -140,9 +140,13 @@ class VideoShareCreate(BaseModel):
 
 
 def get_user_ids(current_user: Dict[str, Any]) -> tuple:
-    """Extract tenant_id and owner_id from current user"""
+    """Extract tenant_id and owner_id from current user.
+
+    owner_id should be tenant_user_id (references tenant_users.id)
+    """
     tenant_id = current_user.get("tenant_id") or current_user.get("company_id") or current_user.get("erp_company_id")
-    owner_id = current_user.get("id") or current_user.get("user_id")
+    # Use tenant_user_id for created_by (references tenant_users.id, not user_id)
+    owner_id = current_user.get("tenant_user_id") or current_user.get("id") or current_user.get("user_id")
     if not tenant_id or not owner_id:
         raise HTTPException(status_code=400, detail="User context incomplete")
     if isinstance(tenant_id, str):
@@ -174,7 +178,7 @@ async def list_videos(
     status: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db),
 ):
     """List all videos for the current user"""
@@ -203,7 +207,7 @@ async def list_videos(
 @router.post("", response_model=VideoResponse)
 async def create_video(
     video_data: VideoCreate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new video entry (placeholder for upload)"""
@@ -231,7 +235,7 @@ async def upload_video(
     file: UploadFile = File(...),
     title: str = Form(...),
     description: Optional[str] = Form(None),
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db),
 ):
     """Upload a video file to Nextcloud and create video record"""
@@ -359,7 +363,7 @@ async def upload_video(
 @router.get("/{video_id}", response_model=VideoResponse)
 async def get_video(
     video_id: UUID,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db),
 ):
     """Get a specific video"""
@@ -386,7 +390,7 @@ async def get_video(
 @router.get("/{video_id}/stream")
 async def stream_video(
     video_id: UUID,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db),
 ):
     """Stream video content from Nextcloud storage"""
@@ -446,7 +450,7 @@ async def stream_video(
 async def update_video(
     video_id: UUID,
     update_data: VideoUpdate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db),
 ):
     """Update video metadata"""
@@ -477,7 +481,7 @@ async def update_video(
 @router.delete("/{video_id}")
 async def delete_video(
     video_id: UUID,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db),
 ):
     """Soft delete a video"""
@@ -503,7 +507,7 @@ async def delete_video(
 @router.post("/{video_id}/refresh-share")
 async def refresh_share_url(
     video_id: UUID,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db),
 ):
     """Refresh/create share URL for video playback"""
@@ -542,7 +546,7 @@ async def refresh_share_url(
 @router.post("/{video_id}/star")
 async def toggle_star(
     video_id: UUID,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db),
 ):
     """Toggle star status for a video"""
@@ -569,7 +573,7 @@ async def toggle_star(
 async def share_video(
     video_id: UUID,
     share_data: VideoShareCreate,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db),
 ):
     """Share a video with another user"""
@@ -612,7 +616,7 @@ async def share_video(
 @router.get("/{video_id}/shares")
 async def get_video_shares(
     video_id: UUID,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db),
 ):
     """Get all shares for a video"""
@@ -649,7 +653,7 @@ async def get_video_shares(
 async def remove_video_share(
     video_id: UUID,
     share_id: UUID,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db),
 ):
     """Remove a share from a video"""

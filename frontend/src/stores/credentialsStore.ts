@@ -42,6 +42,7 @@ interface CredentialsState {
 
   // Mail Session Actions
   createMailSession: (email: string, password: string) => Promise<boolean>;
+  autoCreateMailSession: () => Promise<boolean>;
   refreshMailSession: () => Promise<boolean>;
   destroyMailSession: () => Promise<void>;
   checkMailSession: () => Promise<boolean>;
@@ -134,6 +135,44 @@ export const useCredentialsStore = create<CredentialsState>()(
             error.message ||
             'Failed to authenticate with mail server';
           set({ error: message, isMailAuthenticated: false });
+          return false;
+        } finally {
+          set((state) => ({ loading: { ...state.loading, mail: false } }));
+        }
+      },
+
+      autoCreateMailSession: async () => {
+        set((state) => ({
+          loading: { ...state.loading, mail: true },
+          error: null,
+        }));
+
+        try {
+          const response = await mailApi.autoCreateMailSession();
+
+          if (response.success && response.session_id) {
+            const expiresAt = new Date(
+              Date.now() + (response.expires_in_seconds || 86400) * 1000
+            ).toISOString();
+
+            set({
+              mailSession: {
+                email: response.email || '',
+                sessionId: response.session_id,
+                expiresAt,
+                active: true,
+              },
+              isMailAuthenticated: true,
+              error: null,
+            });
+
+            return true;
+          }
+
+          return false;
+        } catch (error: any) {
+          // Auto-create may fail if no stored credentials - this is expected
+          console.log('Auto-create mail session not available');
           return false;
         } finally {
           set((state) => ({ loading: { ...state.loading, mail: false } }));

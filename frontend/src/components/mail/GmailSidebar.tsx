@@ -29,6 +29,7 @@ import {
   X,
 } from 'lucide-react';
 import { useMailStore } from '@/stores/mailStore';
+import { useCredentialsStore } from '@/stores/credentialsStore';
 import { api } from '@/lib/api';
 
 // Brand Colors
@@ -116,9 +117,29 @@ export default function GmailSidebar({
     categories: { primary: 0, social: 0, updates: 0, promotions: 0, forums: 0 }
   });
 
-  // Fetch counts on mount
+  // Get mail session status and auto-create function
+  const { isMailAuthenticated, isSessionValid, autoCreateMailSession } = useCredentialsStore();
+  const hasValidSession = isMailAuthenticated && isSessionValid();
+  const [sessionChecked, setSessionChecked] = useState(false);
+
+  // Try to auto-create mail session if not authenticated
+  useEffect(() => {
+    const tryAutoCreate = async () => {
+      if (!hasValidSession && !sessionChecked) {
+        setSessionChecked(true);
+        await autoCreateMailSession();
+      }
+    };
+    tryAutoCreate();
+  }, [hasValidSession, sessionChecked, autoCreateMailSession]);
+
+  // Fetch counts on mount and poll every 30 seconds for real-time updates
   useEffect(() => {
     const fetchCounts = async () => {
+      // Only fetch if mail session is active
+      if (!hasValidSession) {
+        return;
+      }
       try {
         const response = await api.get('/mail/counts');
         setCounts(response.data);
@@ -126,8 +147,15 @@ export default function GmailSidebar({
         console.error('Failed to fetch mail counts:', error);
       }
     };
+
+    // Initial fetch
     fetchCounts();
-  }, []);
+
+    // Poll every 30 seconds for real-time updates
+    const interval = setInterval(fetchCounts, 30000);
+
+    return () => clearInterval(interval);
+  }, [hasValidSession]);
 
   // Get folder count by type
   const getFolderCount = (type: string): number => {

@@ -19,7 +19,7 @@ import uuid
 import json
 
 from core.database import get_db
-from core.security import get_current_user, require_tenant_admin
+from core.security import get_current_user, require_tenant_admin, require_tenant_member
 from core.config import settings
 from services.spreadsheet_service import SpreadsheetService, SpreadsheetMode, get_spreadsheet_service
 import logging
@@ -120,15 +120,18 @@ async def ensure_tenant_and_user_exist(db: AsyncSession, tenant_id: str, user_id
 
 
 def get_user_ids(current_user: dict) -> tuple:
-    """Extract tenant_id and user_id from current user context.
+    """Extract tenant_id and tenant_user_id from current user context.
 
     tenant_id can come from:
+    - tenant_id (workspace users - set by require_tenant_member)
     - company_id (ERP users)
     - erp_company_id (external users)
-    - tenant_id (workspace users)
+
+    user_id for created_by should be tenant_user_id (references tenant_users.id)
     """
     tenant_id = current_user.get("tenant_id") or current_user.get("company_id") or current_user.get("erp_company_id")
-    user_id = current_user.get("id") or current_user.get("user_id")
+    # Use tenant_user_id for created_by (references tenant_users.id, not user_id)
+    user_id = current_user.get("tenant_user_id") or current_user.get("id") or current_user.get("user_id")
 
     if not tenant_id or not user_id:
         raise HTTPException(
@@ -226,7 +229,7 @@ async def list_sheets(
     search: Optional[str] = Query(None),
     limit: int = Query(50, le=100),
     offset: int = Query(0),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """List spreadsheets accessible by the user"""
@@ -290,7 +293,7 @@ async def list_sheets(
 @router.post("")
 async def create_sheet(
     data: SheetCreate,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Create a new spreadsheet"""
@@ -382,7 +385,7 @@ class CreateSpreadsheetV2(BaseModel):
 @router.post("/v2", response_model=Dict[str, Any])
 async def create_spreadsheet_v2(
     data: CreateSpreadsheetV2,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -431,7 +434,7 @@ async def create_spreadsheet_v2(
 @router.get("/{sheet_id}")
 async def get_sheet(
     sheet_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get spreadsheet details with worksheets"""
@@ -499,7 +502,7 @@ async def get_sheet(
 async def update_sheet(
     sheet_id: str,
     data: SheetUpdate,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Update spreadsheet metadata"""
@@ -545,7 +548,7 @@ async def update_sheet(
 async def delete_sheet(
     sheet_id: str,
     permanent: bool = Query(False),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Delete a spreadsheet (soft delete by default)"""
@@ -591,7 +594,7 @@ async def delete_sheet(
 @router.post("/{sheet_id}/star")
 async def toggle_star(
     sheet_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Toggle star status of a spreadsheet"""
@@ -627,7 +630,7 @@ async def toggle_star(
 @router.post("/{sheet_id}/duplicate")
 async def duplicate_spreadsheet(
     sheet_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Duplicate a spreadsheet"""
@@ -709,7 +712,7 @@ async def duplicate_spreadsheet(
 async def create_worksheet(
     sheet_id: str,
     data: WorksheetCreate,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Add a new worksheet to a spreadsheet"""
@@ -766,7 +769,7 @@ async def create_worksheet(
 async def get_worksheet_data(
     sheet_id: str,
     worksheet_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get worksheet data including cells"""
@@ -809,7 +812,7 @@ async def update_cells(
     sheet_id: str,
     worksheet_id: str,
     data: BulkCellUpdate,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Update multiple cells in a worksheet"""
@@ -867,7 +870,7 @@ async def update_cells(
 async def delete_worksheet(
     sheet_id: str,
     worksheet_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Delete a worksheet"""
@@ -907,7 +910,7 @@ async def delete_worksheet(
 @router.get("/{sheet_id}/shares")
 async def get_sheet_shares(
     sheet_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get sharing settings for a spreadsheet"""
@@ -949,7 +952,7 @@ async def get_sheet_shares(
 async def share_sheet(
     sheet_id: str,
     data: ShareRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Share a spreadsheet with another user"""
@@ -1062,7 +1065,7 @@ class RestoreVersionRequest(BaseModel):
 async def get_editor_config(
     sheet_id: str,
     mode: str = Query("edit", description="Editor mode: edit, view, or review"),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -1151,7 +1154,7 @@ async def onlyoffice_callback(
 async def get_versions(
     sheet_id: str,
     limit: int = Query(20, le=100),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -1191,7 +1194,7 @@ async def get_versions(
 async def restore_version(
     sheet_id: str,
     data: RestoreVersionRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -1225,7 +1228,7 @@ async def restore_version(
 async def link_to_entity(
     sheet_id: str,
     data: EntityLinkRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -1275,7 +1278,7 @@ async def link_to_entity(
 @router.get("/{sheet_id}/download")
 async def download_spreadsheet(
     sheet_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """

@@ -9,7 +9,7 @@ Security:
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request, UploadFile, File, Form
 from pydantic import BaseModel, EmailStr
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from datetime import datetime
 from core.security import get_current_user
 from services.mailcow_service import mailcow_service
@@ -1501,3 +1501,129 @@ async def get_bheem_tele_status(
             "templates": True
         }
     }
+
+
+# ===========================================
+# Mail Counts Endpoint
+# ===========================================
+
+class MailCountsResponse(BaseModel):
+    """Response for mail counts (sidebar badges)"""
+    inbox: int = 0
+    unread: int = 0
+    starred: int = 0
+    important: int = 0
+    snoozed: int = 0
+    sent: int = 0
+    drafts: int = 0
+    trash: int = 0
+    spam: int = 0
+    categories: Dict[str, int] = {}
+
+
+def _get_folder_counts(email: str, password: str) -> Dict[str, Any]:
+    """
+    Get message counts from various mail folders via IMAP.
+    Returns counts for inbox, unread, starred, sent, drafts, trash, spam.
+    """
+    import imaplib
+
+    counts = {
+        "inbox": 0,
+        "unread": 0,
+        "starred": 0,
+        "important": 0,
+        "snoozed": 0,
+        "sent": 0,
+        "drafts": 0,
+        "trash": 0,
+        "spam": 0,
+        "categories": {
+            "primary": 0,
+            "social": 0,
+            "updates": 0,
+            "promotions": 0,
+            "forums": 0
+        }
+    }
+
+    try:
+        mail = imaplib.IMAP4_SSL(
+            mailcow_service.imap_host,
+            mailcow_service.imap_port,
+            timeout=30
+        )
+        mail.login(email, password)
+
+        # Get INBOX counts
+        status, data = mail.select("INBOX")
+        if status == "OK":
+            counts["inbox"] = int(data[0])
+
+            # Count unread messages
+            _, unread_data = mail.search(None, "UNSEEN")
+            if unread_data[0]:
+                unread_count = len(unread_data[0].split())
+                counts["unread"] = unread_count
+                # Primary category shows unread count (Gmail behavior)
+                counts["categories"]["primary"] = unread_count
+
+            # Count starred (flagged) messages
+            _, flagged_data = mail.search(None, "FLAGGED")
+            if flagged_data[0]:
+                counts["starred"] = len(flagged_data[0].split())
+
+        # Folder mappings - try different naming conventions
+        folder_mappings = {
+            "sent": ["Sent", "INBOX.Sent", "Sent Items", "Sent Messages"],
+            "drafts": ["Drafts", "INBOX.Drafts", "Draft"],
+            "trash": ["Trash", "INBOX.Trash", "Deleted Items", "Deleted"],
+            "spam": ["Spam", "INBOX.Spam", "Junk", "INBOX.Junk", "Junk E-mail"],
+            "important": ["Important", "INBOX.Important"],
+            "snoozed": ["Snoozed", "INBOX.Snoozed"]
+        }
+
+        for count_name, folder_options in folder_mappings.items():
+            for folder in folder_options:
+                try:
+                    status, data = mail.select(folder, readonly=True)
+                    if status == "OK":
+                        counts[count_name] = int(data[0])
+                        break
+                except:
+                    continue
+
+        mail.logout()
+    except Exception as e:
+        print(f"Error getting mail counts: {e}")
+
+    return counts
+
+
+@router.get("/counts", response_model=MailCountsResponse)
+@limiter.limit(RateLimits.MAIL_LIST)
+async def get_mail_counts(
+    request: Request,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get mail counts for sidebar badges.
+
+    Returns counts for inbox, unread, starred, important, snoozed,
+    sent, drafts, trash, and spam folders.
+
+    Requires an active mail session.
+    """
+    import asyncio
+
+    user_id = current_user.get("id") or current_user.get("user_id")
+    credentials = get_mail_credentials(user_id)
+
+    # Run IMAP operations in thread pool
+    loop = asyncio.get_event_loop()
+    counts = await loop.run_in_executor(
+        None,
+        lambda: _get_folder_counts(credentials["email"], credentials["password"])
+    )
+
+    return MailCountsResponse(**counts)

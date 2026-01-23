@@ -13,7 +13,7 @@ import json
 from uuid import UUID
 
 from core.database import get_db
-from core.security import get_current_user
+from core.security import get_current_user, require_tenant_member
 from core.config import settings
 import logging
 
@@ -110,9 +110,13 @@ async def ensure_tenant_and_user_exist(db: AsyncSession, tenant_id: str, user_id
 
 
 def get_user_ids(current_user: dict) -> tuple:
-    """Extract tenant_id and user_id from current user context."""
+    """Extract tenant_id and tenant_user_id from current user context.
+
+    user_id for created_by should be tenant_user_id (references tenant_users.id)
+    """
     tenant_id = current_user.get("tenant_id") or current_user.get("company_id") or current_user.get("erp_company_id")
-    user_id = current_user.get("id") or current_user.get("user_id")
+    # Use tenant_user_id for created_by (references tenant_users.id, not user_id)
+    user_id = current_user.get("tenant_user_id") or current_user.get("id") or current_user.get("user_id")
 
     if not tenant_id or not user_id:
         raise HTTPException(
@@ -191,7 +195,7 @@ async def list_presentations(
     search: Optional[str] = Query(None),
     limit: int = Query(50, le=100),
     offset: int = Query(0),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """List presentations accessible by the user"""
@@ -254,7 +258,7 @@ async def list_presentations(
 @router.post("")
 async def create_presentation(
     data: PresentationCreate,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Create a new presentation"""
@@ -333,7 +337,7 @@ async def create_presentation(
 @router.get("/{presentation_id}")
 async def get_presentation(
     presentation_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Get presentation with all slides"""
@@ -404,7 +408,7 @@ async def get_presentation(
 async def update_presentation(
     presentation_id: str,
     data: PresentationUpdate,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Update presentation metadata"""
@@ -454,7 +458,7 @@ async def update_presentation(
 async def delete_presentation(
     presentation_id: str,
     permanent: bool = Query(False),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Delete a presentation"""
@@ -494,7 +498,7 @@ async def delete_presentation(
 async def create_slide(
     presentation_id: str,
     data: SlideCreate,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Add a new slide to a presentation"""
@@ -564,7 +568,7 @@ async def update_slide(
     presentation_id: str,
     slide_id: str,
     data: SlideUpdate,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Update a slide"""
@@ -614,7 +618,7 @@ async def update_slide(
 async def delete_slide(
     presentation_id: str,
     slide_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Delete a slide"""
@@ -662,7 +666,7 @@ async def delete_slide(
 async def reorder_slides(
     presentation_id: str,
     data: SlideReorder,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """Reorder slides in a presentation"""
@@ -747,7 +751,7 @@ class CreatePresentationV2(BaseModel):
 @router.post("/v2")
 async def create_presentation_v2(
     data: CreatePresentationV2,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -792,7 +796,7 @@ async def create_presentation_v2(
 async def get_editor_config(
     presentation_id: str,
     mode: str = Query("edit", description="Editor mode: edit, view, or review"),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """
@@ -882,7 +886,7 @@ async def onlyoffice_callback(
 async def get_versions(
     presentation_id: str,
     limit: int = Query(20, le=100),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ) -> Dict[str, Any]:
     """

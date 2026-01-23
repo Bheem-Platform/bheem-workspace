@@ -168,15 +168,26 @@ export default function OnlyOfficePresentationEditor({
         ...config,
         events: {
           onReady: () => {
+            console.log('OnlyOffice onReady event fired');
             setLoading(false);
             onReady?.();
           },
           onDocumentReady: () => {
+            console.log('OnlyOffice onDocumentReady event fired');
+            // Also set loading to false here in case onReady doesn't fire
+            setLoading(false);
             onDocumentReady?.();
+          },
+          onAppReady: () => {
+            console.log('OnlyOffice onAppReady event fired');
+            // Ensure loading is set to false when app is ready
+            setLoading(false);
           },
           onError: (event: any) => {
             const errorMsg = event?.data?.errorDescription || 'Unknown editor error';
+            console.error('OnlyOffice error:', errorMsg, event);
             setError(errorMsg);
+            setLoading(false);
             onError?.(errorMsg);
           },
           onDocumentStateChange: (event: any) => {
@@ -212,8 +223,16 @@ export default function OnlyOfficePresentationEditor({
   useEffect(() => {
     initializeEditor();
 
+    // Timeout fallback - if loading doesn't complete in 15 seconds, hide loading overlay
+    // The editor may still be loading internally but we show it to the user
+    const loadingTimeout = setTimeout(() => {
+      setLoading(false);
+      console.log('OnlyOffice loading timeout - showing editor');
+    }, 15000);
+
     // Cleanup on unmount
     return () => {
+      clearTimeout(loadingTimeout);
       if (editorRef.current) {
         try {
           editorRef.current.destroyEditor();
@@ -229,14 +248,27 @@ export default function OnlyOfficePresentationEditor({
 
   // Always render the container, overlay loading/error states
   return (
-    <div className={`relative ${className}`} ref={containerRef} style={{ minHeight: 'calc(100vh - 64px)' }}>
+    <div
+      className={`relative ${className}`}
+      ref={containerRef}
+      style={{
+        height: 'calc(100vh - 64px)',
+        minHeight: 'calc(100vh - 64px)',
+        width: '100%',
+        position: 'relative',
+      }}
+    >
       {/* Editor container - always present */}
       <div
         id="onlyoffice-presentation-container"
         style={{
           width: '100%',
-          height: '100%',
-          minHeight: 'calc(100vh - 64px)',
+          height: 'calc(100vh - 64px)',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
           visibility: loading || error ? 'hidden' : 'visible',
         }}
       />

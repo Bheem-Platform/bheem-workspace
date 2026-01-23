@@ -380,7 +380,9 @@ class PresentationService:
                 "title": f"{presentation['title']}.pptx",
                 "url": download_url,
                 "permissions": {
+                    "chat": True,  # Chat permission (moved from customization)
                     "comment": True,
+                    "copy": True,
                     "download": True,
                     "edit": mode == "edit",
                     "print": True,
@@ -398,32 +400,28 @@ class PresentationService:
                 },
                 "customization": {
                     "autosave": True,
-                    "chat": True,
                     "comments": True,
                     "compactHeader": False,
                     "compactToolbar": False,
                     "feedback": False,
                     "forcesave": True,
-                    "help": False,  # Hide OnlyOffice help
+                    "help": False,
                     "hideRightMenu": False,
-                    "about": False,  # Hide OnlyOffice about dialog
-                    "logo": {
-                        "image": "https://workspace.bheem.cloud/bheem-logo.png",
-                        "imageEmbedded": "https://workspace.bheem.cloud/bheem-logo-small.png",
-                        "url": "https://workspace.bheem.cloud",
-                    },
-                    "loaderLogo": "https://workspace.bheem.cloud/bheem-logo.png",
-                    "loaderName": "Bheem Slides",
-                    "customer": {
-                        "address": "Bheem Workspace",
-                        "logo": "https://workspace.bheem.cloud/bheem-logo.png",
-                        "logoEmbedded": "https://workspace.bheem.cloud/bheem-logo-small.png",
-                        "mail": "support@bheem.cloud",
-                        "name": "Bheem Slides",
-                        "www": "https://workspace.bheem.cloud",
-                    },
                     "toolbarNoTabs": False,
                     "zoom": 100,
+                    "logo": {
+                        "image": "https://workspace.bheem.cloud/bheem-logo.svg",
+                        "imageDark": "https://workspace.bheem.cloud/bheem-logo-dark.svg",
+                        "url": "https://bheem.cloud"
+                    },
+                    "customer": {
+                        "logo": "https://workspace.bheem.cloud/bheem-logo.svg",
+                        "logoDark": "https://workspace.bheem.cloud/bheem-logo-dark.svg",
+                        "name": "Bheem Slides",
+                        "www": "https://bheem.cloud"
+                    },
+                    "loaderLogo": "https://workspace.bheem.cloud/bheem-logo.svg",
+                    "loaderName": "Bheem Slides",
                 },
             },
             "height": "100%",
@@ -507,6 +505,7 @@ class PresentationService:
 
                 storage_path = row.storage_path
                 current_version = row.version or 1
+                tenant_id = row.tenant_id
 
                 # Calculate new checksum
                 new_checksum = hashlib.sha256(new_pptx_bytes).hexdigest()
@@ -517,8 +516,8 @@ class PresentationService:
                     file=BytesIO(new_pptx_bytes),
                     filename=storage_path.split("/")[-1],
                     company_id=None,
-                    tenant_id=None,
-                    folder_path="/".join(storage_path.split("/")[:-1]),
+                    tenant_id=tenant_id,  # Use tenant_id from presentation record
+                    folder_path="presentations",
                     content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation"
                 )
 

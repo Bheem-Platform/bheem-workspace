@@ -16,7 +16,7 @@ import csv
 import io
 
 from core.database import get_db
-from core.security import get_current_user
+from core.security import get_current_user, require_tenant_member
 from core.config import settings
 from services.nextcloud_service import nextcloud_service
 from integrations.notify import notify_client
@@ -173,9 +173,13 @@ async def ensure_tenant_and_user_exist(
 
 
 def get_user_ids(current_user: dict) -> tuple:
-    """Extract tenant_id and user_id from current user context."""
+    """Extract tenant_id and tenant_user_id from current user context.
+
+    user_id for created_by should be tenant_user_id (references tenant_users.id)
+    """
     tenant_id = current_user.get("tenant_id") or current_user.get("company_id") or current_user.get("erp_company_id")
-    user_id = current_user.get("id") or current_user.get("user_id")
+    # Use tenant_user_id for created_by (references tenant_users.id, not user_id)
+    user_id = current_user.get("tenant_user_id") or current_user.get("id") or current_user.get("user_id")
     return tenant_id, user_id
 
 
@@ -306,7 +310,7 @@ class ShareRequest(BaseModel):
 @router.post("")
 async def create_form(
     data: FormCreate,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Create a new form"""
@@ -370,7 +374,7 @@ async def list_forms(
     search: Optional[str] = None,
     skip: int = 0,
     limit: int = 50,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """List all forms"""
@@ -444,7 +448,7 @@ async def list_forms(
 async def get_form(
     form_id: str,
     include_questions: bool = True,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Get a form by ID"""
@@ -453,10 +457,11 @@ async def get_form(
     result = await db.execute(text("""
         SELECT
             f.id, f.title, f.description, f.status, f.is_starred, f.folder_id,
-            f.settings, f.theme, f.response_count, f.created_at, f.updated_at,
+            f.settings, f.theme, f.created_at, f.updated_at,
             f.published_at, f.closes_at, f.created_by,
             u.name as owner_name, u.email as owner_email,
-            COALESCE(fs.permission, CASE WHEN f.created_by = CAST(:user_id AS uuid) THEN 'owner' ELSE NULL END) as permission
+            COALESCE(fs.permission, CASE WHEN f.created_by = CAST(:user_id AS uuid) THEN 'owner' ELSE NULL END) as permission,
+            (SELECT COUNT(*) FROM workspace.form_responses fr WHERE fr.form_id = f.id) as response_count
         FROM workspace.forms f
         LEFT JOIN workspace.tenant_users u ON f.created_by = u.id
         LEFT JOIN workspace.form_shares fs ON f.id = fs.form_id AND fs.user_id = CAST(:user_id AS uuid)
@@ -523,7 +528,7 @@ async def get_form(
 async def update_form(
     form_id: str,
     data: FormUpdate,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Update a form"""
@@ -577,7 +582,7 @@ async def update_form(
 async def delete_form(
     form_id: str,
     permanent: bool = False,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Delete a form (soft delete by default)"""
@@ -619,7 +624,7 @@ async def delete_form(
 @router.post("/{form_id}/restore")
 async def restore_form(
     form_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Restore a deleted form"""
@@ -645,7 +650,7 @@ async def restore_form(
 @router.post("/{form_id}/star")
 async def toggle_star(
     form_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Toggle starred status"""
@@ -682,7 +687,7 @@ async def toggle_star(
 async def duplicate_form(
     form_id: str,
     title: Optional[str] = None,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Duplicate a form"""
@@ -796,7 +801,7 @@ async def duplicate_form(
 async def publish_form(
     form_id: str,
     closes_at: Optional[str] = None,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Publish a form to accept responses"""
@@ -842,7 +847,7 @@ async def publish_form(
 @router.post("/{form_id}/close")
 async def close_form(
     form_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Close a form to stop accepting responses"""
@@ -870,7 +875,7 @@ async def close_form(
 @router.post("/{form_id}/reopen")
 async def reopen_form(
     form_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Reopen a closed form"""
@@ -903,7 +908,7 @@ async def reopen_form(
 async def add_question(
     form_id: str,
     question: QuestionCreate,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Add a question to a form"""
@@ -972,7 +977,7 @@ async def add_question(
 @router.get("/{form_id}/questions")
 async def get_questions(
     form_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Get all questions for a form"""
@@ -1014,7 +1019,7 @@ async def update_question(
     form_id: str,
     question_id: str,
     update: QuestionUpdate,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Update a question"""
@@ -1079,7 +1084,7 @@ async def update_question(
 async def delete_question(
     form_id: str,
     question_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Delete a question"""
@@ -1123,7 +1128,7 @@ async def delete_question(
 async def reorder_questions(
     form_id: str,
     question_ids: List[str],
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Reorder questions in a form"""
@@ -1237,7 +1242,7 @@ async def get_responses(
     limit: int = 50,
     sort_by: str = "submitted_at",
     sort_order: str = "desc",
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Get all responses for a form"""
@@ -1307,7 +1312,7 @@ async def get_responses(
 @router.get("/{form_id}/responses/summary")
 async def get_response_summary(
     form_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Get summary statistics for form responses"""
@@ -1395,7 +1400,7 @@ async def get_response_summary(
 async def export_responses(
     form_id: str,
     format: str = "csv",
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Export form responses"""
@@ -1467,7 +1472,7 @@ async def export_responses(
 async def get_response(
     form_id: str,
     response_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Get a specific response"""
@@ -1523,7 +1528,7 @@ async def get_response(
 async def delete_response(
     form_id: str,
     response_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Delete a response"""
@@ -1560,7 +1565,7 @@ async def delete_response(
 async def share_form(
     form_id: str,
     share: ShareRequest,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Share a form with a user (internal or external)"""
@@ -1715,7 +1720,7 @@ async def share_form(
 @router.get("/{form_id}/shares")
 async def get_shares(
     form_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Get all shares for a form (internal and external)"""
@@ -1785,7 +1790,7 @@ async def update_share(
     form_id: str,
     share_id: str,
     permission: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Update share permission"""
@@ -1820,7 +1825,7 @@ async def update_share(
 async def remove_share(
     form_id: str,
     share_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Remove a share"""
@@ -2014,7 +2019,7 @@ async def upload_response_file(
     response_id: str,
     question_id: str = Form(...),
     file: UploadFile = File(...),
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Upload a file for a form response question to Nextcloud"""
@@ -2278,7 +2283,7 @@ async def export_responses_to_nextcloud(
     form_id: str,
     format: str = "csv",
     folder_path: Optional[str] = None,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Export form responses to Nextcloud as CSV or Excel"""
@@ -2414,7 +2419,7 @@ async def export_responses_to_nextcloud(
 @router.post("/{form_id}/sync-to-drive")
 async def sync_form_to_drive(
     form_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """Create a link to this form in Bheem Drive (like Google Forms in Drive)"""
@@ -2479,7 +2484,7 @@ async def sync_form_to_drive(
 @router.get("/{form_id}/files")
 async def list_form_files(
     form_id: str,
-    current_user: dict = Depends(get_current_user),
+    current_user: dict = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db)
 ):
     """List all files uploaded through this form from Nextcloud"""

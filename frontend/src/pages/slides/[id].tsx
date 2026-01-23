@@ -2,7 +2,7 @@
  * Bheem Slides - Presentation Editor
  * Full PowerPoint-compatible editing with OnlyOffice
  */
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Link from 'next/link';
@@ -46,16 +46,27 @@ export default function PresentationEditorPage() {
   const [editorReady, setEditorReady] = useState(false);
   const [showVersions, setShowVersions] = useState(false);
 
-  const fetchPresentation = useCallback(async () => {
+  const fetchPresentation = useCallback(async (showLoading = true) => {
     if (!id) return;
     try {
-      setLoading(true);
+      if (showLoading) setLoading(true);
       const response = await api.get(`/slides/${id}`);
       setPresentation(response.data);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to load presentation');
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
+    }
+  }, [id]);
+
+  // Refresh metadata without showing loading spinner (used for auto-save updates)
+  const refreshMetadata = useCallback(async () => {
+    if (!id) return;
+    try {
+      const response = await api.get(`/slides/${id}`);
+      setPresentation(response.data);
+    } catch (err) {
+      console.error('Failed to refresh metadata:', err);
     }
   }, [id]);
 
@@ -65,15 +76,51 @@ export default function PresentationEditorPage() {
     }
   }, [isAuthenticated, authLoading, id, fetchPresentation]);
 
+  // Ref for debounced title save
+  const titleSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSavedTitleRef = useRef<string>('');
+
   const updateTitle = async (newTitle: string) => {
-    if (!presentation || newTitle === presentation.title) return;
+    if (!presentation || newTitle === lastSavedTitleRef.current) return;
     try {
       await api.put(`/slides/${presentation.id}`, { title: newTitle });
-      setPresentation({ ...presentation, title: newTitle });
+      lastSavedTitleRef.current = newTitle;
     } catch (err) {
       console.error('Failed to update title:', err);
     }
   };
+
+  // Debounced title change handler - auto-saves after 1 second of no typing
+  const handleTitleChange = (newTitle: string) => {
+    if (!presentation) return;
+    setPresentation({ ...presentation, title: newTitle });
+
+    // Clear existing timeout
+    if (titleSaveTimeoutRef.current) {
+      clearTimeout(titleSaveTimeoutRef.current);
+    }
+
+    // Set new timeout to save after 1 second
+    titleSaveTimeoutRef.current = setTimeout(() => {
+      updateTitle(newTitle);
+    }, 1000);
+  };
+
+  // Initialize lastSavedTitleRef when presentation loads
+  useEffect(() => {
+    if (presentation?.title) {
+      lastSavedTitleRef.current = presentation.title;
+    }
+  }, [presentation?.id]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (titleSaveTimeoutRef.current) {
+        clearTimeout(titleSaveTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const toggleStar = async () => {
     if (!presentation) return;
@@ -145,7 +192,7 @@ export default function PresentationEditorPage() {
               <input
                 type="text"
                 value={presentation.title}
-                onChange={(e) => setPresentation({ ...presentation, title: e.target.value })}
+                onChange={(e) => handleTitleChange(e.target.value)}
                 onBlur={(e) => updateTitle(e.target.value)}
                 className="text-lg font-medium text-gray-900 bg-transparent border-none focus:outline-none focus:ring-2 focus:ring-orange-500 rounded px-2 py-1 w-full max-w-md"
               />
@@ -249,8 +296,8 @@ export default function PresentationEditorPage() {
             }}
             onSave={() => {
               console.log('Document saved');
-              // Refresh metadata to get new version
-              fetchPresentation();
+              // Refresh metadata to get new version (without showing loading spinner)
+              refreshMetadata();
             }}
             className="h-full"
           />

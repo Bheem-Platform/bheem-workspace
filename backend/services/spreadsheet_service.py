@@ -446,7 +446,9 @@ class SpreadsheetService:
                 "title": f"{spreadsheet['title']}.xlsx",
                 "url": download_url,
                 "permissions": {
+                    "chat": True,  # Chat permission (moved from customization)
                     "comment": True,
+                    "copy": True,
                     "download": True,
                     "edit": mode == "edit",
                     "print": True,
@@ -464,32 +466,28 @@ class SpreadsheetService:
                 },
                 "customization": {
                     "autosave": True,
-                    "chat": True,
                     "comments": True,
                     "compactHeader": False,
                     "compactToolbar": False,
                     "feedback": False,
                     "forcesave": True,
-                    "help": False,  # Hide OnlyOffice help
+                    "help": False,
                     "hideRightMenu": False,
-                    "about": False,  # Hide OnlyOffice about dialog
-                    "logo": {
-                        "image": "https://workspace.bheem.cloud/bheem-logo.png",
-                        "imageEmbedded": "https://workspace.bheem.cloud/bheem-logo-small.png",
-                        "url": "https://workspace.bheem.cloud",
-                    },
-                    "loaderLogo": "https://workspace.bheem.cloud/bheem-logo.png",
-                    "loaderName": "Bheem Sheets",
-                    "customer": {
-                        "address": "Bheem Workspace",
-                        "logo": "https://workspace.bheem.cloud/bheem-logo.png",
-                        "logoEmbedded": "https://workspace.bheem.cloud/bheem-logo-small.png",
-                        "mail": "support@bheem.cloud",
-                        "name": "Bheem Sheets",
-                        "www": "https://workspace.bheem.cloud",
-                    },
                     "toolbarNoTabs": False,
                     "zoom": 100,
+                    "logo": {
+                        "image": "https://workspace.bheem.cloud/bheem-logo.svg",
+                        "imageDark": "https://workspace.bheem.cloud/bheem-logo-dark.svg",
+                        "url": "https://bheem.cloud"
+                    },
+                    "customer": {
+                        "logo": "https://workspace.bheem.cloud/bheem-logo.svg",
+                        "logoDark": "https://workspace.bheem.cloud/bheem-logo-dark.svg",
+                        "name": "Bheem Sheets",
+                        "www": "https://bheem.cloud"
+                    },
+                    "loaderLogo": "https://workspace.bheem.cloud/bheem-logo.svg",
+                    "loaderName": "Bheem Sheets",
                 },
             },
             "height": "100%",
@@ -581,6 +579,7 @@ class SpreadsheetService:
 
                 storage_path = row.storage_path
                 current_version = row.version
+                tenant_id = row.tenant_id
 
                 # Calculate new checksum
                 new_checksum = hashlib.sha256(new_xlsx_bytes).hexdigest()
@@ -590,9 +589,9 @@ class SpreadsheetService:
                 await self.storage.upload_file(
                     file=BytesIO(new_xlsx_bytes),
                     filename=storage_path.split("/")[-1],
-                    company_id=None,  # Use full path
-                    tenant_id=None,
-                    folder_path="/".join(storage_path.split("/")[:-1]),
+                    company_id=None,
+                    tenant_id=tenant_id,  # Use tenant_id from spreadsheet record
+                    folder_path="spreadsheets",
                     content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
 

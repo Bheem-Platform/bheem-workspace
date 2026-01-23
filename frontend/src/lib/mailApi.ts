@@ -68,6 +68,15 @@ export const destroyMailSession = async (): Promise<{ success: boolean; message:
   return response.data;
 };
 
+/**
+ * Auto-create mail session using stored workspace credentials.
+ * This allows users who have provisioned mail accounts to login automatically.
+ */
+export const autoCreateMailSession = async (): Promise<MailSessionResponse> => {
+  const response = await api.post('/mail/session/auto-create');
+  return response.data;
+};
+
 // ===========================================
 // Legacy login (deprecated - uses session internally)
 // ===========================================

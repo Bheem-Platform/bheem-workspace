@@ -9,7 +9,7 @@
  * - Version history
  * - Auto-save
  */
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import Link from 'next/link';
@@ -94,16 +94,52 @@ export default function SpreadsheetEditor() {
     }
   }, [isAuthenticated, authLoading, id, fetchSpreadsheet]);
 
+  // Ref for debounced title save
+  const titleSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const lastSavedTitleRef = useRef<string>('');
+
   // Update title
   const updateTitle = async (newTitle: string) => {
-    if (!spreadsheet || newTitle === spreadsheet.title) return;
+    if (!spreadsheet || newTitle === lastSavedTitleRef.current) return;
     try {
       await api.put(`/sheets/${spreadsheet.id}`, { title: newTitle });
-      setSpreadsheet({ ...spreadsheet, title: newTitle });
+      lastSavedTitleRef.current = newTitle;
     } catch (err) {
       console.error('Failed to update title:', err);
     }
   };
+
+  // Debounced title change handler - auto-saves after 1 second of no typing
+  const handleTitleChange = (newTitle: string) => {
+    if (!spreadsheet) return;
+    setSpreadsheet({ ...spreadsheet, title: newTitle });
+
+    // Clear existing timeout
+    if (titleSaveTimeoutRef.current) {
+      clearTimeout(titleSaveTimeoutRef.current);
+    }
+
+    // Set new timeout to save after 1 second
+    titleSaveTimeoutRef.current = setTimeout(() => {
+      updateTitle(newTitle);
+    }, 1000);
+  };
+
+  // Initialize lastSavedTitleRef when spreadsheet loads
+  useEffect(() => {
+    if (spreadsheet?.title) {
+      lastSavedTitleRef.current = spreadsheet.title;
+    }
+  }, [spreadsheet?.id]);
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (titleSaveTimeoutRef.current) {
+        clearTimeout(titleSaveTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Toggle star
   const toggleStar = async () => {
@@ -255,7 +291,7 @@ export default function SpreadsheetEditor() {
               <input
                 type="text"
                 value={spreadsheet.title}
-                onChange={(e) => setSpreadsheet({ ...spreadsheet, title: e.target.value })}
+                onChange={(e) => handleTitleChange(e.target.value)}
                 onBlur={(e) => updateTitle(e.target.value)}
                 className="text-lg font-medium text-gray-900 bg-transparent border-none focus:outline-none focus:ring-2 focus:ring-green-500 rounded px-2 py-1"
               />

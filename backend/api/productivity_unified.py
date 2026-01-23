@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from enum import Enum
 
 from core.database import get_db
-from core.security import get_current_user
+from core.security import get_current_user, require_tenant_member
 from models.productivity_models import Spreadsheet, Presentation, Form, Video
 from services.docs_document_service import DocsDocumentService, get_docs_document_service
 
@@ -52,14 +52,18 @@ class UnifiedListResponse(BaseModel):
 
 
 def get_user_ids(current_user: Dict[str, Any]) -> tuple:
-    """Extract company_id and user_id from current user"""
+    """Extract company_id and user_id from current user.
+
+    user_id should be tenant_user_id (references tenant_users.id)
+    """
     # Try tenant_id first (workspace users), then company_id/erp_company_id (ERP users)
     company_id = (
         current_user.get("tenant_id") or
         current_user.get("company_id") or
         current_user.get("erp_company_id")
     )
-    user_id = current_user.get("user_id") or current_user.get("id")
+    # Use tenant_user_id for created_by (references tenant_users.id, not user_id)
+    user_id = current_user.get("tenant_user_id") or current_user.get("user_id") or current_user.get("id")
     if not company_id or not user_id:
         raise HTTPException(status_code=400, detail="User context incomplete")
     if isinstance(company_id, str):
@@ -80,7 +84,7 @@ async def get_unified_documents(
     offset: int = Query(0, ge=0),
     sort_by: str = Query("updated_at", enum=["updated_at", "created_at", "title"]),
     sort_order: str = Query("desc", enum=["asc", "desc"]),
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -269,7 +273,7 @@ async def get_unified_documents(
                 updated_at=form.updated_at,
                 owner_id=str(form.created_by),
                 is_starred=form.is_starred,
-                extra={"status": form.status, "response_count": form.response_count}
+                extra={"status": form.status}
             ))
 
     # Sort all items (handle None values)
@@ -297,7 +301,7 @@ async def get_unified_documents(
 @router.get("/recent", response_model=List[UnifiedDocumentResponse])
 async def get_recent_documents(
     limit: int = Query(10, ge=1, le=50),
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db),
 ):
     """Get most recently accessed documents across all types"""
@@ -315,7 +319,7 @@ async def get_recent_documents(
 @router.get("/starred", response_model=List[UnifiedDocumentResponse])
 async def get_starred_documents(
     limit: int = Query(50, ge=1, le=200),
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db),
 ):
     """Get all starred documents across all types"""
@@ -333,7 +337,7 @@ async def get_starred_documents(
 async def toggle_star(
     doc_type: str,
     doc_id: UUID,
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db),
 ):
     """Toggle star status for any document type"""
@@ -378,46 +382,50 @@ async def toggle_star(
 
 @router.get("/stats")
 async def get_productivity_stats(
-    current_user: Dict[str, Any] = Depends(get_current_user),
+    current_user: Dict[str, Any] = Depends(require_tenant_member()),
     db: AsyncSession = Depends(get_db),
 ):
-    """Get document counts by type"""
+    """Get document counts by type for the current user"""
     company_id, user_id = get_user_ids(current_user)
 
     stats = {}
 
-    # Count spreadsheets
+    # Count spreadsheets owned by user
     result = await db.execute(
         select(func.count(Spreadsheet.id)).where(
             Spreadsheet.tenant_id == company_id,
+            Spreadsheet.created_by == user_id,
             Spreadsheet.is_deleted == False
         )
     )
     stats["sheets"] = result.scalar() or 0
 
-    # Count presentations
+    # Count presentations owned by user
     result = await db.execute(
         select(func.count(Presentation.id)).where(
             Presentation.tenant_id == company_id,
+            Presentation.created_by == user_id,
             Presentation.is_deleted == False
         )
     )
     stats["slides"] = result.scalar() or 0
 
-    # Count forms
+    # Count forms owned by user
     result = await db.execute(
         select(func.count(Form.id)).where(
             Form.tenant_id == company_id,
+            Form.created_by == user_id,
             Form.is_deleted == False
         )
     )
     stats["forms"] = result.scalar() or 0
 
-    # Count videos
+    # Count videos owned by user
     try:
         result = await db.execute(
             select(func.count(Video.id)).where(
                 Video.tenant_id == company_id,
+                Video.created_by == user_id,
                 Video.is_deleted == False
             )
         )
@@ -425,7 +433,7 @@ async def get_productivity_stats(
     except:
         stats["videos"] = 0
 
-    # Count docs (from docs service)
+    # Count docs (from docs service - already filters by user_id)
     try:
         docs_service = get_docs_document_service()
         result = await docs_service.list_documents(company_id=company_id, user_id=user_id, limit=1000)
