@@ -1,3 +1,7 @@
+/**
+ * Super Admin Dashboard - Platform Management
+ * Brand colors: #FFCCF2, #977DFF, #0033FF
+ */
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/router';
 import {
@@ -8,12 +12,13 @@ import {
   TrendingUp,
   Code2,
   Plus,
+  Sparkles,
+  Crown,
 } from 'lucide-react';
 import AdminLayout from '@/components/admin/AdminLayout';
 import StatsCard from '@/components/admin/StatsCard';
-import ActivityFeed from '@/components/admin/ActivityFeed';
 import { useAdminStore } from '@/stores/adminStore';
-import * as adminApi from '@/lib/adminApi';
+import AppsCarousel from '@/components/shared/AppsCarousel';
 
 export default function SuperAdminDashboard() {
   const router = useRouter();
@@ -24,7 +29,6 @@ export default function SuperAdminDashboard() {
     totalUsers: 0,
     totalDomains: 0,
   });
-  const [recentActivity, setRecentActivity] = useState<any[]>([]);
 
   useEffect(() => {
     fetchTenants();
@@ -41,7 +45,7 @@ export default function SuperAdminDashboard() {
         totalTenants: tenants.length,
         activeTenants: activeTenants.length,
         totalUsers,
-        totalDomains: 0, // Would need separate API call
+        totalDomains: 0,
       });
     }
   }, [tenants]);
@@ -52,12 +56,27 @@ export default function SuperAdminDashboard() {
       breadcrumbs={[{ label: 'Super Admin' }, { label: 'Dashboard' }]}
     >
       <div className="space-y-6">
-        {/* Welcome */}
-        <div className="bg-gradient-to-r from-purple-600 to-purple-800 rounded-2xl p-6 text-white">
-          <h1 className="text-2xl font-bold">Welcome to Super Admin</h1>
-          <p className="mt-1 text-purple-200">
-            Manage the entire Bheem Workspace platform from here.
-          </p>
+        {/* Welcome Banner with Brand Colors */}
+        <div className="bg-gradient-to-r from-[#FFCCF2] via-[#977DFF] to-[#0033FF] rounded-2xl p-6 text-white relative overflow-hidden">
+          <div className="absolute inset-0 bg-grid-white/[0.05] bg-[size:20px_20px]" />
+          <div className="absolute -top-24 -right-24 w-64 h-64 bg-white/10 rounded-full blur-3xl" />
+          <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-white/10 rounded-full blur-3xl" />
+          <div className="relative z-10 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-white/20 backdrop-blur rounded-xl">
+                <Crown size={28} />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-2xl font-bold">Welcome to Super Admin</h1>
+                  <Sparkles size={20} className="text-white/80" />
+                </div>
+                <p className="mt-1 text-white/80">
+                  Manage the entire Bheem Workspace platform from here.
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Stats Grid */}
@@ -101,21 +120,21 @@ export default function SuperAdminDashboard() {
             <div className="space-y-3">
               <button
                 onClick={() => router.push('/super-admin/tenants/new')}
-                className="w-full flex items-center space-x-3 px-4 py-3 bg-purple-50 text-purple-700 rounded-lg hover:bg-purple-100 transition-colors"
+                className="w-full flex items-center space-x-3 px-4 py-3 bg-[#FFCCF2]/30 text-[#977DFF] rounded-lg hover:bg-[#FFCCF2]/50 transition-colors"
               >
                 <Plus size={20} />
                 <span className="font-medium">Create New Tenant</span>
               </button>
               <button
                 onClick={() => router.push('/super-admin/developers')}
-                className="w-full flex items-center space-x-3 px-4 py-3 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors"
+                className="w-full flex items-center space-x-3 px-4 py-3 bg-[#977DFF]/20 text-[#977DFF] rounded-lg hover:bg-[#977DFF]/30 transition-colors"
               >
                 <Code2 size={20} />
                 <span className="font-medium">Manage Developers</span>
               </button>
               <button
                 onClick={() => router.push('/super-admin/activity')}
-                className="w-full flex items-center space-x-3 px-4 py-3 bg-gray-50 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors"
+                className="w-full flex items-center space-x-3 px-4 py-3 bg-[#0033FF]/10 text-[#0033FF] rounded-lg hover:bg-[#0033FF]/20 transition-colors"
               >
                 <Activity size={20} />
                 <span className="font-medium">View Activity Logs</span>
@@ -129,7 +148,7 @@ export default function SuperAdminDashboard() {
               <h2 className="text-lg font-semibold text-gray-900">Recent Tenants</h2>
               <button
                 onClick={() => router.push('/super-admin/tenants')}
-                className="text-sm text-purple-600 hover:text-purple-700 font-medium"
+                className="text-sm text-[#977DFF] hover:text-[#0033FF] font-medium"
               >
                 View All
               </button>
@@ -148,11 +167,11 @@ export default function SuperAdminDashboard() {
                   <div
                     key={tenant.id}
                     onClick={() => router.push(`/super-admin/tenants/${tenant.id}`)}
-                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 cursor-pointer transition-colors"
+                    className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-[#FFCCF2]/20 cursor-pointer transition-colors"
                   >
                     <div className="flex items-center space-x-3">
-                      <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
-                        <span className="text-purple-600 font-semibold">
+                      <div className="w-10 h-10 bg-gradient-to-br from-[#FFCCF2] to-[#977DFF] rounded-lg flex items-center justify-center">
+                        <span className="text-white font-semibold">
                           {tenant.name.charAt(0).toUpperCase()}
                         </span>
                       </div>
@@ -163,9 +182,9 @@ export default function SuperAdminDashboard() {
                     </div>
                     <div className="text-right">
                       <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-                        tenant.plan === 'enterprise' ? 'bg-purple-100 text-purple-700' :
-                        tenant.plan === 'business' ? 'bg-blue-100 text-blue-700' :
-                        tenant.plan === 'starter' ? 'bg-green-100 text-green-700' :
+                        tenant.plan === 'enterprise' ? 'bg-[#977DFF]/20 text-[#977DFF]' :
+                        tenant.plan === 'business' ? 'bg-[#0033FF]/10 text-[#0033FF]' :
+                        tenant.plan === 'starter' ? 'bg-emerald-100 text-emerald-700' :
                         'bg-gray-100 text-gray-700'
                       }`}>
                         {tenant.plan}
@@ -179,6 +198,9 @@ export default function SuperAdminDashboard() {
           </div>
         </div>
 
+        {/* Apps Carousel */}
+        <AppsCarousel />
+
         {/* Plan Distribution */}
         <div className="bg-white rounded-xl border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Plan Distribution</h2>
@@ -188,9 +210,9 @@ export default function SuperAdminDashboard() {
               const percent = tenants.length > 0 ? (count / tenants.length) * 100 : 0;
               const colors: Record<string, string> = {
                 free: 'bg-gray-500',
-                starter: 'bg-green-500',
-                business: 'bg-blue-500',
-                enterprise: 'bg-purple-500',
+                starter: 'bg-emerald-500',
+                business: 'bg-[#0033FF]',
+                enterprise: 'bg-[#977DFF]',
               };
 
               return (

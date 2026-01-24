@@ -1,25 +1,35 @@
 /**
  * Bheem Docs - Document Editor Page
  * Full-featured document editor with collaboration
+ * Supports both Tiptap (rich text) and OnlyOffice (Word documents)
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import dynamic from 'next/dynamic';
 import DocumentHeader from '@/components/docs/editor/DocumentHeader';
+import BheemDocsHeader from '@/components/docs/BheemDocsHeader';
 import CollaborationBar from '@/components/docs/editor/CollaborationBar';
 import CommentsPanel from '@/components/docs/editor/CommentsPanel';
 import VersionHistory from '@/components/docs/editor/VersionHistory';
 import AIAssistant from '@/components/docs/editor/AIAssistant';
 import FindReplace from '@/components/docs/editor/FindReplace';
 import ShareModal from '@/components/docs/ShareModal';
+import ShareModalShared from '@/components/shared/ShareModal';
 import { useDocsStore } from '@/stores/docsStore';
 import { useRequireAuth, useAuthStore } from '@/stores/authStore';
 import * as docsEditorApi from '@/lib/docsEditorApi';
+import { api } from '@/lib/api';
 
 // Dynamic import to avoid SSR issues with Tiptap
 const TiptapEditor = dynamic(
   () => import('@/components/docs/editor/TiptapEditor'),
+  { ssr: false, loading: () => <EditorSkeleton /> }
+);
+
+// Dynamic import for OnlyOffice editor
+const OnlyOfficeDocEditor = dynamic(
+  () => import('@/components/docs/OnlyOfficeDocEditor'),
   { ssr: false, loading: () => <EditorSkeleton /> }
 );
 
@@ -87,6 +97,25 @@ const isImageFile = (mimeType?: string): boolean => {
   return mimeType.startsWith('image/');
 };
 
+// Check if file is a Word document (editable with OnlyOffice)
+const isWordDocument = (doc: Document): boolean => {
+  const wordMimeTypes = [
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // docx
+    'application/msword', // doc
+    'application/vnd.oasis.opendocument.text', // odt
+    'application/rtf', // rtf
+  ];
+
+  if (doc.mime_type && wordMimeTypes.includes(doc.mime_type)) {
+    return true;
+  }
+
+  // Also check file extension
+  const fileName = doc.file_name || '';
+  const extension = fileName.split('.').pop()?.toLowerCase();
+  return ['docx', 'doc', 'odt', 'rtf'].includes(extension || '');
+};
+
 interface Collaborator {
   id: string;
   name: string;
@@ -123,6 +152,11 @@ export default function DocumentEditorPage() {
   const [showFind, setShowFind] = useState(false);
   const [selectedText, setSelectedText] = useState<string>('');
 
+  // OnlyOffice editor state
+  const [editorReady, setEditorReady] = useState(false);
+  const [useOnlyOffice, setUseOnlyOffice] = useState(false);
+  const [showShareModalNew, setShowShareModalNew] = useState(false);
+
   // Store for share modal
   const { isShareModalOpen, openShareModal, closeShareModal } = useDocsStore();
 
@@ -153,8 +187,20 @@ export default function DocumentEditorPage() {
         console.log('Document content:', doc.content);
         setDocData(doc);
 
-        // Check if it's an uploaded file
-        if (isUploadedFile(doc)) {
+        // Check if it's a Word document - use OnlyOffice
+        if (isWordDocument(doc)) {
+          console.log('Word document detected, using OnlyOffice editor');
+          setUseOnlyOffice(true);
+          // Get download URL for the document
+          try {
+            const url = await docsEditorApi.getFileDownloadUrl(documentId);
+            setDownloadUrl(url);
+          } catch (e) {
+            console.error('Failed to get download URL:', e);
+          }
+        }
+        // Check if it's another type of uploaded file
+        else if (isUploadedFile(doc)) {
           // For text files, fetch content
           if (isTextFile(doc.mime_type)) {
             try {
@@ -378,6 +424,110 @@ export default function DocumentEditorPage() {
     );
   }
 
+  // Download handler for OnlyOffice documents
+  const handleDownloadDoc = async () => {
+    if (downloadUrl) {
+      window.open(downloadUrl, '_blank');
+    } else {
+      try {
+        const url = await docsEditorApi.getFileDownloadUrl(documentId);
+        if (url) {
+          window.open(url, '_blank');
+        }
+      } catch (e) {
+        console.error('Failed to download:', e);
+      }
+    }
+  };
+
+  // Render OnlyOffice editor for Word documents
+  if (useOnlyOffice && docData) {
+    return (
+      <>
+        <Head>
+          <title>{docData.title || 'Untitled'} - Bheem Docs</title>
+        </Head>
+
+        <div className="min-h-screen bg-gray-100 flex flex-col">
+          {/* Custom Bheem Header for OnlyOffice */}
+          <BheemDocsHeader
+            title={docData.title}
+            isFavorite={docData.is_favorite}
+            isSaving={isSaving}
+            isSaved={editorReady}
+            onTitleChange={handleTitleChange}
+            onToggleFavorite={handleToggleFavorite}
+            onShare={() => setShowShareModalNew(true)}
+            onDownload={handleDownloadDoc}
+            onShowHistory={handleToggleHistory}
+            onToggleComments={() => {
+              setShowComments(!showComments);
+              setShowHistory(false);
+            }}
+          />
+
+          {/* OnlyOffice Editor */}
+          <div className="flex-1 relative">
+            <OnlyOfficeDocEditor
+              documentId={documentId}
+              mode="edit"
+              onReady={() => setEditorReady(true)}
+              onError={(error) => {
+                console.error('Editor error:', error);
+                setEditorReady(false);
+              }}
+              onDocumentReady={() => {
+                console.log('Document ready');
+              }}
+              onSave={() => {
+                console.log('Document saved');
+                setLastSaved(new Date());
+              }}
+              className="h-full"
+            />
+          </div>
+
+          {/* Comments Panel for OnlyOffice */}
+          {showComments && (
+            <CommentsPanel
+              documentId={documentId}
+              comments={comments}
+              currentUser={currentUser}
+              onAddComment={handleAddComment}
+              onReply={handleReplyComment}
+              onResolve={handleResolveComment}
+              onDelete={handleDeleteComment}
+              onEdit={() => {}}
+              onReact={() => {}}
+              onClose={() => setShowComments(false)}
+              selectedText={selectedText ? { text: selectedText, start: 0, end: selectedText.length } : undefined}
+            />
+          )}
+
+          {/* Version History Sidebar */}
+          {showHistory && (
+            <VersionHistory
+              versions={versions}
+              currentVersionId={docData.id}
+              onPreview={() => {}}
+              onRestore={handleRestoreVersion}
+              onClose={() => setShowHistory(false)}
+            />
+          )}
+
+          {/* Share Modal */}
+          <ShareModalShared
+            isOpen={showShareModalNew}
+            onClose={() => setShowShareModalNew(false)}
+            documentId={docData.id}
+            documentType="doc"
+            documentTitle={docData.title}
+          />
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       <Head>
@@ -429,7 +579,12 @@ export default function DocumentEditorPage() {
           {/* Editor or File Preview */}
           <div className="flex-1 p-4 overflow-auto">
             <div className="max-w-4xl mx-auto">
-              {isUploadedFile(docData) ? (
+              {isWordDocument(docData) ? (
+                /* OnlyOffice Editor for Word docs - already handled above */
+                <div className="text-center py-8">
+                  <p>Loading Word editor...</p>
+                </div>
+              ) : isUploadedFile(docData) ? (
                 /* File Preview for uploaded documents */
                 <div className="bg-white rounded-lg shadow-sm border p-6">
                   <div className="flex items-center justify-between mb-6">

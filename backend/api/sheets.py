@@ -948,6 +948,13 @@ async def get_sheet_shares(
     }
 
 
+class ShareSettings(BaseModel):
+    """Update sharing settings for multiple users"""
+    access_level: str = "private"  # private, anyone_with_link
+    link_permission: str = "view"  # view, comment, edit
+    invites: List[ShareRequest] = []
+
+
 @router.post("/{sheet_id}/shares")
 async def share_sheet(
     sheet_id: str,
@@ -964,7 +971,8 @@ async def share_sheet(
         WHERE id = CAST(:id AS uuid) AND created_by = CAST(:user_id AS uuid)
     """), {"id": sheet_id, "user_id": user_id})
 
-    if not sheet.fetchone():
+    sheet_row = sheet.fetchone()
+    if not sheet_row:
         raise HTTPException(status_code=403, detail="Only the owner can share this spreadsheet")
 
     # Find target user
@@ -1005,6 +1013,194 @@ async def share_sheet(
     return {
         "message": f"Spreadsheet shared with {target.name}",
         "permission": data.permission
+    }
+
+
+@router.post("/{sheet_id}/share")
+async def share_spreadsheet(
+    sheet_id: str,
+    data: ShareSettings,
+    current_user: dict = Depends(require_tenant_member()),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Share a spreadsheet with users via email.
+
+    Sends email notifications to invited users and creates share records.
+    """
+    from services.mailgun_service import mailgun_service
+
+    tenant_id, user_id = get_user_ids(current_user)
+
+    # Verify ownership or edit permission
+    result = await db.execute(text("""
+        SELECT s.id, s.title, s.created_by,
+            COALESCE(ss.permission, CASE WHEN s.created_by = CAST(:user_id AS uuid) THEN 'owner' ELSE NULL END) as permission
+        FROM workspace.spreadsheets s
+        LEFT JOIN workspace.spreadsheet_shares ss ON s.id = ss.spreadsheet_id AND ss.user_id = CAST(:user_id AS uuid)
+        WHERE s.id = CAST(:sheet_id AS uuid)
+        AND s.tenant_id = CAST(:tenant_id AS uuid)
+        AND s.is_deleted = FALSE
+        AND (s.created_by = CAST(:user_id AS uuid) OR ss.permission = 'edit')
+    """), {"sheet_id": sheet_id, "user_id": user_id, "tenant_id": tenant_id})
+
+    spreadsheet = result.fetchone()
+    if not spreadsheet:
+        raise HTTPException(status_code=404, detail="Spreadsheet not found or no permission to share")
+
+    # Get current user info for the invitation email
+    sharer_name = current_user.get("name") or current_user.get("username") or "Someone"
+    sharer_email = current_user.get("email") or current_user.get("username")
+
+    shared_users = []
+    email_errors = []
+
+    for invite in data.invites:
+        try:
+            # Look up user by email in the tenant
+            user_result = await db.execute(text("""
+                SELECT id, name, email FROM workspace.tenant_users
+                WHERE email = :email AND tenant_id = CAST(:tenant_id AS uuid)
+            """), {"email": invite.email, "tenant_id": tenant_id})
+
+            target_user = user_result.fetchone()
+
+            if target_user:
+                # Check if share already exists
+                existing = await db.execute(text("""
+                    SELECT id FROM workspace.spreadsheet_shares
+                    WHERE spreadsheet_id = CAST(:sheet_id AS uuid)
+                    AND user_id = CAST(:user_id AS uuid)
+                """), {"sheet_id": sheet_id, "user_id": str(target_user.id)})
+
+                if existing.fetchone():
+                    # Update existing share
+                    await db.execute(text("""
+                        UPDATE workspace.spreadsheet_shares
+                        SET permission = :permission
+                        WHERE spreadsheet_id = CAST(:sheet_id AS uuid)
+                        AND user_id = CAST(:user_id AS uuid)
+                    """), {
+                        "sheet_id": sheet_id,
+                        "user_id": str(target_user.id),
+                        "permission": invite.permission
+                    })
+                else:
+                    # Create new share
+                    share_id = str(uuid.uuid4())
+                    await db.execute(text("""
+                        INSERT INTO workspace.spreadsheet_shares
+                        (id, spreadsheet_id, user_id, permission, created_by, created_at)
+                        VALUES (
+                            CAST(:id AS uuid),
+                            CAST(:sheet_id AS uuid),
+                            CAST(:user_id AS uuid),
+                            :permission,
+                            CAST(:created_by AS uuid),
+                            NOW()
+                        )
+                    """), {
+                        "id": share_id,
+                        "sheet_id": sheet_id,
+                        "user_id": str(target_user.id),
+                        "permission": invite.permission,
+                        "created_by": user_id
+                    })
+
+                shared_users.append({
+                    "email": invite.email,
+                    "name": target_user.name,
+                    "permission": invite.permission,
+                    "status": "shared"
+                })
+            else:
+                # User not found in tenant - still send invitation email
+                shared_users.append({
+                    "email": invite.email,
+                    "permission": invite.permission,
+                    "status": "invited"
+                })
+
+            # Send email notification
+            if invite.notify:
+                spreadsheet_url = f"{settings.WORKSPACE_URL}/sheets/{sheet_id}"
+
+                # Build email content
+                permission_text = {
+                    "view": "view",
+                    "comment": "comment on",
+                    "edit": "edit"
+                }.get(invite.permission, "access")
+
+                subject = f"{sharer_name} shared a spreadsheet with you: {spreadsheet.title}"
+
+                html_content = f"""
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <div style="background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); padding: 30px; border-radius: 8px 8px 0 0;">
+                        <h1 style="color: white; margin: 0; font-size: 24px;">Bheem Sheets</h1>
+                    </div>
+                    <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
+                        <p style="font-size: 16px; color: #374151; margin-bottom: 20px;">
+                            <strong>{sharer_name}</strong> has shared a spreadsheet with you and invited you to <strong>{permission_text}</strong> it.
+                        </p>
+
+                        <div style="background: #f9fafb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+                            <h2 style="margin: 0 0 10px 0; font-size: 18px; color: #111827;">
+                                📊 {spreadsheet.title}
+                            </h2>
+                        </div>
+
+                        <a href="{spreadsheet_url}" style="display: inline-block; background: #22c55e; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500;">
+                            Open Spreadsheet
+                        </a>
+
+                        <p style="margin-top: 30px; font-size: 12px; color: #9ca3af;">
+                            This email was sent by Bheem Workspace. If you weren't expecting this email, you can safely ignore it.
+                        </p>
+                    </div>
+                </div>
+                """
+
+                text_content = f"""
+{sharer_name} has shared a spreadsheet with you: {spreadsheet.title}
+
+You have been invited to {permission_text} this spreadsheet.
+
+Open the spreadsheet: {spreadsheet_url}
+
+---
+This email was sent by Bheem Workspace.
+                """
+
+                try:
+                    email_result = await mailgun_service.send_email(
+                        to=[invite.email],
+                        subject=subject,
+                        html=html_content,
+                        text=text_content,
+                        reply_to=sharer_email
+                    )
+
+                    if "error" in email_result:
+                        logger.warning(f"Failed to send share notification to {invite.email}: {email_result}")
+                        email_errors.append({"email": invite.email, "error": str(email_result.get("error"))})
+                    else:
+                        logger.info(f"Sent share notification to {invite.email} for spreadsheet {sheet_id}")
+                except Exception as e:
+                    logger.error(f"Email send error for {invite.email}: {e}")
+                    email_errors.append({"email": invite.email, "error": str(e)})
+
+        except Exception as e:
+            logger.error(f"Error sharing with {invite.email}: {e}")
+            email_errors.append({"email": invite.email, "error": str(e)})
+
+    await db.commit()
+
+    return {
+        "spreadsheet_id": sheet_id,
+        "shared_with": shared_users,
+        "email_errors": email_errors if email_errors else None,
+        "message": f"Spreadsheet shared with {len(shared_users)} user(s)"
     }
 
 

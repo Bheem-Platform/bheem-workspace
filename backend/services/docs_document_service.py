@@ -871,14 +871,15 @@ class DocsDocumentService:
             if version:
                 # Get specific version
                 cur.execute("""
-                    SELECT v.storage_path, v.file_name, v.mime_type
+                    SELECT v.storage_path, v.file_name, v.mime_type, d.created_by
                     FROM dms.document_versions v
+                    JOIN dms.documents d ON d.id = v.document_id
                     WHERE v.document_id = %s AND v.version_number = %s
                 """, (str(document_id), version))
             else:
                 # Get current version
                 cur.execute("""
-                    SELECT storage_path, file_name, mime_type
+                    SELECT storage_path, file_name, mime_type, created_by
                     FROM dms.documents
                     WHERE id = %s AND is_active = true
                 """, (str(document_id),))
@@ -886,6 +887,16 @@ class DocsDocumentService:
             row = cur.fetchone()
             if not row:
                 raise ValueError(f"Document not found: {document_id}")
+
+            # Look up creator's email to use as Nextcloud username
+            nextcloud_user = None
+            if row.get('created_by'):
+                cur.execute("""
+                    SELECT email FROM auth.users WHERE id = %s
+                """, (str(row['created_by']),))
+                user_row = cur.fetchone()
+                if user_row and user_row.get('email'):
+                    nextcloud_user = user_row['email'].lower()
 
             # Update download count and log
             if user_id:
@@ -898,8 +909,11 @@ class DocsDocumentService:
                 await self._log_audit(conn, document_id, AuditAction.DOWNLOAD, user_id)
                 conn.commit()
 
-            # Get file from storage
-            file_stream, _ = await self.storage.download_file(row['storage_path'])
+            # Get file from storage (from the creator's Nextcloud folder)
+            file_stream, _ = await self.storage.download_file(
+                row['storage_path'],
+                nextcloud_user=nextcloud_user
+            )
 
             return file_stream, row['file_name'], row['mime_type']
 

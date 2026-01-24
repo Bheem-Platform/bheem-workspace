@@ -988,16 +988,42 @@ async def get_presentation_content(
         logger.warning(f"Presentation {presentation_id} has no storage_path")
         raise HTTPException(status_code=404, detail="Presentation file not found - no storage path")
 
-    # Get file from S3
+    # Get file from storage (Nextcloud with S3 fallback)
     storage = get_docs_storage_service()
     try:
-        logger.info(f"Downloading presentation from S3: {row.storage_path}")
+        logger.info(f"Downloading presentation: {row.storage_path}")
         file_content, metadata = await storage.download_file(row.storage_path)
         content = file_content.read()
         logger.info(f"Downloaded presentation {presentation_id}, size: {len(content)} bytes")
     except FileNotFoundError:
-        logger.error(f"Presentation file not found in S3: {row.storage_path}")
-        raise HTTPException(status_code=404, detail="Presentation file not found in storage")
+        # File doesn't exist - create an empty PPTX for legacy presentations
+        logger.warning(f"Presentation file not found, generating new PPTX: {presentation_id}")
+        try:
+            from services.presentation_service import get_presentation_service
+            pres_service = get_presentation_service(db)
+            content = pres_service._create_empty_pptx(row.title or "Untitled Presentation")
+
+            # Upload to Nextcloud for future access
+            from io import BytesIO
+            upload_result = await storage.upload_file(
+                file=BytesIO(content),
+                filename=f"{presentation_id}.pptx",
+                tenant_id=None,  # Will use admin folder
+                folder_path="presentations/recovered",
+                content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation"
+            )
+            new_path = upload_result.get('storage_path')
+            if new_path:
+                # Update the storage path in database
+                await db.execute(
+                    text("UPDATE workspace.presentations SET storage_path = :path WHERE id = CAST(:id AS uuid)"),
+                    {"path": new_path, "id": presentation_id}
+                )
+                await db.commit()
+                logger.info(f"Recovered presentation {presentation_id} to {new_path}")
+        except Exception as regen_error:
+            logger.error(f"Failed to regenerate presentation {presentation_id}: {regen_error}")
+            raise HTTPException(status_code=404, detail="Presentation file not found and could not be recovered")
     except Exception as e:
         logger.error(f"Failed to download presentation {presentation_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to download file from storage")
@@ -1014,3 +1040,344 @@ async def get_presentation_content(
             "Access-Control-Allow-Headers": "Content-Type, Authorization",
         }
     )
+
+
+# =============================================
+# Sharing Endpoints
+# =============================================
+
+class ShareRequest(BaseModel):
+    """Request to share a presentation"""
+    email: str
+    permission: str = "view"  # view, comment, edit
+    message: Optional[str] = None
+    send_notification: bool = True
+
+
+class ShareSettings(BaseModel):
+    """Update sharing settings"""
+    access_level: str = "private"  # private, anyone_with_link
+    link_permission: str = "view"  # view, comment, edit
+    invites: List[ShareRequest] = []
+
+
+@router.post("/{presentation_id}/share")
+async def share_presentation(
+    presentation_id: str,
+    data: ShareSettings,
+    current_user: dict = Depends(require_tenant_member()),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Share a presentation with users via email.
+
+    Sends email notifications to invited users and creates share records.
+    """
+    from services.mailgun_service import mailgun_service
+
+    tenant_id, user_id = get_user_ids(current_user)
+
+    # Verify ownership or edit permission
+    result = await db.execute(text("""
+        SELECT p.id, p.title, p.created_by,
+            COALESCE(ps.permission, CASE WHEN p.created_by = CAST(:user_id AS uuid) THEN 'owner' ELSE NULL END) as permission
+        FROM workspace.presentations p
+        LEFT JOIN workspace.presentation_shares ps ON p.id = ps.presentation_id AND ps.user_id = CAST(:user_id AS uuid)
+        WHERE p.id = CAST(:presentation_id AS uuid)
+        AND p.tenant_id = CAST(:tenant_id AS uuid)
+        AND p.is_deleted = FALSE
+        AND (p.created_by = CAST(:user_id AS uuid) OR ps.permission = 'edit')
+    """), {"presentation_id": presentation_id, "user_id": user_id, "tenant_id": tenant_id})
+
+    presentation = result.fetchone()
+    if not presentation:
+        raise HTTPException(status_code=404, detail="Presentation not found or no permission to share")
+
+    # Get current user info for the invitation email
+    sharer_name = current_user.get("name") or current_user.get("username") or "Someone"
+    sharer_email = current_user.get("email") or current_user.get("username")
+
+    shared_users = []
+    email_errors = []
+
+    for invite in data.invites:
+        try:
+            # Look up user by email in the tenant
+            user_result = await db.execute(text("""
+                SELECT id, name, email FROM workspace.tenant_users
+                WHERE email = :email AND tenant_id = CAST(:tenant_id AS uuid)
+            """), {"email": invite.email, "tenant_id": tenant_id})
+
+            target_user = user_result.fetchone()
+
+            if target_user:
+                # Check if share already exists
+                existing = await db.execute(text("""
+                    SELECT id FROM workspace.presentation_shares
+                    WHERE presentation_id = CAST(:presentation_id AS uuid)
+                    AND user_id = CAST(:user_id AS uuid)
+                """), {"presentation_id": presentation_id, "user_id": str(target_user.id)})
+
+                if existing.fetchone():
+                    # Update existing share
+                    await db.execute(text("""
+                        UPDATE workspace.presentation_shares
+                        SET permission = :permission
+                        WHERE presentation_id = CAST(:presentation_id AS uuid)
+                        AND user_id = CAST(:user_id AS uuid)
+                    """), {
+                        "presentation_id": presentation_id,
+                        "user_id": str(target_user.id),
+                        "permission": invite.permission
+                    })
+                else:
+                    # Create new share
+                    share_id = str(uuid.uuid4())
+                    await db.execute(text("""
+                        INSERT INTO workspace.presentation_shares
+                        (id, presentation_id, user_id, permission, created_by, created_at)
+                        VALUES (
+                            CAST(:id AS uuid),
+                            CAST(:presentation_id AS uuid),
+                            CAST(:user_id AS uuid),
+                            :permission,
+                            CAST(:created_by AS uuid),
+                            NOW()
+                        )
+                    """), {
+                        "id": share_id,
+                        "presentation_id": presentation_id,
+                        "user_id": str(target_user.id),
+                        "permission": invite.permission,
+                        "created_by": user_id
+                    })
+
+                shared_users.append({
+                    "email": invite.email,
+                    "name": target_user.name,
+                    "permission": invite.permission,
+                    "status": "shared"
+                })
+            else:
+                # User not found in tenant - still send invitation email
+                shared_users.append({
+                    "email": invite.email,
+                    "permission": invite.permission,
+                    "status": "invited"
+                })
+
+            # Send email notification
+            if invite.send_notification:
+                presentation_url = f"{settings.WORKSPACE_URL}/slides/{presentation_id}"
+
+                # Build email content
+                permission_text = {
+                    "view": "view",
+                    "comment": "comment on",
+                    "edit": "edit"
+                }.get(invite.permission, "access")
+
+                subject = f"{sharer_name} shared a presentation with you: {presentation.title}"
+
+                html_content = f"""
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                    <div style="background: linear-gradient(135deg, #f97316 0%, #ea580c 100%); padding: 30px; border-radius: 8px 8px 0 0;">
+                        <h1 style="color: white; margin: 0; font-size: 24px;">Bheem Slides</h1>
+                    </div>
+                    <div style="background: #ffffff; padding: 30px; border: 1px solid #e5e7eb; border-top: none; border-radius: 0 0 8px 8px;">
+                        <p style="font-size: 16px; color: #374151; margin-bottom: 20px;">
+                            <strong>{sharer_name}</strong> has shared a presentation with you and invited you to <strong>{permission_text}</strong> it.
+                        </p>
+
+                        <div style="background: #f9fafb; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+                            <h2 style="margin: 0 0 10px 0; font-size: 18px; color: #111827;">
+                                📊 {presentation.title}
+                            </h2>
+                            {f'<p style="margin: 0; color: #6b7280; font-size: 14px;">{invite.message}</p>' if invite.message else ''}
+                        </div>
+
+                        <a href="{presentation_url}" style="display: inline-block; background: #f97316; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 500;">
+                            Open Presentation
+                        </a>
+
+                        <p style="margin-top: 30px; font-size: 12px; color: #9ca3af;">
+                            This email was sent by Bheem Workspace. If you weren't expecting this email, you can safely ignore it.
+                        </p>
+                    </div>
+                </div>
+                """
+
+                text_content = f"""
+{sharer_name} has shared a presentation with you: {presentation.title}
+
+You have been invited to {permission_text} this presentation.
+
+{f"Message: {invite.message}" if invite.message else ""}
+
+Open the presentation: {presentation_url}
+
+---
+This email was sent by Bheem Workspace.
+                """
+
+                try:
+                    email_result = await mailgun_service.send_email(
+                        to=[invite.email],
+                        subject=subject,
+                        html=html_content,
+                        text=text_content,
+                        reply_to=sharer_email
+                    )
+
+                    if "error" in email_result:
+                        logger.warning(f"Failed to send share notification to {invite.email}: {email_result}")
+                        email_errors.append({"email": invite.email, "error": str(email_result.get("error"))})
+                    else:
+                        logger.info(f"Sent share notification to {invite.email} for presentation {presentation_id}")
+                except Exception as e:
+                    logger.error(f"Email send error for {invite.email}: {e}")
+                    email_errors.append({"email": invite.email, "error": str(e)})
+
+        except Exception as e:
+            logger.error(f"Error sharing with {invite.email}: {e}")
+            email_errors.append({"email": invite.email, "error": str(e)})
+
+    await db.commit()
+
+    return {
+        "presentation_id": presentation_id,
+        "shared_with": shared_users,
+        "email_errors": email_errors if email_errors else None,
+        "message": f"Presentation shared with {len(shared_users)} user(s)"
+    }
+
+
+@router.get("/{presentation_id}/shares")
+async def list_shares(
+    presentation_id: str,
+    current_user: dict = Depends(require_tenant_member()),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """List all users who have access to this presentation"""
+    tenant_id, user_id = get_user_ids(current_user)
+
+    # Verify access
+    await _verify_presentation_access(db, presentation_id, user_id, "view")
+
+    # Get owner
+    owner_result = await db.execute(text("""
+        SELECT p.created_by, u.name as owner_name, u.email as owner_email
+        FROM workspace.presentations p
+        JOIN workspace.tenant_users u ON p.created_by = u.id
+        WHERE p.id = CAST(:presentation_id AS uuid)
+    """), {"presentation_id": presentation_id})
+
+    owner = owner_result.fetchone()
+
+    # Get shares
+    shares_result = await db.execute(text("""
+        SELECT ps.id, ps.permission, ps.created_at,
+            u.id as user_id, u.name as user_name, u.email as user_email
+        FROM workspace.presentation_shares ps
+        JOIN workspace.tenant_users u ON ps.user_id = u.id
+        WHERE ps.presentation_id = CAST(:presentation_id AS uuid)
+        ORDER BY ps.created_at DESC
+    """), {"presentation_id": presentation_id})
+
+    shares = []
+    for row in shares_result.fetchall():
+        shares.append({
+            "id": str(row.id),
+            "user_id": str(row.user_id),
+            "name": row.user_name,
+            "email": row.user_email,
+            "permission": row.permission,
+            "created_at": row.created_at.isoformat() if row.created_at else None
+        })
+
+    return {
+        "presentation_id": presentation_id,
+        "owner": {
+            "id": str(owner.created_by) if owner else None,
+            "name": owner.owner_name if owner else None,
+            "email": owner.owner_email if owner else None,
+            "permission": "owner"
+        },
+        "shares": shares
+    }
+
+
+@router.delete("/{presentation_id}/shares/{share_id}")
+async def remove_share(
+    presentation_id: str,
+    share_id: str,
+    current_user: dict = Depends(require_tenant_member()),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """Remove a user's access to a presentation"""
+    tenant_id, user_id = get_user_ids(current_user)
+
+    # Verify ownership
+    result = await db.execute(text("""
+        SELECT id FROM workspace.presentations
+        WHERE id = CAST(:presentation_id AS uuid)
+        AND created_by = CAST(:user_id AS uuid)
+    """), {"presentation_id": presentation_id, "user_id": user_id})
+
+    if not result.fetchone():
+        raise HTTPException(status_code=403, detail="Only the owner can remove shares")
+
+    # Delete share
+    await db.execute(text("""
+        DELETE FROM workspace.presentation_shares
+        WHERE id = CAST(:share_id AS uuid)
+        AND presentation_id = CAST(:presentation_id AS uuid)
+    """), {"share_id": share_id, "presentation_id": presentation_id})
+
+    await db.commit()
+
+    return {"message": "Share removed successfully"}
+
+
+@router.get("/{presentation_id}/download")
+async def download_presentation(
+    presentation_id: str,
+    current_user: dict = Depends(require_tenant_member()),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """
+    Get a presigned URL to download the presentation as PPTX.
+
+    The URL is valid for 1 hour and can be used directly
+    by the browser or any HTTP client.
+    """
+    from services.docs_storage_service import get_docs_storage_service
+
+    tenant_id, user_id = get_user_ids(current_user)
+
+    # Verify access
+    await _verify_presentation_access(db, presentation_id, user_id, "view")
+
+    # Get storage path
+    result = await db.execute(
+        text("SELECT storage_path, title FROM workspace.presentations WHERE id = CAST(:id AS uuid)"),
+        {"id": presentation_id}
+    )
+    row = result.fetchone()
+
+    if not row or not row.storage_path:
+        raise HTTPException(status_code=404, detail="Presentation file not found")
+
+    # Generate presigned URL
+    storage = get_docs_storage_service()
+    download_url = await storage.generate_presigned_url(
+        storage_path=row.storage_path,
+        expires_in=3600,
+        operation="get_object"
+    )
+
+    return {
+        "download_url": download_url,
+        "filename": f"{row.title}.pptx",
+        "expires_in": 3600,
+    }

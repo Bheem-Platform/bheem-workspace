@@ -87,11 +87,12 @@ export default function DocsPage() {
   const [unifiedLoading, setUnifiedLoading] = useState(false);
   const [stats, setStats] = useState<productivityApi.ProductivityStats | null>(null);
 
-  // Create new document
+  // Create new document (Word format for OnlyOffice editing)
   const handleCreateNewDocument = async () => {
     setIsCreatingDoc(true);
     try {
-      const doc = await docsEditorApi.createDocument({
+      // Create a Word document (.docx) that can be edited in OnlyOffice
+      const doc = await docsEditorApi.createWordDocument({
         title: 'Untitled Document',
         folder_id: currentPath !== '/' ? currentPath : undefined,
       });

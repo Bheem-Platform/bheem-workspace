@@ -70,6 +70,23 @@ export const createDocument = async (data: {
   return response.data;
 };
 
+/**
+ * Create a new Word document (.docx) for OnlyOffice editing
+ * This creates an actual DOCX file that can be edited in OnlyOffice
+ */
+export const createWordDocument = async (data: {
+  title: string;
+  folder_id?: string;
+}): Promise<Document> => {
+  const params = new URLSearchParams();
+  params.append('title', data.title);
+  if (data.folder_id) {
+    params.append('folder_id', data.folder_id);
+  }
+  const response = await api.post(`/docs/v2/documents/create-word?${params.toString()}`);
+  return response.data;
+};
+
 export const saveDocument = async (documentId: string, content: any, createVersion = false): Promise<void> => {
   await api.put(`/docs/editor/documents/${documentId}/content`, {
     content,
@@ -78,7 +95,13 @@ export const saveDocument = async (documentId: string, content: any, createVersi
 };
 
 export const updateDocumentTitle = async (documentId: string, title: string): Promise<void> => {
-  await api.patch(`/docs/editor/documents/${documentId}`, { title });
+  // Try v2 endpoint first (for Word documents), fallback to editor endpoint
+  try {
+    await api.patch(`/docs/v2/documents/${documentId}`, { title });
+  } catch (err: any) {
+    // Fallback to old endpoint
+    await api.patch(`/docs/editor/documents/${documentId}`, { title });
+  }
 };
 
 export const deleteDocument = async (documentId: string): Promise<void> => {
@@ -95,7 +118,12 @@ export const moveDocument = async (documentId: string, folderId: string): Promis
 };
 
 export const toggleFavorite = async (documentId: string, isFavorite: boolean): Promise<void> => {
-  await api.patch(`/docs/editor/documents/${documentId}`, { is_favorite: isFavorite });
+  // Try v2 endpoint first (for Word documents), fallback to editor endpoint
+  try {
+    await api.patch(`/docs/v2/documents/${documentId}`, { is_favorite: isFavorite });
+  } catch {
+    await api.patch(`/docs/editor/documents/${documentId}`, { is_favorite: isFavorite });
+  }
 };
 
 // ===========================================
@@ -198,8 +226,15 @@ export interface Version {
 }
 
 export const getVersionHistory = async (documentId: string): Promise<Version[]> => {
-  const response = await api.get(`/docs/editor/documents/${documentId}/versions`);
-  return response.data.versions || [];
+  // Try v2 endpoint first (for Word documents), fallback to editor endpoint
+  try {
+    const response = await api.get(`/docs/v2/documents/${documentId}/versions`);
+    return response.data.versions || [];
+  } catch {
+    // Fallback to old endpoint
+    const response = await api.get(`/docs/editor/documents/${documentId}/versions`);
+    return response.data.versions || [];
+  }
 };
 
 export const getVersion = async (documentId: string, versionId: string): Promise<Version> => {

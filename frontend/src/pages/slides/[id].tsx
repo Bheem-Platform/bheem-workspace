@@ -8,20 +8,13 @@ import Head from 'next/head';
 import Link from 'next/link';
 import {
   Presentation,
-  Star,
-  StarOff,
-  Share2,
-  Play,
   ArrowLeft,
-  Download,
-  History,
-  MoreHorizontal,
-  Edit3,
-  Eye,
 } from 'lucide-react';
 import { useRequireAuth } from '@/stores/authStore';
 import { api } from '@/lib/api';
 import OnlyOfficePresentationEditor from '@/components/slides/OnlyOfficePresentationEditor';
+import BheemSlidesHeader from '@/components/slides/BheemSlidesHeader';
+import ShareModal from '@/components/shared/ShareModal';
 
 interface PresentationData {
   id: string;
@@ -45,6 +38,7 @@ export default function PresentationEditorPage() {
   const [editorMode, setEditorMode] = useState<'edit' | 'view'>('edit');
   const [editorReady, setEditorReady] = useState(false);
   const [showVersions, setShowVersions] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
 
   const fetchPresentation = useCallback(async (showLoading = true) => {
     if (!id) return;
@@ -179,107 +173,23 @@ export default function PresentationEditorPage() {
       </Head>
 
       <div className="min-h-screen bg-gray-100 flex flex-col">
-        {/* Top Bar */}
-        <header className="bg-white border-b border-gray-200 flex-shrink-0 z-10">
-          <div className="flex items-center px-4 py-2">
-            {/* Logo and Back */}
-            <Link href="/slides" className="p-2 hover:bg-gray-100 rounded-full mr-2">
-              <Presentation className="h-7 w-7 text-orange-600" />
-            </Link>
-
-            {/* Title */}
-            <div className="flex-1">
-              <input
-                type="text"
-                value={presentation.title}
-                onChange={(e) => handleTitleChange(e.target.value)}
-                onBlur={(e) => updateTitle(e.target.value)}
-                className="text-lg font-medium text-gray-900 bg-transparent border-none focus:outline-none focus:ring-2 focus:ring-orange-500 rounded px-2 py-1 w-full max-w-md"
-              />
-              <div className="flex items-center space-x-2 text-xs text-gray-500 ml-2 mt-0.5">
-                <button
-                  onClick={toggleStar}
-                  className="p-1 hover:bg-gray-100 rounded"
-                  title={presentation.is_starred ? 'Remove star' : 'Add star'}
-                >
-                  {presentation.is_starred ? (
-                    <Star size={14} className="text-yellow-500 fill-yellow-500" />
-                  ) : (
-                    <StarOff size={14} />
-                  )}
-                </button>
-                <span className="text-gray-400">|</span>
-                <span>
-                  {editorReady ? 'All changes saved' : 'Connecting...'}
-                </span>
-                {presentation.version > 1 && (
-                  <>
-                    <span className="text-gray-400">|</span>
-                    <span>Version {presentation.version}</span>
-                  </>
-                )}
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="flex items-center space-x-2">
-              {/* Mode Toggle */}
-              <div className="flex items-center bg-gray-100 rounded-lg p-1">
-                <button
-                  onClick={() => setEditorMode('edit')}
-                  className={`flex items-center px-3 py-1.5 rounded text-sm ${
-                    editorMode === 'edit'
-                      ? 'bg-white shadow text-orange-600'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  <Edit3 size={14} className="mr-1" />
-                  Edit
-                </button>
-                <button
-                  onClick={() => setEditorMode('view')}
-                  className={`flex items-center px-3 py-1.5 rounded text-sm ${
-                    editorMode === 'view'
-                      ? 'bg-white shadow text-orange-600'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  <Eye size={14} className="mr-1" />
-                  View
-                </button>
-              </div>
-
-              {/* Version History */}
-              <button
-                onClick={() => setShowVersions(!showVersions)}
-                className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
-                title="Version history"
-              >
-                <History size={20} />
-              </button>
-
-              {/* Download */}
-              <button
-                onClick={downloadPresentation}
-                className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg"
-                title="Download"
-              >
-                <Download size={20} />
-              </button>
-
-              {/* Share */}
-              <button className="flex items-center px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700">
-                <Share2 size={18} className="mr-2" />
-                Share
-              </button>
-
-              {/* More */}
-              <button className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg">
-                <MoreHorizontal size={20} />
-              </button>
-            </div>
-          </div>
-        </header>
+        {/* Custom Bheem Header */}
+        <BheemSlidesHeader
+          title={presentation.title}
+          isStarred={presentation.is_starred}
+          isSaving={false}
+          isSaved={editorReady}
+          version={presentation.version}
+          onTitleChange={handleTitleChange}
+          onToggleStar={toggleStar}
+          onShare={() => setShowShareModal(true)}
+          onDownload={downloadPresentation}
+          onShowHistory={() => setShowVersions(!showVersions)}
+          onPresent={() => {
+            // Open presentation in new fullscreen window
+            window.open(`/slides/${presentation.id}/present`, '_blank', 'fullscreen=yes');
+          }}
+        />
 
         {/* OnlyOffice Editor */}
         <div className="flex-1 relative">
@@ -301,6 +211,7 @@ export default function PresentationEditorPage() {
             }}
             className="h-full"
           />
+
         </div>
 
         {/* Version History Sidebar */}
@@ -310,6 +221,15 @@ export default function PresentationEditorPage() {
             onClose={() => setShowVersions(false)}
           />
         )}
+
+        {/* Share Modal */}
+        <ShareModal
+          isOpen={showShareModal}
+          onClose={() => setShowShareModal(false)}
+          documentId={presentation.id}
+          documentType="slide"
+          documentTitle={presentation.title}
+        />
       </div>
     </>
   );

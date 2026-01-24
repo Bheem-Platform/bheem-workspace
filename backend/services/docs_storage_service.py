@@ -1,29 +1,29 @@
 """
-Bheem Docs - Unified Storage Service
-=====================================
-Handles file storage for both internal (ERP) and external (SaaS) users.
-Supports S3-compatible storage (existing Bheem infrastructure).
+Bheem Docs - Storage Service (Nextcloud with S3 Fallback)
+==========================================================
+Handles file storage via Nextcloud WebDAV as per developer guide.
+Includes S3 fallback for backward compatibility with legacy files.
 
 Storage Structure:
-- internal/{company_id}/...  - ERP company documents
-- external/{tenant_id}/...   - SaaS tenant documents
-- shared/templates/...       - Global templates
+- /Documents/{tenant_id}/{document_id}.{ext}
+- /Documents/internal/{company_id}/{document_id}.{ext}
 
-Configuration:
-- Uses existing S3 credentials from config
-- Bucket: bheem-docs (or bheem for shared storage)
+Uses Nextcloud WebDAV API for all file operations.
+Falls back to S3 for legacy files not yet migrated to Nextcloud.
 """
+
+import io
+import hashlib
+import logging
+import mimetypes
+from typing import BinaryIO, Dict, Any, Optional, Tuple, List
+from uuid import UUID
+from datetime import datetime
+import httpx
+import xml.etree.ElementTree as ET
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ClientError
-from typing import Optional, BinaryIO, List, Dict, Any, Tuple
-from uuid import UUID
-import hashlib
-from datetime import datetime, timedelta
-import mimetypes
-import logging
-import io
 
 from core.config import settings
 
@@ -32,59 +32,76 @@ logger = logging.getLogger(__name__)
 
 class DocsStorageService:
     """
-    Unified storage service using S3-compatible backend.
+    Storage service using Nextcloud WebDAV backend.
 
-    Supports:
-    - File upload with chunking for large files
-    - Presigned URLs for direct browser upload/download
-    - Storage usage calculation
-    - File metadata extraction
+    All files are stored in Nextcloud which uses S3 as its storage backend.
+    This ensures files are visible when users login to docs.bheem.cloud.
     """
 
     def __init__(self):
-        # Use Docs-specific S3 config or fall back to main S3 config
-        endpoint = settings.DOCS_S3_ENDPOINT or settings.S3_ENDPOINT
-        access_key = settings.DOCS_S3_ACCESS_KEY or settings.S3_ACCESS_KEY
-        secret_key = settings.DOCS_S3_SECRET_KEY or settings.S3_SECRET_KEY
-        region = settings.DOCS_S3_REGION or settings.S3_REGION
-
-        self.s3_client = boto3.client(
-            's3',
-            endpoint_url=endpoint,
-            aws_access_key_id=access_key,
-            aws_secret_access_key=secret_key,
-            config=Config(signature_version='s3v4'),
-            region_name=region
-        )
-
-        # Primary bucket for docs
-        self.bucket = settings.DOCS_S3_BUCKET or settings.S3_BUCKET
-
-        # Ensure bucket exists
-        self._ensure_bucket_exists()
+        self.nextcloud_url = settings.NEXTCLOUD_URL
+        self.admin_user = settings.NEXTCLOUD_ADMIN_USER
+        self.admin_pass = settings.NEXTCLOUD_ADMIN_PASSWORD
 
         # Max file size from config
-        self.max_file_size = settings.DOCS_MAX_FILE_SIZE_BYTES
+        self.max_file_size = getattr(settings, 'DOCS_MAX_FILE_SIZE_BYTES', 100 * 1024 * 1024)
 
         # Allowed extensions
-        self.allowed_extensions = set(
-            settings.DOCS_ALLOWED_EXTENSIONS.lower().split(',')
-        )
+        allowed = getattr(settings, 'DOCS_ALLOWED_EXTENSIONS', 'pdf,doc,docx,xls,xlsx,ppt,pptx,txt,rtf,odt,ods,odp,csv,jpg,jpeg,png,gif,bmp,svg,zip,rar,7z,tar,gz')
+        self.allowed_extensions = set(allowed.lower().split(','))
 
-    def _ensure_bucket_exists(self):
-        """Create bucket if it doesn't exist"""
-        try:
-            self.s3_client.head_bucket(Bucket=self.bucket)
-        except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code')
-            if error_code == '404':
-                try:
-                    self.s3_client.create_bucket(Bucket=self.bucket)
-                    logger.info(f"Created bucket: {self.bucket}")
-                except Exception as create_error:
-                    logger.warning(f"Could not create bucket: {create_error}")
-            else:
-                logger.warning(f"Bucket check failed: {e}")
+        # For compatibility with existing code
+        self.bucket = "nextcloud"
+
+        # S3 fallback for legacy files
+        s3_endpoint = getattr(settings, 'DOCS_S3_ENDPOINT', None) or getattr(settings, 'S3_ENDPOINT', None)
+        s3_access_key = getattr(settings, 'DOCS_S3_ACCESS_KEY', None) or getattr(settings, 'S3_ACCESS_KEY', None)
+        s3_secret_key = getattr(settings, 'DOCS_S3_SECRET_KEY', None) or getattr(settings, 'S3_SECRET_KEY', None)
+        s3_region = getattr(settings, 'DOCS_S3_REGION', None) or getattr(settings, 'S3_REGION', 'us-east-1')
+        self.s3_bucket = getattr(settings, 'DOCS_S3_BUCKET', None) or getattr(settings, 'S3_BUCKET', 'bheem')
+
+        if s3_endpoint and s3_access_key and s3_secret_key:
+            self.s3_client = boto3.client(
+                's3',
+                endpoint_url=s3_endpoint,
+                aws_access_key_id=s3_access_key,
+                aws_secret_access_key=s3_secret_key,
+                config=Config(signature_version='s3v4'),
+                region_name=s3_region
+            )
+            logger.info(f"S3 fallback configured: {s3_endpoint}, bucket: {self.s3_bucket}")
+        else:
+            self.s3_client = None
+            logger.warning("S3 fallback not configured - legacy files may not be accessible")
+
+        logger.info(f"DocsStorageService initialized with Nextcloud at {self.nextcloud_url}")
+
+    def _get_webdav_url(self, target_user: str = None) -> str:
+        """
+        Get WebDAV base URL for a target user's files.
+
+        Args:
+            target_user: The Nextcloud username whose files to access.
+                        If None, uses admin user.
+
+        Note: Admin credentials are used for auth, but path targets the user's folder.
+        """
+        user = target_user or self.admin_user
+        return f"{self.nextcloud_url}/remote.php/dav/files/{user}"
+
+    def _get_auth(self, username: str = None, password: str = None) -> Tuple[str, str]:
+        """
+        Get authentication credentials.
+        Always use admin credentials for server-side operations.
+        """
+        return (username or self.admin_user, password or self.admin_pass)
+
+    def get_nextcloud_username(self, user_email: str) -> str:
+        """
+        Convert user email to Nextcloud username.
+        Nextcloud usernames are typically the email address.
+        """
+        return user_email.lower() if user_email else self.admin_user
 
     def get_storage_path(
         self,
@@ -93,50 +110,84 @@ class DocsStorageService:
         folder_path: str = ""
     ) -> str:
         """
-        Generate storage path based on internal/external mode.
+        Generate Nextcloud storage path within user's folder.
 
-        Args:
-            company_id: ERP company ID (internal mode)
-            tenant_id: SaaS tenant ID (external mode)
-            folder_path: Additional path within storage
-
-        Returns:
-            Full storage path prefix
+        Structure (all paths are relative to user's Nextcloud home):
+        - /BheemDocs/  - All Bheem documents go here
+        - Files are organized by document, not by company (since each user has their own folder)
         """
-        # Normalize folder path
-        folder_path = folder_path.strip('/')
-
-        if company_id:
-            # Internal mode - ERP company storage
-            base = f"internal/{company_id}"
-        elif tenant_id:
-            # External mode - SaaS tenant storage
-            base = f"external/{tenant_id}"
-        else:
-            raise ValueError("Either company_id or tenant_id is required")
+        base = "/BheemDocs"
+        folder_path = folder_path.strip('/') if folder_path else ""
 
         if folder_path:
-            return f"{base}/{folder_path}"
-        return base
+            path = f"{base}/{folder_path}"
+        else:
+            path = base
+
+        return path
 
     def validate_file(self, filename: str, file_size: int) -> Tuple[bool, str]:
-        """
-        Validate file before upload.
-
-        Returns:
-            Tuple of (is_valid, error_message)
-        """
+        """Validate file before upload."""
         # Check file size
         if file_size > self.max_file_size:
             max_mb = self.max_file_size / (1024 * 1024)
-            return False, f"File too large. Maximum size is {max_mb}MB"
+            return False, f"File size exceeds maximum allowed ({max_mb}MB)"
 
         # Check extension
         ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
         if ext and ext not in self.allowed_extensions:
-            return False, f"File type '.{ext}' is not allowed"
+            return False, f"File type .{ext} is not allowed"
 
         return True, ""
+
+    async def ensure_folder_exists(
+        self,
+        path: str,
+        username: str = None,
+        password: str = None,
+        target_user: str = None
+    ) -> bool:
+        """Create folder hierarchy if it doesn't exist"""
+        auth = self._get_auth(username, password)
+        webdav_url = self._get_webdav_url(target_user)
+
+        # Split path and create each level
+        parts = path.strip('/').split('/')
+        current_path = ""
+
+        async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+            for part in parts:
+                current_path = f"{current_path}/{part}"
+                folder_url = f"{webdav_url}{current_path}"
+
+                # Check if exists first
+                try:
+                    response = await client.request(
+                        method="PROPFIND",
+                        url=folder_url,
+                        auth=auth,
+                        headers={"Depth": "0"}
+                    )
+                    if response.status_code == 207:
+                        continue  # Already exists
+                except:
+                    pass
+
+                # Create folder
+                try:
+                    response = await client.request(
+                        method="MKCOL",
+                        url=folder_url,
+                        auth=auth
+                    )
+                    if response.status_code in [201, 204]:
+                        logger.info(f"Created folder: {current_path}")
+                    elif response.status_code != 405:  # 405 = already exists
+                        logger.warning(f"Failed to create folder {current_path}: {response.status_code}")
+                except Exception as e:
+                    logger.warning(f"Error creating folder {current_path}: {e}")
+
+        return True
 
     async def upload_file(
         self,
@@ -146,10 +197,13 @@ class DocsStorageService:
         tenant_id: Optional[UUID] = None,
         folder_path: str = "",
         content_type: Optional[str] = None,
-        metadata: Optional[Dict[str, str]] = None
+        metadata: Optional[Dict[str, str]] = None,
+        username: str = None,
+        password: str = None,
+        nextcloud_user: str = None
     ) -> Dict[str, Any]:
         """
-        Upload file to storage.
+        Upload file to Nextcloud via WebDAV.
 
         Args:
             file: File-like object to upload
@@ -157,16 +211,21 @@ class DocsStorageService:
             company_id: ERP company ID (for internal mode)
             tenant_id: SaaS tenant ID (for external mode)
             folder_path: Path within storage
-            content_type: MIME type (auto-detected if not provided)
-            metadata: Additional metadata to store
+            content_type: MIME type
+            metadata: Additional metadata
+            username: Auth username (defaults to admin)
+            password: Auth password (defaults to admin)
+            nextcloud_user: Target user's Nextcloud folder (e.g., user's email)
 
         Returns:
             Dict with storage details
         """
         # Read file content
-        file_content = file.read()
+        file_content = file.read() if hasattr(file, 'read') else file
+        if isinstance(file_content, str):
+            file_content = file_content.encode('utf-8')
+
         file_size = len(file_content)
-        file.seek(0)
 
         # Validate
         is_valid, error = self.validate_file(filename, file_size)
@@ -175,7 +234,7 @@ class DocsStorageService:
 
         # Generate storage path
         storage_prefix = self.get_storage_path(company_id, tenant_id, folder_path)
-        key = f"{storage_prefix}/{filename}"
+        storage_path = f"{storage_prefix}/{filename}"
 
         # Auto-detect content type
         if not content_type:
@@ -185,77 +244,162 @@ class DocsStorageService:
         # Calculate checksum
         checksum = hashlib.sha256(file_content).hexdigest()
 
-        # Prepare metadata
-        upload_metadata = {
-            'checksum': checksum,
-            'uploaded_at': datetime.utcnow().isoformat(),
-            'original_filename': filename
-        }
-        if metadata:
-            upload_metadata.update(metadata)
+        # Ensure folder exists in the target user's folder
+        target_user = nextcloud_user or self.admin_user
+        await self.ensure_folder_exists(storage_prefix, username, password, target_user)
 
-        # Upload to S3
+        # Upload to Nextcloud (target user's folder, admin auth)
+        auth = self._get_auth(username, password)
+        webdav_url = f"{self._get_webdav_url(target_user)}{storage_path}"
+
         try:
-            self.s3_client.upload_fileobj(
-                io.BytesIO(file_content),
-                self.bucket,
-                key,
-                ExtraArgs={
-                    'ContentType': content_type,
-                    'Metadata': upload_metadata
-                }
-            )
+            async with httpx.AsyncClient(verify=False, timeout=120.0) as client:
+                headers = {"Content-Type": content_type} if content_type else {}
 
-            logger.info(f"Uploaded file: {key} ({file_size} bytes)")
+                response = await client.put(
+                    url=webdav_url,
+                    content=file_content,
+                    auth=auth,
+                    headers=headers
+                )
+
+                if response.status_code not in [201, 204]:
+                    raise Exception(f"Upload failed with status {response.status_code}: {response.text}")
+
+            logger.info(f"Uploaded file to Nextcloud: {target_user}:{storage_path} ({file_size} bytes)")
 
             return {
-                'storage_path': key,
-                'storage_bucket': self.bucket,
+                'storage_path': storage_path,
+                'storage_bucket': 'nextcloud',
                 'checksum': checksum,
                 'file_size': file_size,
-                'content_type': content_type
+                'content_type': content_type,
+                'nextcloud_user': target_user
             }
-
         except Exception as e:
-            logger.error(f"Upload failed for {key}: {e}")
+            logger.error(f"Failed to upload to Nextcloud: {e}")
             raise
 
-    async def download_file(self, storage_path: str) -> Tuple[BinaryIO, Dict[str, Any]]:
+    async def download_file(
+        self,
+        storage_path: str,
+        username: str = None,
+        password: str = None,
+        nextcloud_user: str = None
+    ) -> Tuple[BinaryIO, Dict[str, Any]]:
         """
-        Download file from storage.
+        Download file from Nextcloud.
+
+        Args:
+            storage_path: Path to file within user's folder
+            username: Auth username (defaults to admin)
+            password: Auth password (defaults to admin)
+            nextcloud_user: Target user's Nextcloud folder
 
         Returns:
-            Tuple of (file_content, metadata)
+            Tuple of (file stream, metadata dict)
         """
+        target_user = nextcloud_user or self.admin_user
+        auth = self._get_auth(username, password)
+
+        # Build list of paths to try (handle legacy S3-style paths)
+        paths_to_try = [storage_path]
+        if not storage_path.startswith('/'):
+            # Legacy S3 path without leading slash - try with /Documents/ prefix
+            paths_to_try.append(f"/Documents/{storage_path}")
+
+        # Try user's folder first, then admin folder for backward compatibility
+        users_to_try = [target_user]
+        if target_user != self.admin_user:
+            users_to_try.append(self.admin_user)
+
+        last_error = None
+        for user in users_to_try:
+            for path in paths_to_try:
+                webdav_url = f"{self._get_webdav_url(user)}{path}"
+
+                try:
+                    async with httpx.AsyncClient(verify=False, timeout=120.0) as client:
+                        response = await client.get(
+                            url=webdav_url,
+                            auth=auth
+                        )
+
+                        if response.status_code == 200:
+                            content = response.content
+                            metadata = {
+                                'content_type': response.headers.get('content-type'),
+                                'content_length': len(content),
+                                'last_modified': response.headers.get('last-modified'),
+                                'metadata': {}
+                            }
+                            logger.info(f"Downloaded file from {user}'s folder: {path}")
+                            return io.BytesIO(content), metadata
+                        elif response.status_code == 404:
+                            logger.debug(f"File not found at {webdav_url}, trying next...")
+                            last_error = FileNotFoundError(f"File not found: {storage_path}")
+                            continue
+                        else:
+                            last_error = Exception(f"Download failed with status {response.status_code}")
+                            continue
+                except Exception as e:
+                    last_error = e
+                    continue
+
+        # Try S3 fallback for legacy files
+        if self.s3_client:
+            # Try original path and without leading slash
+            s3_paths = [storage_path.lstrip('/'), storage_path]
+            for s3_path in s3_paths:
+                try:
+                    logger.info(f"Trying S3 fallback: {self.s3_bucket}/{s3_path}")
+                    response = self.s3_client.get_object(
+                        Bucket=self.s3_bucket,
+                        Key=s3_path
+                    )
+                    content = response['Body'].read()
+                    metadata = {
+                        'content_type': response.get('ContentType', 'application/octet-stream'),
+                        'content_length': len(content),
+                        'last_modified': str(response.get('LastModified', '')),
+                        'metadata': response.get('Metadata', {})
+                    }
+                    logger.info(f"Downloaded file from S3 fallback: {s3_path}")
+                    return io.BytesIO(content), metadata
+                except self.s3_client.exceptions.NoSuchKey:
+                    logger.debug(f"File not found in S3: {s3_path}")
+                    continue
+                except Exception as e:
+                    logger.debug(f"S3 fallback error: {e}")
+                    continue
+
+        # If we get here, file wasn't found in any location
+        logger.error(f"Failed to download from Nextcloud and S3: {storage_path}")
+        raise FileNotFoundError(f"File not found: {storage_path}")
+
+    async def delete_file(
+        self,
+        storage_path: str,
+        username: str = None,
+        password: str = None
+    ) -> bool:
+        """Delete file from Nextcloud."""
+        auth = self._get_auth(username, password)
+        webdav_url = f"{self._get_webdav_url(username)}{storage_path}"
+
         try:
-            response = self.s3_client.get_object(
-                Bucket=self.bucket,
-                Key=storage_path
-            )
+            async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+                response = await client.delete(
+                    url=webdav_url,
+                    auth=auth
+                )
 
-            metadata = {
-                'content_type': response.get('ContentType'),
-                'content_length': response.get('ContentLength'),
-                'last_modified': response.get('LastModified'),
-                'metadata': response.get('Metadata', {})
-            }
-
-            return response['Body'], metadata
-
-        except ClientError as e:
-            if e.response['Error']['Code'] == 'NoSuchKey':
-                raise FileNotFoundError(f"File not found: {storage_path}")
-            raise
-
-    async def delete_file(self, storage_path: str) -> bool:
-        """Delete file from storage."""
-        try:
-            self.s3_client.delete_object(
-                Bucket=self.bucket,
-                Key=storage_path
-            )
-            logger.info(f"Deleted file: {storage_path}")
-            return True
+                if response.status_code in [204, 200, 404]:
+                    logger.info(f"Deleted file: {storage_path}")
+                    return True
+                else:
+                    logger.warning(f"Delete failed for {storage_path}: {response.status_code}")
+                    return False
         except Exception as e:
             logger.error(f"Delete failed for {storage_path}: {e}")
             raise
@@ -263,17 +407,33 @@ class DocsStorageService:
     async def copy_file(
         self,
         source_path: str,
-        dest_path: str
+        dest_path: str,
+        username: str = None,
+        password: str = None
     ) -> Dict[str, Any]:
-        """Copy file within storage."""
+        """Copy a file within Nextcloud."""
+        auth = self._get_auth(username, password)
+        source_url = f"{self._get_webdav_url(username)}{source_path}"
+        dest_url = f"{self._get_webdav_url(username)}{dest_path}"
+
+        # Ensure destination folder exists
+        dest_folder = '/'.join(dest_path.split('/')[:-1])
+        await self.ensure_folder_exists(dest_folder, username, password)
+
         try:
-            self.s3_client.copy_object(
-                Bucket=self.bucket,
-                CopySource={'Bucket': self.bucket, 'Key': source_path},
-                Key=dest_path
-            )
-            logger.info(f"Copied file: {source_path} -> {dest_path}")
-            return {'storage_path': dest_path}
+            async with httpx.AsyncClient(verify=False, timeout=60.0) as client:
+                response = await client.request(
+                    method="COPY",
+                    url=source_url,
+                    auth=auth,
+                    headers={"Destination": dest_url}
+                )
+
+                if response.status_code in [201, 204]:
+                    logger.info(f"Copied file: {source_path} -> {dest_path}")
+                    return {'storage_path': dest_path}
+                else:
+                    raise Exception(f"Copy failed with status {response.status_code}")
         except Exception as e:
             logger.error(f"Copy failed: {e}")
             raise
@@ -281,12 +441,201 @@ class DocsStorageService:
     async def move_file(
         self,
         source_path: str,
-        dest_path: str
+        dest_path: str,
+        username: str = None,
+        password: str = None
     ) -> Dict[str, Any]:
-        """Move file (copy + delete source)."""
-        result = await self.copy_file(source_path, dest_path)
-        await self.delete_file(source_path)
-        return result
+        """Move/rename a file within Nextcloud."""
+        auth = self._get_auth(username, password)
+        source_url = f"{self._get_webdav_url(username)}{source_path}"
+        dest_url = f"{self._get_webdav_url(username)}{dest_path}"
+
+        # Ensure destination folder exists
+        dest_folder = '/'.join(dest_path.split('/')[:-1])
+        await self.ensure_folder_exists(dest_folder, username, password)
+
+        try:
+            async with httpx.AsyncClient(verify=False, timeout=60.0) as client:
+                response = await client.request(
+                    method="MOVE",
+                    url=source_url,
+                    auth=auth,
+                    headers={"Destination": dest_url}
+                )
+
+                if response.status_code in [201, 204]:
+                    logger.info(f"Moved file: {source_path} -> {dest_path}")
+                    return {'storage_path': dest_path}
+                else:
+                    raise Exception(f"Move failed with status {response.status_code}")
+        except Exception as e:
+            logger.error(f"Move failed: {e}")
+            raise
+
+    async def file_exists(
+        self,
+        storage_path: str,
+        username: str = None,
+        password: str = None
+    ) -> bool:
+        """Check if file exists in Nextcloud."""
+        auth = self._get_auth(username, password)
+        webdav_url = f"{self._get_webdav_url(username)}{storage_path}"
+
+        try:
+            async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
+                response = await client.request(
+                    method="PROPFIND",
+                    url=webdav_url,
+                    auth=auth,
+                    headers={"Depth": "0"}
+                )
+                return response.status_code == 207
+        except:
+            return False
+
+    async def get_file_info(
+        self,
+        storage_path: str,
+        username: str = None,
+        password: str = None
+    ) -> Optional[Dict[str, Any]]:
+        """Get file metadata without downloading."""
+        auth = self._get_auth(username, password)
+        webdav_url = f"{self._get_webdav_url(username)}{storage_path}"
+
+        propfind_body = '''<?xml version="1.0"?>
+        <d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
+            <d:prop>
+                <d:getlastmodified/>
+                <d:getcontentlength/>
+                <d:getcontenttype/>
+                <oc:fileid/>
+            </d:prop>
+        </d:propfind>'''
+
+        try:
+            async with httpx.AsyncClient(verify=False, timeout=15.0) as client:
+                response = await client.request(
+                    method="PROPFIND",
+                    url=webdav_url,
+                    auth=auth,
+                    content=propfind_body,
+                    headers={"Depth": "0", "Content-Type": "application/xml"}
+                )
+
+                if response.status_code == 207:
+                    root = ET.fromstring(response.content)
+                    ns = {"d": "DAV:", "oc": "http://owncloud.org/ns"}
+
+                    props = root.find(".//d:prop", ns)
+                    if props is not None:
+                        size_elem = props.find("d:getcontentlength", ns)
+                        type_elem = props.find("d:getcontenttype", ns)
+                        modified_elem = props.find("d:getlastmodified", ns)
+
+                        return {
+                            'content_length': int(size_elem.text) if size_elem is not None and size_elem.text else 0,
+                            'content_type': type_elem.text if type_elem is not None else None,
+                            'last_modified': modified_elem.text if modified_elem is not None else None,
+                            'metadata': {}
+                        }
+                return None
+        except Exception as e:
+            logger.error(f"Get file info failed: {e}")
+            return None
+
+    async def list_files(
+        self,
+        company_id: Optional[UUID] = None,
+        tenant_id: Optional[UUID] = None,
+        folder_path: str = "",
+        max_keys: int = 1000,
+        username: str = None,
+        password: str = None
+    ) -> List[Dict[str, Any]]:
+        """List files in a Nextcloud folder."""
+        storage_path = self.get_storage_path(company_id, tenant_id, folder_path)
+        auth = self._get_auth(username, password)
+        webdav_url = f"{self._get_webdav_url(username)}{storage_path}"
+
+        propfind_body = '''<?xml version="1.0"?>
+        <d:propfind xmlns:d="DAV:" xmlns:oc="http://owncloud.org/ns">
+            <d:prop>
+                <d:getlastmodified/>
+                <d:getcontentlength/>
+                <d:getcontenttype/>
+                <d:resourcetype/>
+                <oc:fileid/>
+                <d:displayname/>
+            </d:prop>
+        </d:propfind>'''
+
+        try:
+            async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+                response = await client.request(
+                    method="PROPFIND",
+                    url=webdav_url,
+                    auth=auth,
+                    content=propfind_body,
+                    headers={"Depth": "1", "Content-Type": "application/xml"}
+                )
+
+                if response.status_code != 207:
+                    return []
+
+                root = ET.fromstring(response.content)
+                ns = {"d": "DAV:", "oc": "http://owncloud.org/ns"}
+
+                files = []
+                for resp_elem in root.findall(".//d:response", ns):
+                    href = resp_elem.find("d:href", ns).text
+                    props = resp_elem.find(".//d:prop", ns)
+
+                    # Skip root folder
+                    if href.rstrip("/").endswith(storage_path.rstrip("/")):
+                        continue
+
+                    is_folder = props.find(".//d:resourcetype/d:collection", ns) is not None
+                    name = href.rstrip("/").split("/")[-1]
+
+                    if not name:
+                        continue
+
+                    size_elem = props.find("d:getcontentlength", ns)
+                    modified_elem = props.find("d:getlastmodified", ns)
+
+                    files.append({
+                        'name': name,
+                        'type': 'folder' if is_folder else 'file',
+                        'path': href,
+                        'size': int(size_elem.text) if size_elem is not None and size_elem.text else 0,
+                        'last_modified': modified_elem.text if modified_elem is not None else None
+                    })
+
+                return files[:max_keys]
+        except Exception as e:
+            logger.error(f"List files failed: {e}")
+            return []
+
+    async def get_storage_usage(
+        self,
+        company_id: Optional[UUID] = None,
+        tenant_id: Optional[UUID] = None
+    ) -> Dict[str, Any]:
+        """Calculate storage usage for a company/tenant."""
+        files = await self.list_files(company_id, tenant_id)
+
+        total_size = sum(f.get('size', 0) for f in files if f.get('type') == 'file')
+        object_count = len([f for f in files if f.get('type') == 'file'])
+
+        return {
+            'used_bytes': total_size,
+            'used_mb': round(total_size / (1024 * 1024), 2),
+            'used_gb': round(total_size / (1024 * 1024 * 1024), 4),
+            'object_count': object_count,
+            'prefix': self.get_storage_path(company_id, tenant_id)
+        }
 
     async def generate_presigned_url(
         self,
@@ -296,35 +645,36 @@ class DocsStorageService:
         content_type: Optional[str] = None
     ) -> str:
         """
-        Generate presigned URL for direct browser access.
-
-        Args:
-            storage_path: Path to file in storage
-            expires_in: URL expiration in seconds (default 1 hour)
-            operation: 'get_object' for download, 'put_object' for upload
-            content_type: Required for put_object
-
-        Returns:
-            Presigned URL
+        Generate a download URL for a file.
+        For Nextcloud, we create a share link.
         """
-        params = {
-            'Bucket': self.bucket,
-            'Key': storage_path
-        }
-
-        if operation == 'put_object' and content_type:
-            params['ContentType'] = content_type
+        # Create a temporary share link
+        auth = self._get_auth()
+        ocs_url = f"{self.nextcloud_url}/ocs/v2.php/apps/files_sharing/api/v1/shares"
 
         try:
-            url = self.s3_client.generate_presigned_url(
-                operation,
-                Params=params,
-                ExpiresIn=expires_in
-            )
-            return url
+            async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
+                response = await client.post(
+                    url=ocs_url,
+                    auth=auth,
+                    headers={"OCS-APIREQUEST": "true"},
+                    data={
+                        "path": storage_path,
+                        "shareType": 3,  # Public link
+                        "permissions": 1  # Read only
+                    }
+                )
+
+                if response.status_code == 200:
+                    root = ET.fromstring(response.content)
+                    url_elem = root.find(".//url")
+                    if url_elem is not None:
+                        return f"{url_elem.text}/download"
         except Exception as e:
-            logger.error(f"Failed to generate presigned URL: {e}")
-            raise
+            logger.warning(f"Failed to create share link: {e}")
+
+        # Fallback: return direct WebDAV URL (requires auth)
+        return f"{self._get_webdav_url()}{storage_path}"
 
     async def generate_upload_url(
         self,
@@ -336,153 +686,24 @@ class DocsStorageService:
         expires_in: int = 3600
     ) -> Dict[str, str]:
         """
-        Generate presigned URL for direct browser upload.
-
-        Returns:
-            Dict with upload_url and storage_path
+        Generate upload info for Nextcloud.
+        Note: Nextcloud doesn't support presigned upload URLs like S3.
+        Returns WebDAV URL that requires authentication.
         """
-        # Generate storage path
         storage_prefix = self.get_storage_path(company_id, tenant_id, folder_path)
-        key = f"{storage_prefix}/{filename}"
+        storage_path = f"{storage_prefix}/{filename}"
 
-        # Auto-detect content type
         if not content_type:
             content_type, _ = mimetypes.guess_type(filename)
             content_type = content_type or "application/octet-stream"
 
-        url = await self.generate_presigned_url(
-            storage_path=key,
-            expires_in=expires_in,
-            operation='put_object',
-            content_type=content_type
-        )
-
         return {
-            'upload_url': url,
-            'storage_path': key,
-            'content_type': content_type
+            'upload_url': f"{self._get_webdav_url()}{storage_path}",
+            'storage_path': storage_path,
+            'content_type': content_type,
+            'method': 'PUT',
+            'requires_auth': True
         }
-
-    async def get_storage_usage(
-        self,
-        company_id: Optional[UUID] = None,
-        tenant_id: Optional[UUID] = None
-    ) -> Dict[str, Any]:
-        """
-        Calculate storage usage for company/tenant.
-
-        Returns:
-            Dict with used_bytes, object_count
-        """
-        prefix = self.get_storage_path(company_id, tenant_id, "")
-
-        total_size = 0
-        total_objects = 0
-
-        try:
-            paginator = self.s3_client.get_paginator('list_objects_v2')
-            for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
-                for obj in page.get('Contents', []):
-                    total_size += obj['Size']
-                    total_objects += 1
-
-            return {
-                'used_bytes': total_size,
-                'used_mb': round(total_size / (1024 * 1024), 2),
-                'used_gb': round(total_size / (1024 * 1024 * 1024), 2),
-                'object_count': total_objects,
-                'prefix': prefix
-            }
-
-        except Exception as e:
-            logger.error(f"Failed to calculate storage usage: {e}")
-            return {
-                'used_bytes': 0,
-                'object_count': 0,
-                'error': str(e)
-            }
-
-    async def list_files(
-        self,
-        company_id: Optional[UUID] = None,
-        tenant_id: Optional[UUID] = None,
-        folder_path: str = "",
-        max_keys: int = 1000
-    ) -> List[Dict[str, Any]]:
-        """
-        List files in a folder.
-
-        Returns:
-            List of file metadata
-        """
-        prefix = self.get_storage_path(company_id, tenant_id, folder_path)
-        if not prefix.endswith('/'):
-            prefix += '/'
-
-        files = []
-
-        try:
-            response = self.s3_client.list_objects_v2(
-                Bucket=self.bucket,
-                Prefix=prefix,
-                Delimiter='/',
-                MaxKeys=max_keys
-            )
-
-            # Folders (common prefixes)
-            for prefix_obj in response.get('CommonPrefixes', []):
-                folder_name = prefix_obj['Prefix'].rstrip('/').split('/')[-1]
-                files.append({
-                    'name': folder_name,
-                    'type': 'folder',
-                    'path': prefix_obj['Prefix']
-                })
-
-            # Files
-            for obj in response.get('Contents', []):
-                # Skip the folder itself
-                if obj['Key'] == prefix:
-                    continue
-
-                filename = obj['Key'].split('/')[-1]
-                files.append({
-                    'name': filename,
-                    'type': 'file',
-                    'path': obj['Key'],
-                    'size': obj['Size'],
-                    'last_modified': obj['LastModified'].isoformat()
-                })
-
-            return files
-
-        except Exception as e:
-            logger.error(f"Failed to list files: {e}")
-            return []
-
-    async def file_exists(self, storage_path: str) -> bool:
-        """Check if file exists in storage."""
-        try:
-            self.s3_client.head_object(Bucket=self.bucket, Key=storage_path)
-            return True
-        except ClientError:
-            return False
-
-    async def get_file_info(self, storage_path: str) -> Optional[Dict[str, Any]]:
-        """Get file metadata without downloading."""
-        try:
-            response = self.s3_client.head_object(
-                Bucket=self.bucket,
-                Key=storage_path
-            )
-            return {
-                'content_type': response.get('ContentType'),
-                'content_length': response.get('ContentLength'),
-                'last_modified': response.get('LastModified'),
-                'etag': response.get('ETag'),
-                'metadata': response.get('Metadata', {})
-            }
-        except ClientError:
-            return None
 
 
 # Singleton instance

@@ -15,22 +15,15 @@ import Head from 'next/head';
 import Link from 'next/link';
 import {
   FileSpreadsheet,
-  Star,
-  StarOff,
-  Share2,
-  MoreHorizontal,
-  Download,
-  History,
   ArrowLeft,
   Clock,
   Users,
-  CheckCircle,
-  AlertCircle,
-  Loader2,
 } from 'lucide-react';
 import { useRequireAuth } from '@/stores/authStore';
 import { api } from '@/lib/api';
 import OnlyOfficeEditor, { useOnlyOfficeAvailable } from '@/components/sheets/OnlyOfficeEditor';
+import BheemSheetsHeader from '@/components/sheets/BheemSheetsHeader';
+import ShareModal from '@/components/shared/ShareModal';
 
 interface Spreadsheet {
   id: string;
@@ -70,6 +63,7 @@ export default function SpreadsheetEditor() {
   const [versions, setVersions] = useState<Version[]>([]);
   const [loadingVersions, setLoadingVersions] = useState(false);
   const [editorMode, setEditorMode] = useState<'edit' | 'view'>('edit');
+  const [showShareModal, setShowShareModal] = useState(false);
 
   // Check if OnlyOffice is available
   const onlyOfficeAvailable = useOnlyOfficeAvailable();
@@ -279,96 +273,19 @@ export default function SpreadsheetEditor() {
       </Head>
 
       <div className="min-h-screen bg-white flex flex-col">
-        {/* Top Bar */}
-        <header className="bg-white border-b border-gray-200 flex-shrink-0 z-50">
-          <div className="flex items-center px-3 py-2">
-            {/* Logo and Title */}
-            <Link href="/sheets" className="p-2 hover:bg-gray-100 rounded-full">
-              <FileSpreadsheet className="h-8 w-8 text-green-600" />
-            </Link>
-
-            <div className="ml-2 flex-1">
-              <input
-                type="text"
-                value={spreadsheet.title}
-                onChange={(e) => handleTitleChange(e.target.value)}
-                onBlur={(e) => updateTitle(e.target.value)}
-                className="text-lg font-medium text-gray-900 bg-transparent border-none focus:outline-none focus:ring-2 focus:ring-green-500 rounded px-2 py-1"
-              />
-              <div className="flex items-center space-x-2 text-xs text-gray-500 ml-2">
-                <button
-                  onClick={toggleStar}
-                  className="p-1 hover:bg-gray-100 rounded"
-                  title={spreadsheet.is_starred ? 'Remove from starred' : 'Add to starred'}
-                >
-                  {spreadsheet.is_starred ? (
-                    <Star size={14} className="text-yellow-500 fill-yellow-500" />
-                  ) : (
-                    <StarOff size={14} />
-                  )}
-                </button>
-
-                {/* Save status indicator */}
-                <div className="flex items-center space-x-1">
-                  {saveStatus === 'saving' && (
-                    <>
-                      <Loader2 size={12} className="animate-spin" />
-                      <span>Saving...</span>
-                    </>
-                  )}
-                  {saveStatus === 'saved' && (
-                    <>
-                      <CheckCircle size={12} className="text-green-500" />
-                      <span>All changes saved</span>
-                    </>
-                  )}
-                  {saveStatus === 'error' && (
-                    <>
-                      <AlertCircle size={12} className="text-red-500" />
-                      <span className="text-red-500">Save error</span>
-                    </>
-                  )}
-                </div>
-
-                {/* Version indicator */}
-                {spreadsheet.version && (
-                  <span className="text-gray-400">v{spreadsheet.version}</span>
-                )}
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="flex items-center space-x-2">
-              {/* Version history */}
-              <button
-                onClick={handleShowVersions}
-                className={`p-2 rounded-full transition-colors ${
-                  showVersions
-                    ? 'bg-green-100 text-green-600'
-                    : 'text-gray-500 hover:bg-gray-100'
-                }`}
-                title="Version history"
-              >
-                <History size={20} />
-              </button>
-
-              {/* Download */}
-              <button
-                onClick={downloadSpreadsheet}
-                className="p-2 text-gray-500 hover:bg-gray-100 rounded-full"
-                title="Download as XLSX"
-              >
-                <Download size={20} />
-              </button>
-
-              {/* Share */}
-              <button className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
-                <Share2 size={18} className="mr-2" />
-                Share
-              </button>
-            </div>
-          </div>
-        </header>
+        {/* Custom Bheem Header */}
+        <BheemSheetsHeader
+          title={spreadsheet.title}
+          isStarred={spreadsheet.is_starred}
+          isSaving={saveStatus === 'saving'}
+          isSaved={saveStatus === 'saved'}
+          version={spreadsheet.version}
+          onTitleChange={handleTitleChange}
+          onToggleStar={toggleStar}
+          onShare={() => setShowShareModal(true)}
+          onDownload={downloadSpreadsheet}
+          onShowHistory={handleShowVersions}
+        />
 
         {/* Main Content */}
         <div className="flex-1 flex overflow-hidden">
@@ -488,6 +405,15 @@ export default function SpreadsheetEditor() {
             </div>
           )}
         </div>
+
+        {/* Share Modal */}
+        <ShareModal
+          isOpen={showShareModal}
+          onClose={() => setShowShareModal(false)}
+          documentId={spreadsheet.id}
+          documentType="sheet"
+          documentTitle={spreadsheet.title}
+        />
       </div>
     </>
   );

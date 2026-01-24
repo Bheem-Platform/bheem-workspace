@@ -11,14 +11,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { api } from '@/lib/api';
 
-// OnlyOffice DocsAPI type (loaded from external script)
-declare global {
-  interface Window {
-    DocsAPI?: {
-      DocEditor: new (containerId: string, config: EditorConfig) => DocEditorInstance;
-    };
-  }
-}
+// OnlyOffice types are defined in src/types/onlyoffice.d.ts
 
 interface DocEditorInstance {
   destroyEditor: () => void;

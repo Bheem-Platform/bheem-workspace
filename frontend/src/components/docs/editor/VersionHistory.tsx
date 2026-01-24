@@ -10,16 +10,16 @@ interface Version {
   id: string;
   version_number: number;
   title: string;
-  content: any;
-  user: {
+  content?: any;
+  user?: {
     id: string;
     name: string;
     avatar?: string;
   };
   created_at: string;
-  size_bytes: number;
-  is_auto_save: boolean;
-  is_current: boolean;
+  size_bytes?: number;
+  is_auto_save?: boolean;
+  is_current?: boolean;
 }
 
 interface VersionHistoryProps {
@@ -127,14 +127,14 @@ export default function VersionHistory({
                       <div className="flex items-start gap-3">
                         {/* User avatar */}
                         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white text-xs font-medium flex-shrink-0 mt-0.5">
-                          {version.user.avatar ? (
+                          {version.user?.avatar ? (
                             <img
                               src={version.user.avatar}
                               alt=""
                               className="w-full h-full rounded-full"
                             />
                           ) : (
-                            version.user.name.charAt(0).toUpperCase()
+                            (version.user?.name || 'U').charAt(0).toUpperCase()
                           )}
                         </div>
 
@@ -156,14 +156,14 @@ export default function VersionHistory({
                             )}
                           </div>
                           <p className="text-xs text-gray-500 mt-0.5">
-                            {version.user.name}
+                            {version.user?.name || 'Unknown user'}
                           </p>
                           <div className="flex items-center gap-3 mt-1 text-xs text-gray-400">
                             <span className="flex items-center gap-1">
                               <Clock size={10} />
                               {format(new Date(version.created_at), 'h:mm a')}
                             </span>
-                            <span>{formatSize(version.size_bytes)}</span>
+                            <span>{formatSize(version.size_bytes || 0)}</span>
                           </div>
                         </div>
                       </div>

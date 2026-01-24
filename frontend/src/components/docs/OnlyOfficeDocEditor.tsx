@@ -1,139 +1,54 @@
 /**
- * Bheem Slides - Presentation Editor Component
+ * Bheem Docs - OnlyOffice Document Editor Component
  *
- * Full PowerPoint-compatible presentation editing with real-time collaboration.
+ * Full Word-compatible document editing with real-time collaboration.
  * Features:
  * - Real-time collaboration
- * - Full slide layouts and transitions
- * - Speaker notes
+ * - Full formatting support
+ * - Track changes and comments
  * - Auto-save
  */
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { api } from '@/lib/api';
 
-// OnlyOffice types are defined in src/types/onlyoffice.d.ts
-
 interface DocEditorInstance {
   destroyEditor: () => void;
   refreshHistory: (data: any) => void;
-  executeCommand: (command: string, params?: any) => void;
-  serviceCommand: (command: string, params?: any) => void;
 }
 
-interface EditorConfig {
-  document: {
-    fileType: string;
-    key: string;
-    title: string;
-    url: string;
-    permissions?: {
-      comment?: boolean;
-      download?: boolean;
-      edit?: boolean;
-      print?: boolean;
-      review?: boolean;
-    };
-  };
-  documentType: string;
-  editorConfig: {
-    callbackUrl: string;
-    lang?: string;
-    mode?: string;
-    user?: {
-      id: string;
-      name: string;
-    };
-    customization?: {
-      autosave?: boolean;
-      chat?: boolean;
-      comments?: boolean;
-      compactHeader?: boolean;
-      compactToolbar?: boolean;
-      feedback?: boolean;
-      forcesave?: boolean;
-      help?: boolean;
-      hideRightMenu?: boolean;
-      logo?: {
-        image?: string;
-        url?: string;
-      };
-      toolbarNoTabs?: boolean;
-      zoom?: number;
-    };
-  };
-  height?: string;
-  width?: string;
-  type?: string;
-  token?: string;
-}
-
-interface OnlyOfficePresentationEditorProps {
-  presentationId: string;
+interface OnlyOfficeDocEditorProps {
+  documentId: string;
   mode?: 'edit' | 'view' | 'review';
   onReady?: () => void;
   onError?: (error: string) => void;
   onDocumentReady?: () => void;
   onSave?: () => void;
   className?: string;
-  onEditorReady?: (editorApi: EditorApi) => void;
 }
 
-// Editor API exposed to parent components
-export interface EditorApi {
-  startPresentation: () => void;
-  addSlide: () => void;
-}
-
-// OnlyOffice Document Server URL (from env or default)
+// OnlyOffice Document Server URL
 const ONLYOFFICE_URL = process.env.NEXT_PUBLIC_ONLYOFFICE_URL || 'https://office.bheem.cloud';
 
-export default function OnlyOfficePresentationEditor({
-  presentationId,
+export default function OnlyOfficeDocEditor({
+  documentId,
   mode = 'edit',
   onReady,
   onError,
   onDocumentReady,
   onSave,
   className = '',
-  onEditorReady,
-}: OnlyOfficePresentationEditorProps) {
+}: OnlyOfficeDocEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<DocEditorInstance | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scriptLoaded, setScriptLoaded] = useState(false);
 
-  // Create editor API for parent components
-  const createEditorApi = useCallback((): EditorApi => ({
-    startPresentation: () => {
-      // Use iframe postMessage to trigger presentation mode
-      const iframe = document.querySelector('#onlyoffice-presentation-container iframe') as HTMLIFrameElement;
-      if (iframe?.contentWindow) {
-        // OnlyOffice uses F5 key to start presentation, we simulate this
-        iframe.contentWindow.postMessage(JSON.stringify({
-          type: 'onExternalPluginMessage',
-          data: { type: 'startSlideShow' }
-        }), '*');
-      }
-      // Alternative: Open in new window for presentation
-      window.open(`/slides/${presentationId}/present`, '_blank', 'fullscreen=yes');
-    },
-    addSlide: () => {
-      const iframe = document.querySelector('#onlyoffice-presentation-container iframe') as HTMLIFrameElement;
-      if (iframe?.contentWindow) {
-        iframe.contentWindow.postMessage(JSON.stringify({
-          type: 'onExternalPluginMessage',
-          data: { type: 'addSlide' }
-        }), '*');
-      }
-    },
-  }), [presentationId]);
-
   // Load OnlyOffice API script
   const loadOnlyOfficeScript = useCallback(() => {
     return new Promise<void>((resolve, reject) => {
       // Check if already loaded
-      if (window.DocsAPI) {
+      if ((window as any).DocsAPI) {
         resolve();
         return;
       }
@@ -159,14 +74,14 @@ export default function OnlyOfficePresentationEditor({
   // Fetch editor configuration from backend
   const fetchEditorConfig = useCallback(async () => {
     try {
-      const response = await api.get(`/slides/${presentationId}/editor-config`, {
+      const response = await api.get(`/docs/v2/documents/${documentId}/editor-config`, {
         params: { mode },
       });
       return response.data;
     } catch (err: any) {
       throw new Error(err.response?.data?.detail || 'Failed to load editor configuration');
     }
-  }, [presentationId, mode]);
+  }, [documentId, mode]);
 
   // Initialize editor
   const initializeEditor = useCallback(async () => {
@@ -197,26 +112,22 @@ export default function OnlyOfficePresentationEditor({
         ...config,
         events: {
           onReady: () => {
-            console.log('OnlyOffice onReady event fired');
+            console.log('OnlyOffice Docs onReady event fired');
             setLoading(false);
             onReady?.();
           },
           onDocumentReady: () => {
-            console.log('OnlyOffice onDocumentReady event fired');
-            // Also set loading to false here in case onReady doesn't fire
+            console.log('OnlyOffice Docs onDocumentReady event fired');
             setLoading(false);
             onDocumentReady?.();
-            // Expose editor API to parent
-            onEditorReady?.(createEditorApi());
           },
           onAppReady: () => {
-            console.log('OnlyOffice onAppReady event fired');
-            // Ensure loading is set to false when app is ready
+            console.log('OnlyOffice Docs onAppReady event fired');
             setLoading(false);
           },
           onError: (event: any) => {
             const errorMsg = event?.data?.errorDescription || 'Unknown editor error';
-            console.error('OnlyOffice error:', errorMsg, event);
+            console.error('OnlyOffice Docs error:', errorMsg, event);
             setError(errorMsg);
             setLoading(false);
             onError?.(errorMsg);
@@ -228,22 +139,22 @@ export default function OnlyOfficePresentationEditor({
             }
           },
           onWarning: (event: any) => {
-            console.warn('OnlyOffice warning:', event);
+            console.warn('OnlyOffice Docs warning:', event);
           },
         },
       };
 
       // Create editor instance
-      if (window.DocsAPI) {
-        editorRef.current = new window.DocsAPI.DocEditor(
-          'onlyoffice-presentation-container',
+      if ((window as any).DocsAPI) {
+        editorRef.current = new (window as any).DocsAPI.DocEditor(
+          'onlyoffice-doc-editor-container',
           configWithEvents
         );
       } else {
         throw new Error('OnlyOffice API not available');
       }
     } catch (err: any) {
-      console.error('Failed to initialize OnlyOffice editor:', err);
+      console.error('Failed to initialize OnlyOffice Docs editor:', err);
       setError(err.message);
       setLoading(false);
       onError?.(err.message);
@@ -254,11 +165,10 @@ export default function OnlyOfficePresentationEditor({
   useEffect(() => {
     initializeEditor();
 
-    // Timeout fallback - if loading doesn't complete in 15 seconds, hide loading overlay
-    // The editor may still be loading internally but we show it to the user
+    // Timeout fallback - if loading doesn't complete in 15 seconds, show editor anyway
     const loadingTimeout = setTimeout(() => {
       setLoading(false);
-      console.log('OnlyOffice loading timeout - showing editor');
+      console.log('OnlyOffice Docs loading timeout - showing editor');
     }, 15000);
 
     // Cleanup on unmount
@@ -273,11 +183,10 @@ export default function OnlyOfficePresentationEditor({
         editorRef.current = null;
       }
     };
-  }, [presentationId, mode]); // Re-initialize when presentationId or mode changes
+  }, [documentId, mode]);
 
   const isSSLError = error && (error.includes('script') || error.includes('API') || error.includes('load'));
 
-  // Always render the container, overlay loading/error states
   return (
     <div
       className={`relative ${className}`}
@@ -291,7 +200,7 @@ export default function OnlyOfficePresentationEditor({
     >
       {/* Editor container - always present */}
       <div
-        id="onlyoffice-presentation-container"
+        id="onlyoffice-doc-editor-container"
         style={{
           width: '100%',
           height: 'calc(100vh - 64px)',
@@ -308,9 +217,9 @@ export default function OnlyOfficePresentationEditor({
       {loading && !error && (
         <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-orange-600 mx-auto"></div>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
             <p className="mt-4 text-gray-600">
-              {scriptLoaded ? 'Initializing Bheem Slides...' : 'Loading presentation editor...'}
+              {scriptLoaded ? 'Initializing Bheem Docs...' : 'Loading document editor...'}
             </p>
           </div>
         </div>
@@ -326,7 +235,7 @@ export default function OnlyOfficePresentationEditor({
               </svg>
             </div>
             <h3 className="text-lg font-medium text-gray-900 mb-2">
-              Bheem Slides Connection Issue
+              Bheem Docs Connection Issue
             </h3>
             {isSSLError ? (
               <>
@@ -334,7 +243,7 @@ export default function OnlyOfficePresentationEditor({
                   Unable to connect to the document server. This may be due to a certificate issue.
                 </p>
                 <p className="text-gray-500 text-xs mb-4">
-                  Try visiting <a href={ONLYOFFICE_URL} target="_blank" rel="noopener noreferrer" className="text-orange-600 underline">{ONLYOFFICE_URL}</a> directly and accepting the certificate, then retry.
+                  Try visiting <a href={ONLYOFFICE_URL} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">{ONLYOFFICE_URL}</a> directly and accepting the certificate, then retry.
                 </p>
               </>
             ) : (
@@ -343,7 +252,7 @@ export default function OnlyOfficePresentationEditor({
             <div className="flex gap-2 justify-center">
               <button
                 onClick={initializeEditor}
-                className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 transition-colors"
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
               >
                 Retry
               </button>
@@ -361,49 +270,4 @@ export default function OnlyOfficePresentationEditor({
       )}
     </div>
   );
-}
-
-/**
- * Hook to check if Bheem Slides editor is available
- * Checks if the document server is reachable
- */
-export function useOnlyOfficePresentationAvailable() {
-  const [available, setAvailable] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    const checkAvailability = async () => {
-      try {
-        // Try to load the API script as a test
-        // If the server is available, the script should load
-        const testScript = document.createElement('script');
-        testScript.src = `${ONLYOFFICE_URL}/web-apps/apps/api/documents/api.js`;
-
-        const loadPromise = new Promise<boolean>((resolve) => {
-          testScript.onload = () => resolve(true);
-          testScript.onerror = () => resolve(false);
-          // Timeout after 5 seconds
-          setTimeout(() => resolve(false), 5000);
-        });
-
-        // Don't actually add to document, just try to fetch
-        const response = await fetch(`${ONLYOFFICE_URL}/healthcheck`, {
-          method: 'GET',
-          mode: 'no-cors',
-        }).catch(() => null);
-
-        // With no-cors, we can't read the response, but if fetch doesn't throw, server is likely up
-        // As a fallback, assume available and let the editor handle any errors
-        setAvailable(true);
-      } catch (err) {
-        console.warn('Document server check failed:', err);
-        // Default to available=true and let the actual editor load handle errors
-        // This provides a better user experience than blocking access
-        setAvailable(true);
-      }
-    };
-
-    checkAvailability();
-  }, []);
-
-  return available;
 }

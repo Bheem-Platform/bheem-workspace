@@ -115,17 +115,9 @@ class PresentationService:
         checksum = hashlib.sha256(pptx_bytes).hexdigest()
         file_size = len(pptx_bytes)
 
-        # Determine storage path based on mode
-        if mode == PresentationMode.INTERNAL:
-            if not company_id:
-                raise ValueError("company_id is required for internal mode")
-            storage_path = f"internal/{company_id}/presentations/{presentation_id}.pptx"
-        else:
-            storage_path = f"external/{tenant_id}/presentations/{presentation_id}.pptx"
-
-        # Upload to S3
+        # Upload to Nextcloud and get the actual storage path
         try:
-            await self.storage.upload_file(
+            upload_result = await self.storage.upload_file(
                 file=BytesIO(pptx_bytes),
                 filename=f"{presentation_id}.pptx",
                 company_id=company_id if mode == PresentationMode.INTERNAL else None,
@@ -133,9 +125,11 @@ class PresentationService:
                 folder_path="presentations",
                 content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation"
             )
-            logger.info(f"Uploaded presentation to S3: {storage_path}")
+            # Use the actual storage path from the upload result
+            storage_path = upload_result.get('storage_path', f"/BheemDocs/external/{tenant_id}/presentations/{presentation_id}.pptx")
+            logger.info(f"Uploaded presentation to Nextcloud: {storage_path}")
         except Exception as e:
-            logger.error(f"Failed to upload presentation to S3: {e}")
+            logger.error(f"Failed to upload presentation to Nextcloud: {e}")
             raise
 
         # Default theme
@@ -401,13 +395,19 @@ class PresentationService:
                 "customization": {
                     "autosave": True,
                     "comments": True,
-                    "compactHeader": False,
+                    "compactHeader": True,
                     "compactToolbar": False,
                     "feedback": False,
                     "forcesave": True,
                     "help": False,
                     "hideRightMenu": False,
                     "toolbarNoTabs": False,
+                    "toolbarHideFileName": True,
+                    "header": False,
+                    "statusBar": True,
+                    "leftMenu": True,
+                    "rightMenu": True,
+                    "toolbar": True,
                     "zoom": 100,
                     "logo": {
                         "image": "https://workspace.bheem.cloud/bheem-logo.svg",
@@ -734,16 +734,13 @@ class PresentationService:
         """
         Create PPTX file for legacy presentations that don't have storage_path.
         """
-        # Create workbook
+        # Create presentation
         pptx_bytes = self._create_empty_pptx(title)
         checksum = hashlib.sha256(pptx_bytes).hexdigest()
         file_size = len(pptx_bytes)
 
-        # Storage path
-        storage_path = f"external/{tenant_id}/presentations/{presentation_id}.pptx"
-
-        # Upload to S3
-        await self.storage.upload_file(
+        # Upload to Nextcloud and get the actual storage path from the result
+        upload_result = await self.storage.upload_file(
             file=BytesIO(pptx_bytes),
             filename=f"{presentation_id}.pptx",
             tenant_id=tenant_id,
@@ -751,7 +748,11 @@ class PresentationService:
             content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation"
         )
 
-        # Update database
+        # Use the actual storage path from the upload result
+        storage_path = upload_result.get('storage_path', f"/BheemDocs/presentations/{presentation_id}.pptx")
+        logger.info(f"Uploaded legacy presentation to: {storage_path}")
+
+        # Update database with the actual Nextcloud path
         await self.db.execute(
             text("""
                 UPDATE workspace.presentations
@@ -773,7 +774,7 @@ class PresentationService:
         )
         await self.db.commit()
 
-        logger.info(f"Created PPTX for legacy presentation {presentation_id}")
+        logger.info(f"Created PPTX for legacy presentation {presentation_id} at {storage_path}")
         return storage_path
 
     async def _create_version_record(
