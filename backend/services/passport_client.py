@@ -408,6 +408,71 @@ class BheemPassportClient:
         except Exception:
             return False
 
+    async def get_oauth_providers(self) -> Dict[str, Any]:
+        """
+        Get list of available OAuth providers from Bheem Passport
+
+        Returns:
+            Dict containing list of available OAuth providers with their status
+        """
+        url = f"{self.base_url}/api/v1/auth/oauth/providers"
+
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.get(url)
+
+                if response.status_code != 200:
+                    # Return default providers if endpoint not available
+                    return {
+                        "providers": [
+                            {"name": "google", "enabled": True, "display_name": "Google"},
+                            {"name": "github", "enabled": True, "display_name": "GitHub"},
+                            {"name": "facebook", "enabled": True, "display_name": "Facebook"},
+                            {"name": "linkedin", "enabled": True, "display_name": "LinkedIn"},
+                        ]
+                    }
+
+                return response.json()
+
+        except httpx.TimeoutException:
+            # Return default providers on timeout
+            return {
+                "providers": [
+                    {"name": "google", "enabled": True, "display_name": "Google"},
+                    {"name": "github", "enabled": True, "display_name": "GitHub"},
+                    {"name": "facebook", "enabled": True, "display_name": "Facebook"},
+                    {"name": "linkedin", "enabled": True, "display_name": "LinkedIn"},
+                ]
+            }
+        except httpx.RequestError:
+            return {"providers": [], "error": "Cannot connect to authentication service"}
+
+    def get_oauth_url(
+        self,
+        provider: str,
+        redirect_url: str,
+        company_code: str = "BHM001"
+    ) -> str:
+        """
+        Generate OAuth initiation URL for a specific provider
+
+        Args:
+            provider: OAuth provider name (google, github, facebook, linkedin)
+            redirect_url: URL to redirect after OAuth completion
+            company_code: Company code for multi-tenant auth
+
+        Returns:
+            Full OAuth URL to redirect user to
+        """
+        from urllib.parse import urlencode
+
+        params = {
+            "company_code": company_code,
+            "redirect_url": redirect_url
+        }
+
+        return f"{self.base_url}/api/v1/auth/oauth/{provider}?{urlencode(params)}"
+
 
 # Singleton instance
 _passport_client: Optional[BheemPassportClient] = None

@@ -25,6 +25,7 @@ interface AuthState {
   // Actions
   initialize: () => Promise<void>;
   setAuth: (token: string, user: User) => Promise<void>;
+  loginWithOAuth: (accessToken: string, refreshToken?: string) => Promise<void>;
   logout: () => Promise<void>;
   fetchCurrentUser: () => Promise<User | null>;
 }
@@ -135,6 +136,66 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch (error) {
       console.warn('[Auth] Could not create SSO session:', error);
       // Non-critical - user can still use the app, just might need to re-auth for external services
+    }
+  },
+
+  loginWithOAuth: async (accessToken, refreshToken) => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    // Store tokens
+    localStorage.setItem('auth_token', accessToken);
+    if (refreshToken) {
+      localStorage.setItem('refresh_token', refreshToken);
+    }
+
+    // Decode JWT to extract user info
+    const payload = decodeToken(accessToken);
+    if (!payload) {
+      throw new Error('Invalid access token');
+    }
+
+    const user: User = {
+      id: payload.user_id || payload.sub,
+      user_id: payload.user_id,
+      username: payload.username || payload.email,
+      email: payload.email,
+      role: payload.role || 'Customer',
+      company_id: payload.company_id,
+      company_code: payload.company_code,
+      companies: payload.companies,
+      person_id: payload.person_id,
+    };
+
+    set({ token: accessToken, user, isAuthenticated: true, isLoading: false });
+
+    // Fetch workspace info for external customers
+    try {
+      const workspaceRes = await api.get('/user-workspace/me');
+      const workspace = workspaceRes.data;
+      if (workspace?.id) {
+        set((state) => ({
+          user: state.user ? {
+            ...state.user,
+            workspace_tenant_id: workspace.id,
+            workspace_role: workspace.role
+          } : null
+        }));
+        console.log('[Auth] Workspace tenant ID set:', workspace.id);
+      }
+    } catch (error) {
+      console.warn('[Auth] Could not fetch workspace info:', error);
+    }
+
+    // Create SSO session for seamless cross-service authentication
+    try {
+      await api.post('/sso/session/create', {}, {
+        withCredentials: true
+      });
+      console.log('[Auth] SSO session created for cross-service authentication');
+    } catch (error) {
+      console.warn('[Auth] Could not create SSO session:', error);
     }
   },
 

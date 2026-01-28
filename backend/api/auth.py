@@ -465,6 +465,69 @@ async def verify_token_endpoint(current_user: dict = Depends(get_current_user)):
     }
 
 
+# OAuth Endpoints
+@router.get("/oauth/providers")
+async def get_oauth_providers():
+    """
+    Get list of available OAuth providers from Bheem Passport
+    Returns providers like Google, GitHub, Facebook, LinkedIn with their enabled status
+    """
+    passport = get_passport()
+
+    try:
+        result = await passport.get_oauth_providers()
+        return result
+    except Exception as e:
+        print(f"[Workspace Auth] Get OAuth providers failed: {e}")
+        # Return default providers as fallback
+        return {
+            "providers": [
+                {"name": "google", "enabled": True, "display_name": "Google"},
+                {"name": "github", "enabled": True, "display_name": "GitHub"},
+                {"name": "facebook", "enabled": True, "display_name": "Facebook"},
+                {"name": "linkedin", "enabled": True, "display_name": "LinkedIn"},
+            ]
+        }
+
+
+@router.get("/oauth/{provider}/url")
+async def get_oauth_url(
+    provider: str,
+    redirect_url: str,
+    company_code: str = "BHM001"
+):
+    """
+    Get OAuth initiation URL for a specific provider
+
+    Args:
+        provider: OAuth provider name (google, github, facebook, linkedin)
+        redirect_url: URL to redirect after OAuth completion (typically /auth/callback)
+        company_code: Company code for multi-tenant authentication
+
+    Returns:
+        JSON with the OAuth URL to redirect user to
+    """
+    valid_providers = ["google", "github", "facebook", "linkedin"]
+    if provider.lower() not in valid_providers:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid OAuth provider. Valid providers: {', '.join(valid_providers)}"
+        )
+
+    passport = get_passport()
+    oauth_url = passport.get_oauth_url(
+        provider=provider.lower(),
+        redirect_url=redirect_url,
+        company_code=company_code
+    )
+
+    return {
+        "provider": provider.lower(),
+        "url": oauth_url,
+        "redirect_url": redirect_url
+    }
+
+
 @router.get("/health")
 async def auth_health():
     """Check authentication service health"""
