@@ -910,9 +910,12 @@ class DocsDocumentService:
                 conn.commit()
 
             # Get file from storage (from the creator's Nextcloud folder)
+            # Pass both the creator's user_id (for credentials lookup) and nextcloud_user
+            creator_id = row.get('created_by')
             file_stream, _ = await self.storage.download_file(
                 row['storage_path'],
-                nextcloud_user=nextcloud_user
+                nextcloud_user=nextcloud_user,
+                user_id=UUID(str(creator_id)) if creator_id else None
             )
 
             return file_stream, row['file_name'], row['mime_type']

@@ -14,20 +14,29 @@ import {
   Star,
   StarOff,
   MoreVertical,
+  MoreHorizontal,
   Trash2,
   Copy,
   Share2,
+  UserPlus,
+  Link2,
   Clock,
   Folder,
   FileSpreadsheet,
   Users,
   ArrowUpDown,
+  Download,
+  Pencil,
+  ExternalLink,
+  Info,
+  Move,
 } from 'lucide-react';
 import { useRequireAuth } from '@/stores/authStore';
 import { api } from '@/lib/api';
 import AppSwitcherBar from '@/components/shared/AppSwitcherBar';
 import AppLauncher from '@/components/shared/AppLauncher';
 import DocsSidebar from '@/components/docs/DocsSidebar';
+import Pagination from '@/components/shared/Pagination';
 
 interface Spreadsheet {
   id: string;
@@ -52,6 +61,15 @@ export default function SheetsPage() {
   const [filter, setFilter] = useState<'all' | 'starred' | 'recent'>('all');
   const [showNewMenu, setShowNewMenu] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+
+  // Sorting state
+  const [sortBy, setSortBy] = useState<'title' | 'updated_at' | 'created_at'>('updated_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [showSortMenu, setShowSortMenu] = useState(false);
+
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
 
   const fetchSpreadsheets = useCallback(async () => {
     try {
@@ -85,6 +103,11 @@ export default function SheetsPage() {
       fetchSpreadsheets();
     }
   }, [isAuthenticated, authLoading, fetchSpreadsheets]);
+
+  // Reset to page 1 when filter or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filter, searchQuery]);
 
   const createSpreadsheet = async (templateId?: string) => {
     try {
@@ -146,20 +169,35 @@ export default function SheetsPage() {
     return date.toLocaleDateString();
   };
 
+  // Skip showing loading screen - LoginLoader already handles the transition
   if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600"></div>
-      </div>
-    );
+    return null;
   }
 
-  const filteredSpreadsheets = spreadsheets.filter((s) => {
-    if (searchQuery) {
-      return s.title.toLowerCase().includes(searchQuery.toLowerCase());
-    }
-    return true;
-  });
+  const filteredSpreadsheets = spreadsheets
+    .filter((s) => {
+      if (searchQuery) {
+        return s.title.toLowerCase().includes(searchQuery.toLowerCase());
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      let comparison = 0;
+      if (sortBy === 'title') {
+        comparison = a.title.localeCompare(b.title);
+      } else if (sortBy === 'updated_at') {
+        comparison = new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
+      } else if (sortBy === 'created_at') {
+        comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      }
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
+
+  // Pagination calculations
+  const totalItems = filteredSpreadsheets.length;
+  const totalPages = Math.ceil(totalItems / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedSpreadsheets = filteredSpreadsheets.slice(startIndex, startIndex + itemsPerPage);
 
   return (
     <>
@@ -302,10 +340,55 @@ export default function SheetsPage() {
               </button>
             </div>
 
-            <button className="flex items-center space-x-1 text-sm text-gray-600 hover:text-gray-900">
-              <ArrowUpDown size={16} />
-              <span>Sort</span>
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => setShowSortMenu(!showSortMenu)}
+                className="flex items-center space-x-1 text-sm text-gray-600 hover:text-gray-900"
+              >
+                <ArrowUpDown size={16} />
+                <span>Sort</span>
+              </button>
+              {showSortMenu && (
+                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+                  <button
+                    onClick={() => { setSortBy('updated_at'); setSortOrder('desc'); setShowSortMenu(false); }}
+                    className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-100 ${sortBy === 'updated_at' && sortOrder === 'desc' ? 'bg-green-50 text-green-700' : 'text-gray-700'}`}
+                  >
+                    Last Modified (Newest)
+                  </button>
+                  <button
+                    onClick={() => { setSortBy('updated_at'); setSortOrder('asc'); setShowSortMenu(false); }}
+                    className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-100 ${sortBy === 'updated_at' && sortOrder === 'asc' ? 'bg-green-50 text-green-700' : 'text-gray-700'}`}
+                  >
+                    Last Modified (Oldest)
+                  </button>
+                  <button
+                    onClick={() => { setSortBy('created_at'); setSortOrder('desc'); setShowSortMenu(false); }}
+                    className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-100 ${sortBy === 'created_at' && sortOrder === 'desc' ? 'bg-green-50 text-green-700' : 'text-gray-700'}`}
+                  >
+                    Created (Newest)
+                  </button>
+                  <button
+                    onClick={() => { setSortBy('created_at'); setSortOrder('asc'); setShowSortMenu(false); }}
+                    className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-100 ${sortBy === 'created_at' && sortOrder === 'asc' ? 'bg-green-50 text-green-700' : 'text-gray-700'}`}
+                  >
+                    Created (Oldest)
+                  </button>
+                  <button
+                    onClick={() => { setSortBy('title'); setSortOrder('asc'); setShowSortMenu(false); }}
+                    className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-100 ${sortBy === 'title' && sortOrder === 'asc' ? 'bg-green-50 text-green-700' : 'text-gray-700'}`}
+                  >
+                    Title (A-Z)
+                  </button>
+                  <button
+                    onClick={() => { setSortBy('title'); setSortOrder('desc'); setShowSortMenu(false); }}
+                    className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-100 ${sortBy === 'title' && sortOrder === 'desc' ? 'bg-green-50 text-green-700' : 'text-gray-700'}`}
+                  >
+                    Title (Z-A)
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Error */}
@@ -335,7 +418,7 @@ export default function SheetsPage() {
             </div>
           ) : viewMode === 'grid' ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {filteredSpreadsheets.map((spreadsheet) => (
+              {paginatedSpreadsheets.map((spreadsheet) => (
                 <div
                   key={spreadsheet.id}
                   className="bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-md transition-shadow group"
@@ -387,62 +470,70 @@ export default function SheetsPage() {
               ))}
             </div>
           ) : (
-            <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+            <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
               <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-200">
+                <thead className="border-b border-gray-200">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Owner</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Last modified</th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
+                    <th className="w-10 px-3 py-3">
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                      />
+                    </th>
+                    <th className="text-left px-2 py-3 text-sm font-medium text-gray-700">
+                      <div className="flex items-center gap-1 cursor-pointer hover:text-gray-900">
+                        Name
+                        <span className="text-xs text-gray-400">▲</span>
+                      </div>
+                    </th>
+                    <th className="w-28 px-2 py-3"></th>
+                    <th className="w-24 text-right px-4 py-3 text-sm font-medium text-gray-700">Sheets</th>
+                    <th className="w-32 text-right px-4 py-3 text-sm font-medium text-gray-700">Modified</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {filteredSpreadsheets.map((spreadsheet) => (
-                    <tr key={spreadsheet.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3">
-                        <Link href={`/sheets/${spreadsheet.id}`} className="flex items-center space-x-3">
-                          <FileSpreadsheet size={20} className="text-green-600" />
-                          <span className="font-medium text-gray-900 hover:text-green-600">
+                <tbody>
+                  {paginatedSpreadsheets.map((spreadsheet) => (
+                    <tr
+                      key={spreadsheet.id}
+                      className="group cursor-pointer border-b border-gray-100 last:border-b-0 hover:bg-gray-50"
+                      onClick={() => router.push(`/sheets/${spreadsheet.id}`)}
+                    >
+                      {/* Checkbox */}
+                      <td className="px-3 py-2.5" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                        />
+                      </td>
+
+                      {/* Name with icon */}
+                      <td className="px-2 py-2.5">
+                        <div className="flex items-center gap-3">
+                          <FileSpreadsheet size={28} className="text-green-600" />
+                          <span className="text-sm font-medium text-gray-900 truncate">
                             {spreadsheet.title}
                           </span>
-                        </Link>
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-500">me</td>
-                      <td className="px-4 py-3 text-sm text-gray-500">
-                        {formatDate(spreadsheet.updated_at)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end space-x-1">
+
+                      {/* Actions: Share badge, Share button, Menu */}
+                      <td className="px-2 py-2.5" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1">
+                          {/* Share button */}
                           <button
                             onClick={(e) => {
-                              e.preventDefault();
                               e.stopPropagation();
-                              toggleStar(spreadsheet.id);
+                              // Open share modal
                             }}
-                            className="p-2 text-gray-400 hover:text-yellow-500 hover:bg-gray-100 rounded"
-                            title={spreadsheet.is_starred ? 'Remove from starred' : 'Add to starred'}
+                            className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-gray-100 rounded opacity-0 group-hover:opacity-100 transition-all"
+                            title="Share"
                           >
-                            {spreadsheet.is_starred ? (
-                              <Star size={18} className="text-yellow-500 fill-yellow-500" />
-                            ) : (
-                              <Star size={18} />
-                            )}
+                            <UserPlus size={18} />
                           </button>
+
+                          {/* Three dots menu */}
                           <button
                             onClick={(e) => {
-                              e.preventDefault();
-                              e.stopPropagation();
-                              duplicateSpreadsheet(spreadsheet.id);
-                            }}
-                            className="p-2 text-gray-400 hover:text-green-600 hover:bg-gray-100 rounded"
-                            title="Make a copy"
-                          >
-                            <Copy size={18} />
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.preventDefault();
                               e.stopPropagation();
                               setContextMenu({
                                 id: spreadsheet.id,
@@ -450,17 +541,59 @@ export default function SheetsPage() {
                                 y: e.clientY,
                               });
                             }}
-                            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded"
-                            title="More actions"
+                            className="p-1.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded opacity-0 group-hover:opacity-100 transition-all"
+                            title="Actions"
                           >
-                            <MoreVertical size={18} />
+                            <MoreHorizontal size={18} />
                           </button>
                         </div>
+                      </td>
+
+                      {/* Sheets count */}
+                      <td className="px-4 py-2.5 text-sm text-gray-500 text-right">
+                        {spreadsheet.worksheet_count || 1}
+                      </td>
+
+                      {/* Modified */}
+                      <td className="px-4 py-2.5 text-sm text-gray-500 text-right whitespace-nowrap">
+                        {formatDate(spreadsheet.updated_at)}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              {/* Pagination */}
+              {totalItems > 0 && (
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  totalItems={totalItems}
+                  itemsPerPage={itemsPerPage}
+                  onPageChange={setCurrentPage}
+                  onItemsPerPageChange={(value) => {
+                    setItemsPerPage(value);
+                    setCurrentPage(1);
+                  }}
+                />
+              )}
+            </div>
+          )}
+
+          {/* Grid Pagination */}
+          {viewMode === 'grid' && totalItems > 0 && (
+            <div className="mt-6">
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                totalItems={totalItems}
+                itemsPerPage={itemsPerPage}
+                onPageChange={setCurrentPage}
+                onItemsPerPageChange={(value) => {
+                  setItemsPerPage(value);
+                  setCurrentPage(1);
+                }}
+                className="bg-white rounded-xl border border-gray-200"
+              />
             </div>
           )}
           </main>

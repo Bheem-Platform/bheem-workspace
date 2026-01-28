@@ -842,8 +842,8 @@ function HeroVisualSection() {
           className="relative w-full h-full"
         >
           {orbitDots.map((dot, i) => {
-            const x = Math.cos((dot.angle * Math.PI) / 180) * dot.radius;
-            const y = Math.sin((dot.angle * Math.PI) / 180) * dot.radius;
+            const x = Math.round(Math.cos((dot.angle * Math.PI) / 180) * dot.radius * 100) / 100;
+            const y = Math.round(Math.sin((dot.angle * Math.PI) / 180) * dot.radius * 100) / 100;
             return (
               <motion.div
                 key={`orbit-${i}`}
@@ -872,6 +872,8 @@ function HeroVisualSection() {
       {[...Array(8)].map((_, i) => {
         const angle = (i * 45) * (Math.PI / 180);
         const radius = 180 + (i % 2) * 40;
+        const sparkleX = Math.round(Math.cos(angle) * radius * 100) / 100;
+        const sparkleY = Math.round(Math.sin(angle) * radius * 100) / 100;
         return (
           <motion.div
             key={`sparkle-${i}`}
@@ -883,8 +885,8 @@ function HeroVisualSection() {
             transition={{ delay: 1 + i * 0.15, duration: 0.8 }}
             className="absolute"
             style={{
-              left: `calc(50% + ${Math.cos(angle) * radius}px)`,
-              top: `calc(50% + ${Math.sin(angle) * radius}px)`,
+              left: `calc(50% + ${sparkleX}px)`,
+              top: `calc(50% + ${sparkleY}px)`,
             }}
           >
             <Sparkles size={12 + (i % 3) * 4} className="text-[#977DFF]" style={{ opacity: 0.6 }} />
@@ -996,8 +998,8 @@ function HeroVisualSection() {
           {apps.map((app, i) => {
             const angle = (i * 60) * (Math.PI / 180); // 6 apps, 60 degrees apart
             const radius = 180;
-            const x = Math.cos(angle) * radius;
-            const y = Math.sin(angle) * radius;
+            const x = Math.round(Math.cos(angle) * radius * 100) / 100;
+            const y = Math.round(Math.sin(angle) * radius * 100) / 100;
             return (
               <motion.div
                 key={i}
@@ -1281,8 +1283,8 @@ function CarouselIllustration({ icon: Icon, color, isActive }: { icon: any; colo
       {carouselAvatars.map((avatar, i) => {
         const angle = (i * 72) * (Math.PI / 180);
         const radius = 100;
-        const x = Math.cos(angle) * radius;
-        const y = Math.sin(angle) * radius;
+        const x = Math.round(Math.cos(angle) * radius * 100) / 100;
+        const y = Math.round(Math.sin(angle) * radius * 100) / 100;
 
         return (
           <motion.div
@@ -1352,8 +1354,8 @@ function CarouselIllustration({ icon: Icon, color, isActive }: { icon: any; colo
         {carouselAvatars.map((_, i) => {
           const angle = (i * 72) * (Math.PI / 180);
           const radius = 100;
-          const x = Math.cos(angle) * radius + 50;
-          const y = Math.sin(angle) * radius + 50;
+          const x = Math.round((Math.cos(angle) * radius + 50) * 100) / 100;
+          const y = Math.round((Math.sin(angle) * radius + 50) * 100) / 100;
           return (
             <motion.line
               key={`line-${i}`}
@@ -1954,8 +1956,8 @@ function TimeSavedScene() {
             {/* Clock face markers */}
             {[...Array(12)].map((_, i) => {
               const angle = (i * 30 - 90) * (Math.PI / 180);
-              const x = 50 + 42 * Math.cos(angle);
-              const y = 50 + 42 * Math.sin(angle);
+              const x = Math.round((50 + 42 * Math.cos(angle)) * 100) / 100;
+              const y = Math.round((50 + 42 * Math.sin(angle)) * 100) / 100;
               return (
                 <div
                   key={i}
@@ -2389,8 +2391,8 @@ function StatsCarousel() {
                   <motion.div
                     className="absolute"
                     style={{
-                      x: Math.cos(angle) * 220,
-                      y: Math.sin(angle) * 180,
+                      x: Math.round(Math.cos(angle) * 220 * 100) / 100,
+                      y: Math.round(Math.sin(angle) * 180 * 100) / 100,
                     }}
                     animate={{
                       scale: [1, 1.5, 1],

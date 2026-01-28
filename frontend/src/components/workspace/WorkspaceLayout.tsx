@@ -26,8 +26,12 @@ import {
   ChevronLeft,
   ChevronRight,
   LayoutGrid,
+  Table,
+  Presentation,
+  FormInput,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
+import { useSettingsStore, useShowAppNames, useCompactMode, useEnabledApps } from '@/stores/settingsStore';
 import {
   BheemMailIcon,
   BheemCalendarIcon,
@@ -58,14 +62,17 @@ interface WorkspaceLayoutProps {
   customHeader?: ReactNode;
 }
 
-const navigation = [
-  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, bheemIcon: BheemDashboardIcon },
-  { name: 'Mail', href: '/mail', icon: Mail, bheemIcon: BheemMailIcon },
-  { name: 'Docs', href: '/docs', icon: FileText, bheemIcon: BheemDocsIcon },
-  { name: 'Calendar', href: '/calendar', icon: Calendar, bheemIcon: BheemCalendarIcon },
-  { name: 'Meet', href: '/meet', icon: Video, bheemIcon: BheemMeetIcon },
-  { name: 'Drive', href: '/drive', icon: HardDrive, bheemIcon: BheemDriveIcon },
-  { name: 'Chat', href: '/chat', icon: MessageCircle, bheemIcon: BheemChatIcon },
+const navigationItems = [
+  { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, bheemIcon: BheemDashboardIcon, appId: 'dashboard' },
+  { name: 'Mail', href: '/mail', icon: Mail, bheemIcon: BheemMailIcon, appId: 'mail' },
+  { name: 'Docs', href: '/docs', icon: FileText, bheemIcon: BheemDocsIcon, appId: 'docs' },
+  { name: 'Sheets', href: '/sheets', icon: Table, appId: 'sheets' },
+  { name: 'Slides', href: '/slides', icon: Presentation, appId: 'slides' },
+  { name: 'Calendar', href: '/calendar', icon: Calendar, bheemIcon: BheemCalendarIcon, appId: 'calendar' },
+  { name: 'Meet', href: '/meet', icon: Video, bheemIcon: BheemMeetIcon, appId: 'meet' },
+  { name: 'Drive', href: '/drive', icon: HardDrive, bheemIcon: BheemDriveIcon, appId: 'drive' },
+  { name: 'Chat', href: '/chat', icon: MessageCircle, bheemIcon: BheemChatIcon, appId: 'chat' },
+  { name: 'Forms', href: '/oforms', icon: FormInput, appId: 'forms' },
 ];
 
 export default function WorkspaceLayout({
@@ -83,6 +90,16 @@ export default function WorkspaceLayout({
   const [searchQuery, setSearchQuery] = useState('');
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [hoveredItem, setHoveredItem] = useState<string | null>(null);
+
+  // Settings from store
+  const showAppNames = useShowAppNames();
+  const compactMode = useCompactMode();
+  const enabledApps = useEnabledApps();
+
+  // Filter navigation based on enabled apps
+  const navigation = navigationItems.filter(
+    (item) => item.appId === 'dashboard' || enabledApps[item.appId as keyof typeof enabledApps] !== false
+  );
 
   const displayName = user?.username || 'User';
   const displayEmail = user?.email || '';
@@ -105,7 +122,7 @@ export default function WorkspaceLayout({
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
+    <div className={`min-h-screen bg-gray-50 flex ${compactMode ? 'compact-mode' : ''}`}>
       {/* Mobile sidebar overlay */}
       {sidebarOpen && (
         <div
@@ -171,20 +188,20 @@ export default function WorkspaceLayout({
                     `}
                   >
                     <div className={`flex-shrink-0 transition-transform duration-200 ${active || hovered ? 'scale-105' : ''}`}>
-                      {active ? (
+                      {active && BheemIcon ? (
                         <BheemIcon size={sidebarExpanded ? 28 : 32} />
                       ) : (
                         <div className={`
                           ${sidebarExpanded ? 'w-7 h-7' : 'w-8 h-8'}
                           rounded-lg flex items-center justify-center
-                          ${hovered ? 'bg-gray-200' : 'bg-gray-100'}
+                          ${active ? 'bg-gradient-to-br from-[#FFCCF2] via-[#977DFF] to-[#0033FF]' : hovered ? 'bg-gray-200' : 'bg-gray-100'}
                           transition-colors
                         `}>
-                          <LucideIcon size={sidebarExpanded ? 16 : 18} className="text-gray-600" />
+                          <LucideIcon size={sidebarExpanded ? 16 : 18} className={active ? 'text-white' : 'text-gray-600'} />
                         </div>
                       )}
                     </div>
-                    {sidebarExpanded && (
+                    {sidebarExpanded && showAppNames && (
                       <span className={`font-medium text-sm ${active ? 'text-[#0033FF]' : 'text-gray-700'}`}>
                         {item.name}
                       </span>
@@ -448,8 +465,8 @@ export default function WorkspaceLayout({
           {/* Secondary Sidebar (app-specific) */}
           {secondarySidebar && (
             <div
-              className="flex-shrink-0 bg-white border-r border-gray-200 h-full overflow-hidden hidden lg:block"
-              style={{ width: secondarySidebarWidth }}
+              className="flex-shrink-0 bg-white border-r border-gray-200 h-full overflow-y-auto hidden lg:block"
+              style={{ width: secondarySidebarWidth, maxWidth: secondarySidebarWidth, minWidth: secondarySidebarWidth }}
             >
               {secondarySidebar}
             </div>

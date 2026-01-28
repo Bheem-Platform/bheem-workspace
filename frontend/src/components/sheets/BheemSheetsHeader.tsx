@@ -94,9 +94,12 @@ export default function BheemSheetsHeader({
       <div className="flex items-center px-3 py-2 gap-2">
         {/* Logo */}
         <Link href="/sheets" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-          <div className="w-10 h-10 bg-gradient-to-br from-green-400 to-green-600 rounded-lg flex items-center justify-center shadow-sm">
+          <div className="w-10 h-10 bg-gradient-to-br from-[#FFCCF2] via-[#977DFF] to-[#0033FF] rounded-lg flex items-center justify-center shadow-sm">
             <FileSpreadsheet className="w-6 h-6 text-white" />
           </div>
+          <span className="text-lg font-bold bg-gradient-to-r from-[#977DFF] to-[#0033FF] bg-clip-text text-transparent hidden sm:block">
+            Bheem Sheets
+          </span>
         </Link>
 
         {/* Title and Status Section */}
@@ -228,7 +231,7 @@ export default function BheemSheetsHeader({
           {/* Share Button */}
           <button
             onClick={onShare}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-full hover:bg-green-700 transition-colors font-medium text-sm ml-2"
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-[#977DFF] to-[#0033FF] text-white rounded-full hover:opacity-90 transition-all font-medium text-sm ml-2 shadow-sm"
           >
             <Share2 className="w-4 h-4" />
             Share

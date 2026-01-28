@@ -110,6 +110,13 @@ try:
 except ImportError as e:
     logger.warning(f"Rate limiting not available: {e}", action="rate_limit_disabled")
 
+# Mount static files for branding assets (logos, etc.)
+import os as _os
+_static_path = _os.path.join(_os.path.dirname(__file__), "static")
+if _os.path.exists(_static_path):
+    app.mount("/static", StaticFiles(directory=_static_path), name="static")
+    logger.info("Static files mounted at /static", action="static_mounted")
+
 # Request logging middleware
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -322,6 +329,12 @@ try:
     app.include_router(user_workspace_router, prefix="/api/v1")
 except Exception as e:
     print(f"Could not load user_workspace router: {e}")
+
+try:
+    from api.settings import router as settings_router
+    app.include_router(settings_router, prefix="/api/v1/settings")
+except Exception as e:
+    print(f"Could not load settings router: {e}")
 
 try:
     from api.workspace import router as workspace_router
@@ -599,6 +612,14 @@ try:
     logger.info("Bheem Forms API loaded", action="forms_loaded")
 except Exception as e:
     print(f"Could not load forms router: {e}")
+
+# Bheem OForms API (OnlyOffice Document Forms)
+try:
+    from api.oforms import router as oforms_router
+    app.include_router(oforms_router, prefix="/api/v1", tags=["Bheem OForms"])
+    logger.info("Bheem OForms API loaded", action="oforms_loaded")
+except Exception as e:
+    print(f"Could not load oforms router: {e}")
 
 # =============================================
 # Phase 3: Drive, Workflows, Meet Enhancements, Appointments
@@ -977,13 +998,27 @@ async def team_page():
             return HTMLResponse(content=f.read())
     return HTMLResponse(content="<h1>Team</h1>")
 
-@app.get("/settings", response_class=HTMLResponse)
-async def settings_page():
-    path = os.path.join(FRONTEND_PATH, "dashboard.html")
-    if os.path.exists(path):
-        with open(path, "r") as f:
-            return HTMLResponse(content=f.read())
-    return HTMLResponse(content="<h1>Settings</h1>")
+# Bheem Settings - Proxy to Next.js server
+@app.api_route("/settings/{path:path}", methods=["GET"])
+@app.api_route("/settings", methods=["GET"])
+async def settings_proxy(request: Request, path: str = ""):
+    """Proxy settings routes to Next.js server"""
+    target_url = f"{NEXTJS_URL}/settings/{path}" if path else f"{NEXTJS_URL}/settings"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Settings service unavailable</h1><p>{str(e)}</p>", status_code=503)
 
 # Bheem Calendar - Proxy to Next.js server
 @app.api_route("/calendar/{path:path}", methods=["GET"])
@@ -1094,6 +1129,28 @@ async def forms_proxy(request: Request, path: str = ""):
             )
         except httpx.RequestError as e:
             return HTMLResponse(content=f"<h1>Forms service unavailable</h1><p>{str(e)}</p>", status_code=503)
+
+# Bheem OForms - Proxy to Next.js server
+@app.api_route("/oforms/{path:path}", methods=["GET"])
+@app.api_route("/oforms", methods=["GET"])
+async def oforms_proxy(request: Request, path: str = ""):
+    """Proxy oforms routes to Next.js server"""
+    target_url = f"{NEXTJS_URL}/oforms/{path}" if path else f"{NEXTJS_URL}/oforms"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>OForms service unavailable</h1><p>{str(e)}</p>", status_code=503)
 
 # Bheem Videos - Proxy to Next.js server
 @app.api_route("/videos/{path:path}", methods=["GET"])

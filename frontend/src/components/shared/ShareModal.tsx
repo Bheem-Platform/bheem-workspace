@@ -21,7 +21,7 @@ interface ShareModalProps {
   isOpen: boolean;
   onClose: () => void;
   documentId: string;
-  documentType: 'sheet' | 'slide' | 'doc';
+  documentType: 'sheet' | 'slide' | 'doc' | 'oform';
   documentTitle: string;
 }
 
@@ -49,10 +49,11 @@ export default function ShareModal({
   // Generate share link
   const getShareLink = () => {
     const baseUrl = typeof window !== 'undefined' ? window.location.origin : '';
-    const typeMap = {
+    const typeMap: Record<string, string> = {
       sheet: 'sheets',
       slide: 'slides',
       doc: 'docs',
+      oform: 'oforms',
     };
     return `${baseUrl}/${typeMap[documentType]}/${documentId}`;
   };
@@ -105,6 +106,8 @@ export default function ShareModal({
           return `/sheets/${documentId}/share`;
         } else if (documentType === 'slide') {
           return `/slides/${documentId}/share`;
+        } else if (documentType === 'oform') {
+          return `/oforms/${documentId}/share`;
         }
         return `/docs/v2/documents/${documentId}/share`;
       };
@@ -165,6 +168,7 @@ export default function ShareModal({
       case 'sheet': return 'green';
       case 'slide': return 'orange';
       case 'doc': return 'blue';
+      case 'oform': return 'purple';
       default: return 'purple';
     }
   };

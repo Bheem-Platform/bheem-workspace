@@ -31,7 +31,7 @@ export default function CalendarSidebar({ onCreateEvent }: CalendarSidebarProps)
       <div className="p-4">
         <button
           onClick={onCreateEvent}
-          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-xl hover:from-blue-600 hover:to-cyan-600 transition-all shadow-lg shadow-blue-500/25"
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-[#FFCCF2] via-[#977DFF] to-[#0033FF] text-white rounded-xl hover:opacity-90 transition-all shadow-lg shadow-[#977DFF]/25"
         >
           <Plus size={20} />
           <span className="font-medium">Create Event</span>
@@ -74,15 +74,15 @@ export default function CalendarSidebar({ onCreateEvent }: CalendarSidebarProps)
           <button
             onClick={() => setSourceFilter('personal')}
             className={`w-full flex items-center gap-3 px-2 py-2 rounded-lg transition-colors ${
-              sourceFilter === 'personal' ? 'bg-blue-50' : 'hover:bg-gray-50'
+              sourceFilter === 'personal' ? 'bg-[#FFCCF2]/20' : 'hover:bg-gray-50'
             }`}
           >
             <div className={`w-5 h-5 rounded flex items-center justify-center ${
-              sourceFilter === 'personal' ? 'bg-blue-500' : 'border-2 border-gray-300'
+              sourceFilter === 'personal' ? 'bg-[#977DFF]' : 'border-2 border-gray-300'
             }`}>
               {sourceFilter === 'personal' && <Check size={12} className="text-white" />}
             </div>
-            <User size={16} className="text-blue-500" />
+            <User size={16} className="text-[#977DFF]" />
             <span className="text-sm text-gray-700">Personal</span>
           </button>
 
@@ -148,7 +148,7 @@ export default function CalendarSidebar({ onCreateEvent }: CalendarSidebarProps)
       <div className="border-t border-gray-200 p-4">
         <button
           onClick={() => goToDate(new Date())}
-          className="w-full text-sm text-blue-600 hover:text-blue-700 font-medium"
+          className="w-full text-sm text-[#977DFF] hover:text-[#0033FF] font-medium"
         >
           Go to Today
         </button>

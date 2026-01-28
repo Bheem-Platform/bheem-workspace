@@ -108,9 +108,12 @@ export default function BheemSlidesHeader({
       <div className="flex items-center px-3 py-2 gap-2">
         {/* Logo */}
         <Link href="/slides" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-          <div className="w-10 h-10 bg-gradient-to-br from-orange-400 to-orange-600 rounded-lg flex items-center justify-center shadow-sm">
+          <div className="w-10 h-10 bg-gradient-to-br from-[#FFCCF2] via-[#977DFF] to-[#0033FF] rounded-lg flex items-center justify-center shadow-sm">
             <Presentation className="w-6 h-6 text-white" />
           </div>
+          <span className="text-lg font-bold bg-gradient-to-r from-[#977DFF] to-[#0033FF] bg-clip-text text-transparent hidden sm:block">
+            Bheem Slides
+          </span>
         </Link>
 
         {/* Title and Status Section */}
@@ -128,7 +131,7 @@ export default function BheemSlidesHeader({
                     handleTitleBlur();
                   }
                 }}
-                className="text-lg font-medium text-gray-900 bg-transparent border-b-2 border-orange-500 focus:outline-none px-1 py-0.5 min-w-[200px]"
+                className="text-lg font-medium text-gray-900 bg-transparent border-b-2 border-[#977DFF] focus:outline-none px-1 py-0.5 min-w-[200px]"
               />
             ) : (
               <button
@@ -160,7 +163,7 @@ export default function BheemSlidesHeader({
             <div className="flex items-center gap-1">
               {isSaving ? (
                 <>
-                  <div className="w-3 h-3 border-2 border-orange-500 border-t-transparent rounded-full animate-spin" />
+                  <div className="w-3 h-3 border-2 border-[#977DFF] border-t-transparent rounded-full animate-spin" />
                   <span>Saving...</span>
                 </>
               ) : isSaved ? (
@@ -254,7 +257,7 @@ export default function BheemSlidesHeader({
           {/* Share Button */}
           <button
             onClick={onShare}
-            className="flex items-center gap-2 px-4 py-2 bg-orange-600 text-white rounded-full hover:bg-orange-700 transition-colors font-medium text-sm ml-2"
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-[#977DFF] to-[#0033FF] text-white rounded-full hover:opacity-90 transition-all font-medium text-sm ml-2 shadow-sm"
           >
             <Share2 className="w-4 h-4" />
             Share

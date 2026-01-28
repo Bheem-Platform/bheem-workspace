@@ -176,12 +176,9 @@ export default function VideosPage() {
     v.title.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // Skip showing loading screen - LoginLoader already handles the transition
   if (authLoading) {
-    return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-red-500" />
-      </div>
-    );
+    return null;
   }
 
   return (

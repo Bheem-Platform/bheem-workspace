@@ -139,9 +139,9 @@ export default function DriveSidebar({ onNewFolder, onUpload }: DriveSidebarProp
         <div className="relative">
           <button
             onClick={() => setShowNewMenu(!showNewMenu)}
-            className="w-full flex items-center gap-3 px-6 py-3 bg-white border-2 border-gray-200 rounded-2xl hover:bg-gray-50 hover:shadow-md transition-all group"
+            className="w-full flex items-center gap-3 px-6 py-3 bg-white border-2 border-gray-200 rounded-2xl hover:bg-[#FFCCF2]/10 hover:border-[#977DFF] hover:shadow-md transition-all group"
           >
-            <Plus size={20} className="text-gray-600 group-hover:text-blue-500" />
+            <Plus size={20} className="text-gray-600 group-hover:text-[#977DFF]" />
             <span className="font-medium text-gray-700 group-hover:text-gray-900">New</span>
           </button>
 
@@ -212,11 +212,11 @@ export default function DriveSidebar({ onNewFolder, onUpload }: DriveSidebarProp
                 onClick={() => handleNavigation(item.id)}
                 className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-full text-left transition-colors ${
                   isActive
-                    ? 'bg-blue-100 text-blue-700 font-medium'
-                    : 'text-gray-700 hover:bg-gray-100'
+                    ? 'bg-[#FFCCF2]/30 text-[#0033FF] font-medium'
+                    : 'text-gray-700 hover:bg-[#FFCCF2]/10'
                 }`}
               >
-                <Icon size={20} className={isActive ? 'text-blue-600' : ''} />
+                <Icon size={20} className={isActive ? 'text-[#977DFF]' : ''} />
                 <span>{item.label}</span>
               </button>
             );
@@ -237,11 +237,11 @@ export default function DriveSidebar({ onNewFolder, onUpload }: DriveSidebarProp
                 onClick={() => handleNavigation(item.id)}
                 className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-full text-left transition-colors ${
                   isActive
-                    ? 'bg-blue-100 text-blue-700 font-medium'
-                    : 'text-gray-700 hover:bg-gray-100'
+                    ? 'bg-[#FFCCF2]/30 text-[#0033FF] font-medium'
+                    : 'text-gray-700 hover:bg-[#FFCCF2]/10'
                 }`}
               >
-                <Icon size={20} className={isActive ? 'text-blue-600' : ''} />
+                <Icon size={20} className={isActive ? 'text-[#977DFF]' : ''} />
                 <span>{item.label}</span>
               </button>
             );
@@ -254,8 +254,8 @@ export default function DriveSidebar({ onNewFolder, onUpload }: DriveSidebarProp
             onClick={() => setSharedDrivesExpanded(!sharedDrivesExpanded)}
             className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-full text-left transition-colors ${
               activeSection === 'shared-drives'
-                ? 'bg-blue-100 text-blue-700 font-medium'
-                : 'text-gray-700 hover:bg-gray-100'
+                ? 'bg-[#FFCCF2]/30 text-[#0033FF] font-medium'
+                : 'text-gray-700 hover:bg-[#FFCCF2]/10'
             }`}
           >
             {sharedDrivesExpanded ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
@@ -296,11 +296,11 @@ export default function DriveSidebar({ onNewFolder, onUpload }: DriveSidebarProp
                 onClick={() => handleNavigation(item.id)}
                 className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-full text-left transition-colors ${
                   isActive
-                    ? 'bg-blue-100 text-blue-700 font-medium'
-                    : 'text-gray-700 hover:bg-gray-100'
+                    ? 'bg-[#FFCCF2]/30 text-[#0033FF] font-medium'
+                    : 'text-gray-700 hover:bg-[#FFCCF2]/10'
                 }`}
               >
-                <Icon size={20} className={isActive ? 'text-blue-600' : ''} />
+                <Icon size={20} className={isActive ? 'text-[#977DFF]' : ''} />
                 <span>{item.label}</span>
               </button>
             );
@@ -321,7 +321,7 @@ export default function DriveSidebar({ onNewFolder, onUpload }: DriveSidebarProp
                 ? 'bg-red-500'
                 : storagePercentage > 70
                 ? 'bg-yellow-500'
-                : 'bg-blue-500'
+                : 'bg-gradient-to-r from-[#FFCCF2] via-[#977DFF] to-[#0033FF]'
             }`}
             style={{ width: `${Math.min(storagePercentage, 100)}%` }}
           />
@@ -329,7 +329,7 @@ export default function DriveSidebar({ onNewFolder, onUpload }: DriveSidebarProp
         <p className="text-xs text-gray-500">
           {formatFileSize(storageUsed)} of {formatFileSize(storageTotal)} used
         </p>
-        <button className="mt-3 w-full text-sm text-blue-600 hover:text-blue-700 font-medium text-left">
+        <button className="mt-3 w-full text-sm text-[#977DFF] hover:text-[#0033FF] font-medium text-left">
           Buy storage
         </button>
       </div>

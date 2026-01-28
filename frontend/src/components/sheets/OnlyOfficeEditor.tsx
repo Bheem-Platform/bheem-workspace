@@ -152,7 +152,11 @@ export default function OnlyOfficeEditor({
 
       // Destroy existing editor if any
       if (editorRef.current) {
-        editorRef.current.destroyEditor();
+        try {
+          editorRef.current.destroyEditor();
+        } catch (e) {
+          console.warn('Error destroying existing editor:', e);
+        }
         editorRef.current = null;
       }
 
@@ -268,11 +272,24 @@ export default function OnlyOfficeEditor({
 
       {/* Loading overlay */}
       {loading && !error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
+        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-white via-[#FFCCF2]/10 to-[#977DFF]/10">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-600 mx-auto"></div>
-            <p className="mt-4 text-gray-600">
-              {scriptLoaded ? 'Initializing Bheem Sheets...' : 'Loading spreadsheet editor...'}
+            {/* Bheem Logo */}
+            <div className="w-16 h-16 bg-gradient-to-br from-[#FFCCF2] via-[#977DFF] to-[#0033FF] rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg animate-pulse">
+              <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 17V7m0 10a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h2a2 2 0 012 2m0 10a2 2 0 002 2h2a2 2 0 002-2M9 7a2 2 0 012-2h2a2 2 0 012 2m0 10V7m0 10a2 2 0 002 2h2a2 2 0 002-2V7a2 2 0 00-2-2h-2a2 2 0 00-2 2" />
+              </svg>
+            </div>
+            {/* Gradient spinner */}
+            <div className="relative w-12 h-12 mx-auto mb-4">
+              <div className="absolute inset-0 rounded-full border-4 border-[#FFCCF2]/30"></div>
+              <div className="absolute inset-0 rounded-full border-4 border-transparent border-t-[#977DFF] animate-spin"></div>
+            </div>
+            <h3 className="text-lg font-semibold bg-gradient-to-r from-[#977DFF] to-[#0033FF] bg-clip-text text-transparent">
+              Bheem Sheets
+            </h3>
+            <p className="mt-2 text-gray-500 text-sm">
+              {scriptLoaded ? 'Initializing editor...' : 'Loading spreadsheet...'}
             </p>
           </div>
         </div>
@@ -280,14 +297,14 @@ export default function OnlyOfficeEditor({
 
       {/* Error overlay */}
       {error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-gray-50">
-          <div className="text-center max-w-md p-6">
-            <div className="text-yellow-500 mb-4">
-              <svg className="h-16 w-16 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-white via-[#FFCCF2]/10 to-[#977DFF]/10">
+          <div className="text-center max-w-md p-8 bg-white rounded-2xl shadow-xl border border-[#FFCCF2]/30">
+            <div className="w-16 h-16 bg-gradient-to-br from-[#FFCCF2] via-[#977DFF] to-[#0033FF] rounded-2xl flex items-center justify-center mx-auto mb-4 opacity-60">
+              <svg className="h-10 w-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
               </svg>
             </div>
-            <h3 className="text-lg font-medium text-gray-900 mb-2">
+            <h3 className="text-lg font-semibold bg-gradient-to-r from-[#977DFF] to-[#0033FF] bg-clip-text text-transparent mb-2">
               Bheem Sheets Connection Issue
             </h3>
             {isSSLError ? (
@@ -296,16 +313,16 @@ export default function OnlyOfficeEditor({
                   Unable to connect to the document server. This may be due to a certificate issue.
                 </p>
                 <p className="text-gray-500 text-xs mb-4">
-                  Try visiting <a href={ONLYOFFICE_URL} target="_blank" rel="noopener noreferrer" className="text-green-600 underline">{ONLYOFFICE_URL}</a> directly and accepting the certificate, then retry.
+                  Try visiting <a href={ONLYOFFICE_URL} target="_blank" rel="noopener noreferrer" className="text-[#977DFF] underline hover:text-[#0033FF]">{ONLYOFFICE_URL}</a> directly and accepting the certificate, then retry.
                 </p>
               </>
             ) : (
               <p className="text-gray-600 text-sm mb-4">{error}</p>
             )}
-            <div className="flex gap-2 justify-center">
+            <div className="flex gap-3 justify-center">
               <button
                 onClick={initializeEditor}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                className="px-5 py-2.5 bg-gradient-to-r from-[#977DFF] to-[#0033FF] text-white rounded-lg hover:opacity-90 transition-all font-medium shadow-md"
               >
                 Retry
               </button>
@@ -313,7 +330,7 @@ export default function OnlyOfficeEditor({
                 href={ONLYOFFICE_URL}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
+                className="px-5 py-2.5 bg-[#FFCCF2]/30 text-[#0033FF] rounded-lg hover:bg-[#FFCCF2]/50 transition-colors font-medium"
               >
                 Open Server
               </a>

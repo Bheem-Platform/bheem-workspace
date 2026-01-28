@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { api } from '@/lib/api';
+import LoginLoader from '@/components/shared/LoginLoader';
 
 type AuthMode = 'login' | 'signup';
 
@@ -322,12 +323,29 @@ export default function LoginPage() {
   const [success, setSuccess] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const [showLoginLoader, setShowLoginLoader] = useState(false);
+  const [loggedInUserName, setLoggedInUserName] = useState('');
+
+  // Remember me state
+  const [rememberMe, setRememberMe] = useState(false);
 
   // Login form
   const [loginData, setLoginData] = useState({
     username: '',
     password: '',
   });
+
+  // Load saved credentials on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const savedUsername = localStorage.getItem('bheem_remembered_username');
+      const savedRememberMe = localStorage.getItem('bheem_remember_me') === 'true';
+      if (savedUsername && savedRememberMe) {
+        setLoginData(prev => ({ ...prev, username: savedUsername }));
+        setRememberMe(true);
+      }
+    }
+  }, []);
 
   // Signup form
   const [signupData, setSignupData] = useState({
@@ -366,6 +384,9 @@ export default function LoginPage() {
     }
   }, [isAuthenticated, isLoading, router, redirectTo, isLoggingIn, user]);
 
+  // Store target URL for navigation after login loader
+  const [loginTargetUrl, setLoginTargetUrl] = useState('');
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -380,6 +401,9 @@ export default function LoginPage() {
 
       const { access_token, user } = response.data;
       await setAuth(access_token, user);
+
+      // Store user name for loader greeting
+      setLoggedInUserName(user.name || user.full_name || user.username?.split('@')[0] || '');
 
       let targetUrl = '/dashboard';
       if (user.role === 'SuperAdmin') {
@@ -396,7 +420,18 @@ export default function LoginPage() {
         }
       }
 
-      router.push(redirectTo || targetUrl);
+      // Save or clear remembered credentials
+      if (rememberMe) {
+        localStorage.setItem('bheem_remembered_username', loginData.username);
+        localStorage.setItem('bheem_remember_me', 'true');
+      } else {
+        localStorage.removeItem('bheem_remembered_username');
+        localStorage.removeItem('bheem_remember_me');
+      }
+
+      // Store target URL and show branded loader
+      setLoginTargetUrl(redirectTo || targetUrl);
+      setShowLoginLoader(true);
     } catch (err: any) {
       console.error('Login error:', err);
       if (err.response?.status === 401) {
@@ -413,6 +448,11 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Handle login loader completion - navigate to target
+  const handleLoginLoaderComplete = () => {
+    router.push(loginTargetUrl);
   };
 
   const handleSignup = async (e: React.FormEvent) => {
@@ -688,7 +728,12 @@ export default function LoginPage() {
 
                       <div className="flex items-center justify-between">
                         <label className="flex items-center gap-2 cursor-pointer">
-                          <input type="checkbox" className="w-4 h-4 rounded border-gray-300 text-[#977DFF] focus:ring-[#977DFF]" />
+                          <input
+                            type="checkbox"
+                            checked={rememberMe}
+                            onChange={(e) => setRememberMe(e.target.checked)}
+                            className="w-4 h-4 rounded border-gray-300 text-[#977DFF] focus:ring-[#977DFF]"
+                          />
                           <span className="text-sm text-gray-600">Remember me</span>
                         </label>
                         <a href="#" className="text-sm font-medium text-[#977DFF] hover:text-[#0033FF] transition-colors">
@@ -908,6 +953,16 @@ export default function LoginPage() {
           </motion.div>
         </div>
       </div>
+
+      {/* Branded Login Loader - Only shows after successful authentication */}
+      <AnimatePresence>
+        {showLoginLoader && (
+          <LoginLoader
+            userName={loggedInUserName}
+            onComplete={handleLoginLoaderComplete}
+          />
+        )}
+      </AnimatePresence>
     </>
   );
 }

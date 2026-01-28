@@ -18,6 +18,7 @@ from core.config import settings
 from services.passport_client import get_passport_client, BheemPassportClient
 from services.mailcow_service import mailcow_service
 from services.nextcloud_service import nextcloud_service
+from services.nextcloud_credentials_service import get_nextcloud_credentials_service
 from integrations.notify import notify_client
 import asyncio
 import secrets
@@ -112,6 +113,10 @@ async def login(
                     )
                     asyncio.create_task(
                         nextcloud_service.sync_password(email, request.password)
+                    )
+                    # Also update stored credentials for document storage
+                    asyncio.create_task(
+                        get_nextcloud_credentials_service().update_password(email, request.password)
                     )
             except Exception as e:
                 print(f"Password sync skipped: {e}")

@@ -6,6 +6,39 @@
   --bheem-primary: #3B82F6;
   --bheem-secondary: #1E40AF;
   --bheem-accent: #60A5FA;
+  --bheem-pink: #FFCCF2;
+  --bheem-purple: #977DFF;
+  --bheem-blue: #0033FF;
+}
+
+/* Shimmer animation for skeleton loaders */
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* Gradient text animation */
+@keyframes gradient-shift {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+/* Pulse glow animation */
+@keyframes pulse-glow {
+  0%, 100% {
+    box-shadow: 0 0 5px rgba(151, 125, 255, 0.5);
+  }
+  50% {
+    box-shadow: 0 0 20px rgba(151, 125, 255, 0.8), 0 0 30px rgba(0, 51, 255, 0.4);
+  }
 }
 
 body {
@@ -29,4 +62,162 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
+}
+
+/* Accent color CSS variable - can be set dynamically */
+:root {
+  --accent-color: #977DFF;
+}
+
+/* Compact mode styles */
+.compact-mode {
+  --spacing-unit: 0.75;
+}
+
+.compact-mode .p-4 {
+  padding: 0.75rem;
+}
+
+.compact-mode .p-6 {
+  padding: 1rem;
+}
+
+.compact-mode .py-4 {
+  padding-top: 0.75rem;
+  padding-bottom: 0.75rem;
+}
+
+.compact-mode .px-4 {
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+}
+
+.compact-mode .gap-4 {
+  gap: 0.75rem;
+}
+
+.compact-mode .gap-6 {
+  gap: 1rem;
+}
+
+.compact-mode .text-sm {
+  font-size: 0.8125rem;
+}
+
+.compact-mode .rounded-xl {
+  border-radius: 0.625rem;
+}
+
+.compact-mode .rounded-2xl {
+  border-radius: 0.75rem;
+}
+
+/* Dark mode styles */
+.dark {
+  color-scheme: dark;
+}
+
+.dark body {
+  background-color: #0f172a;
+  color: #e2e8f0;
+}
+
+.dark .bg-white {
+  background-color: #1e293b !important;
+}
+
+.dark .bg-gray-50 {
+  background-color: #0f172a !important;
+}
+
+.dark .bg-gray-100 {
+  background-color: #1e293b !important;
+}
+
+.dark .bg-gray-200 {
+  background-color: #334155 !important;
+}
+
+.dark .text-gray-900 {
+  color: #f1f5f9 !important;
+}
+
+.dark .text-gray-800 {
+  color: #e2e8f0 !important;
+}
+
+.dark .text-gray-700 {
+  color: #cbd5e1 !important;
+}
+
+.dark .text-gray-600 {
+  color: #94a3b8 !important;
+}
+
+.dark .text-gray-500 {
+  color: #64748b !important;
+}
+
+.dark .text-gray-400 {
+  color: #475569 !important;
+}
+
+.dark .border-gray-200 {
+  border-color: #334155 !important;
+}
+
+.dark .border-gray-100 {
+  border-color: #1e293b !important;
+}
+
+.dark .border-gray-300 {
+  border-color: #475569 !important;
+}
+
+.dark .hover\:bg-gray-100:hover {
+  background-color: #334155 !important;
+}
+
+.dark .hover\:bg-gray-50:hover {
+  background-color: #1e293b !important;
+}
+
+.dark input,
+.dark textarea,
+.dark select {
+  background-color: #1e293b !important;
+  border-color: #334155 !important;
+  color: #e2e8f0 !important;
+}
+
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #64748b !important;
+}
+
+.dark input:focus,
+.dark textarea:focus,
+.dark select:focus {
+  border-color: #977DFF !important;
+}
+
+/* Dark mode scrollbar */
+.dark ::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: #475569;
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #64748b;
+}
+
+/* Dark mode shadows */
+.dark .shadow-sm,
+.dark .shadow,
+.dark .shadow-md,
+.dark .shadow-lg {
+  --tw-shadow-color: rgba(0, 0, 0, 0.3);
 }

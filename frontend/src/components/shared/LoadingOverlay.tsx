@@ -1,60 +1,50 @@
+/**
+ * Loading Overlay Component - Modern Bheem Branded Design
+ * Uses brand colors: #FFCCF2 (pink), #977DFF (purple), #0033FF (blue)
+ */
+import BheemLoader from './BheemLoader';
+
 interface LoadingOverlayProps {
   text?: string;
   fullScreen?: boolean;
   transparent?: boolean;
+  variant?: 'spinner' | 'pulse' | 'dots' | 'orbit';
+  size?: 'sm' | 'md' | 'lg' | 'xl';
 }
 
 export default function LoadingOverlay({
   text = 'Loading...',
   fullScreen = false,
   transparent = false,
+  variant = 'spinner',
+  size = 'md',
 }: LoadingOverlayProps) {
-  const content = (
-    <div className="flex flex-col items-center justify-center gap-4">
-      {/* Spinner */}
-      <div className="relative">
-        <div className="w-12 h-12 border-4 border-gray-200 rounded-full animate-spin border-t-blue-600" />
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-xs">B</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Text */}
-      {text && (
-        <p className="text-gray-600 font-medium text-sm animate-pulse">
-          {text}
-        </p>
-      )}
-    </div>
-  );
-
-  if (fullScreen) {
-    return (
-      <div
-        className={`fixed inset-0 z-50 flex items-center justify-center ${
-          transparent ? 'bg-white/80 backdrop-blur-sm' : 'bg-white'
-        }`}
-      >
-        {content}
-      </div>
-    );
-  }
-
   return (
-    <div className="flex items-center justify-center p-8">
-      {content}
-    </div>
+    <BheemLoader
+      size={size}
+      variant={variant}
+      text={text}
+      showText={!!text}
+      fullScreen={fullScreen}
+      transparent={transparent}
+    />
   );
 }
 
-// Skeleton loader components
+// Skeleton loader components with brand styling
 export function SkeletonLine({ className = '' }: { className?: string }) {
   return (
     <div
-      className={`bg-gray-200 rounded animate-pulse ${className}`}
-    />
+      className={`relative overflow-hidden bg-gray-200 rounded animate-pulse ${className}`}
+    >
+      <div
+        className="absolute inset-0 -translate-x-full"
+        style={{
+          background: 'linear-gradient(90deg, transparent, rgba(151, 125, 255, 0.15), transparent)',
+          animation: 'shimmer 2s infinite',
+        }}
+      />
+    </div>
   );
 }
 

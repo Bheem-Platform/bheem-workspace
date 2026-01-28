@@ -18,6 +18,7 @@ import ShareModal from '@/components/docs/ShareModal';
 import ShareModalShared from '@/components/shared/ShareModal';
 import { useDocsStore } from '@/stores/docsStore';
 import { useRequireAuth, useAuthStore } from '@/stores/authStore';
+import BheemLoader from '@/components/shared/BheemLoader';
 import * as docsEditorApi from '@/lib/docsEditorApi';
 import { api } from '@/lib/api';
 
@@ -394,17 +395,25 @@ export default function DocumentEditorPage() {
   // Show loading while checking auth
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" />
-      </div>
+      <BheemLoader
+        size="lg"
+        variant="spinner"
+        text="Loading..."
+        fullScreen
+        transparent
+      />
     );
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600" />
-      </div>
+      <BheemLoader
+        size="lg"
+        variant="pulse"
+        text="Opening document..."
+        fullScreen
+        transparent
+      />
     );
   }
 
@@ -415,7 +424,7 @@ export default function DocumentEditorPage() {
           <p className="text-red-600 mb-4">{error || 'Document not found'}</p>
           <button
             onClick={() => router.push('/docs')}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg"
+            className="px-4 py-2 bg-gradient-to-r from-[#FFCCF2] via-[#977DFF] to-[#0033FF] text-white rounded-lg hover:opacity-90 transition-all"
           >
             Back to Documents
           </button>

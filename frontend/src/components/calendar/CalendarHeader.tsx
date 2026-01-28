@@ -1,8 +1,10 @@
 import dayjs from 'dayjs';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useCalendarStore } from '@/stores/calendarStore';
+import { useWeekStart } from '@/stores/settingsStore';
 import CalendarSearchBar from './CalendarSearchBar';
 import AppLauncher from '@/components/shared/AppLauncher';
+import { getMonthNames } from '@/lib/dateFormat';
 import type { CalendarViewType, CalendarEvent } from '@/types/calendar';
 
 interface CalendarHeaderProps {
@@ -11,27 +13,40 @@ interface CalendarHeaderProps {
 
 export default function CalendarHeader({ onEventClick }: CalendarHeaderProps = {}) {
   const { currentDate, viewType, navigateDate, setViewType } = useCalendarStore();
+  const weekStart = useWeekStart();
+  const weekStartDay = weekStart === 'monday' ? 1 : 0;
+  const months = getMonthNames();
 
   const getDateRangeText = () => {
     const current = dayjs(currentDate);
+    const monthName = months[current.month()];
 
     switch (viewType) {
       case 'day':
-        return current.format('MMMM D, YYYY');
+        return `${monthName} ${current.date()}, ${current.year()}`;
       case 'week': {
-        const weekStart = current.startOf('week');
-        const weekEnd = current.endOf('week');
-        if (weekStart.month() === weekEnd.month()) {
-          return `${weekStart.format('MMMM D')} - ${weekEnd.format('D, YYYY')}`;
+        // Adjust week start based on user setting
+        let weekStartDate = current.startOf('week');
+        if (weekStartDay === 1) {
+          // If Monday start, adjust
+          const dayOfWeek = current.day();
+          weekStartDate = dayOfWeek === 0
+            ? current.subtract(6, 'day')
+            : current.subtract(dayOfWeek - 1, 'day');
         }
-        return `${weekStart.format('MMM D')} - ${weekEnd.format('MMM D, YYYY')}`;
+        const weekEndDate = weekStartDate.add(6, 'day');
+
+        if (weekStartDate.month() === weekEndDate.month()) {
+          return `${months[weekStartDate.month()]} ${weekStartDate.date()} - ${weekEndDate.date()}, ${weekEndDate.year()}`;
+        }
+        return `${months[weekStartDate.month()].slice(0, 3)} ${weekStartDate.date()} - ${months[weekEndDate.month()].slice(0, 3)} ${weekEndDate.date()}, ${weekEndDate.year()}`;
       }
       case 'month':
-        return current.format('MMMM YYYY');
+        return `${monthName} ${current.year()}`;
       case 'schedule':
-        return current.format('MMMM YYYY');
+        return `${monthName} ${current.year()}`;
       default:
-        return current.format('MMMM YYYY');
+        return `${monthName} ${current.year()}`;
     }
   };
 
@@ -48,7 +63,7 @@ export default function CalendarHeader({ onEventClick }: CalendarHeaderProps = {
       <div className="flex items-center gap-4">
         <button
           onClick={() => navigateDate('today')}
-          className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
+          className="px-4 py-2 text-sm font-medium text-[#0033FF] bg-white border border-[#977DFF] rounded-lg hover:bg-[#FFCCF2]/10 transition-colors"
         >
           Today
         </button>
@@ -87,8 +102,8 @@ export default function CalendarHeader({ onEventClick }: CalendarHeaderProps = {
               className={`
                 px-4 py-2 text-sm font-medium rounded-md transition-colors
                 ${viewType === option.value
-                  ? 'bg-white text-gray-900 shadow-sm'
-                  : 'text-gray-600 hover:text-gray-900'
+                  ? 'bg-white text-[#0033FF] shadow-sm'
+                  : 'text-gray-600 hover:text-[#977DFF]'
                 }
               `}
             >

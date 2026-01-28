@@ -16,6 +16,7 @@ import { useCredentialsStore } from '@/stores/credentialsStore';
 import { useRequireAuth } from '@/stores/authStore';
 import type { CalendarEvent } from '@/types/calendar';
 import { Calendar as CalendarIcon, CheckSquare, Link2, Video } from 'lucide-react';
+import BheemLoader from '@/components/shared/BheemLoader';
 
 type CalendarTab = 'calendar' | 'tasks' | 'booking';
 
@@ -88,9 +89,13 @@ export default function CalendarPage() {
   // Show loading while checking auth
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500" />
-      </div>
+      <BheemLoader
+        size="lg"
+        variant="spinner"
+        text="Loading Calendar..."
+        fullScreen
+        transparent
+      />
     );
   }
 
@@ -143,7 +148,7 @@ export default function CalendarPage() {
       <div className="p-4 border-b border-gray-200">
         <button
           onClick={() => setShowMeetPanel(!showMeetPanel)}
-          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border-2 border-blue-500 text-blue-600 rounded-xl hover:bg-blue-50 transition-all font-medium"
+          className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border-2 border-[#977DFF] text-[#977DFF] rounded-xl hover:bg-[#FFCCF2]/10 transition-all font-medium"
         >
           <Video size={20} />
           <span>Meet</span>
@@ -180,8 +185,8 @@ export default function CalendarPage() {
                   onClick={() => setActiveTab('calendar')}
                   className={`flex items-center gap-2 px-4 py-2 rounded-t-lg font-medium text-sm transition-colors ${
                     activeTab === 'calendar'
-                      ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600'
-                      : 'text-gray-600 hover:bg-gray-50'
+                      ? 'bg-[#FFCCF2]/20 text-[#0033FF] border-b-2 border-[#977DFF]'
+                      : 'text-gray-600 hover:bg-[#FFCCF2]/10'
                   }`}
                 >
                   <CalendarIcon size={18} />
@@ -191,8 +196,8 @@ export default function CalendarPage() {
                   onClick={() => setActiveTab('tasks')}
                   className={`flex items-center gap-2 px-4 py-2 rounded-t-lg font-medium text-sm transition-colors ${
                     activeTab === 'tasks'
-                      ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600'
-                      : 'text-gray-600 hover:bg-gray-50'
+                      ? 'bg-[#FFCCF2]/20 text-[#0033FF] border-b-2 border-[#977DFF]'
+                      : 'text-gray-600 hover:bg-[#FFCCF2]/10'
                   }`}
                 >
                   <CheckSquare size={18} />
@@ -202,8 +207,8 @@ export default function CalendarPage() {
                   onClick={() => setActiveTab('booking')}
                   className={`flex items-center gap-2 px-4 py-2 rounded-t-lg font-medium text-sm transition-colors ${
                     activeTab === 'booking'
-                      ? 'bg-blue-50 text-blue-600 border-b-2 border-blue-600'
-                      : 'text-gray-600 hover:bg-gray-50'
+                      ? 'bg-[#FFCCF2]/20 text-[#0033FF] border-b-2 border-[#977DFF]'
+                      : 'text-gray-600 hover:bg-[#FFCCF2]/10'
                   }`}
                 >
                   <Link2 size={18} />
@@ -233,8 +238,8 @@ export default function CalendarPage() {
 
                 {/* Loading Overlay */}
                 {(loading.calendars || loading.events) && (
-                  <div className="px-6 py-2 bg-blue-50 border-b border-blue-200">
-                    <span className="text-sm text-blue-700">Loading...</span>
+                  <div className="px-6 py-2 bg-[#FFCCF2]/20 border-b border-[#977DFF]/30">
+                    <span className="text-sm text-[#0033FF]">Loading...</span>
                   </div>
                 )}
 
@@ -364,7 +369,7 @@ function MailLoginPrompt({ onSuccess }: { onSuccess: () => void }) {
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-blue-500 to-cyan-600">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-[#FFCCF2] via-[#977DFF] to-[#0033FF]">
       <div className="w-full max-w-md mx-4">
         {/* Logo */}
         <div className="text-center mb-8">
@@ -378,8 +383,8 @@ function MailLoginPrompt({ onSuccess }: { onSuccess: () => void }) {
         {/* Info Card */}
         <div className="bg-white rounded-2xl shadow-2xl p-8">
           <div className="text-center space-y-4">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-50 rounded-full mb-2">
-              <Mail size={32} className="text-blue-500" />
+            <div className="inline-flex items-center justify-center w-16 h-16 bg-[#FFCCF2]/30 rounded-full mb-2">
+              <Mail size={32} className="text-[#977DFF]" />
             </div>
 
             <h2 className="text-xl font-semibold text-gray-900">
@@ -390,9 +395,9 @@ function MailLoginPrompt({ onSuccess }: { onSuccess: () => void }) {
               Calendar uses your workspace email credentials. Simply login to Bheem Mail with your workspace email and password, then return here.
             </p>
 
-            <div className="bg-blue-50 rounded-lg p-4 text-left">
-              <p className="text-sm text-blue-800 font-medium mb-2">How it works:</p>
-              <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
+            <div className="bg-[#FFCCF2]/20 rounded-lg p-4 text-left">
+              <p className="text-sm text-[#0033FF] font-medium mb-2">How it works:</p>
+              <ol className="text-sm text-[#977DFF] space-y-1 list-decimal list-inside">
                 <li>Go to Bheem Mail</li>
                 <li>Login with your workspace credentials</li>
                 <li>Come back here - Calendar will work automatically!</li>
@@ -401,7 +406,7 @@ function MailLoginPrompt({ onSuccess }: { onSuccess: () => void }) {
 
             <a
               href="/mail"
-              className="inline-flex items-center justify-center gap-2 w-full py-3 px-4 bg-gradient-to-r from-blue-500 to-cyan-500 text-white font-medium rounded-lg hover:from-blue-600 hover:to-cyan-600 transition-all"
+              className="inline-flex items-center justify-center gap-2 w-full py-3 px-4 bg-gradient-to-r from-[#FFCCF2] via-[#977DFF] to-[#0033FF] text-white font-medium rounded-lg hover:opacity-90 transition-all shadow-md"
             >
               Go to Mail
               <ArrowRight size={18} />

@@ -1,6 +1,11 @@
 import { useMemo } from 'react';
 import dayjs from 'dayjs';
+import weekday from 'dayjs/plugin/weekday';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useWeekStart } from '@/stores/settingsStore';
+
+// Extend dayjs with weekday plugin
+dayjs.extend(weekday);
 
 interface MiniCalendarProps {
   currentDate: Date;
@@ -15,14 +20,37 @@ export default function MiniCalendar({
   onDateSelect,
   onMonthChange,
 }: MiniCalendarProps) {
+  // Get week start from settings - using selector hook for proper reactivity
+  const weekStart = useWeekStart();
+  const weekStartDay = weekStart === 'monday' ? 1 : 0;
+
+  // Get day headers based on week start
+  const dayHeaders = useMemo(() => {
+    const days = weekStart === 'monday'
+      ? ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+      : ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+    return days;
+  }, [weekStart]);
+
   const weeks = useMemo(() => {
-    const start = dayjs(currentDate).startOf('month').startOf('week');
-    const end = dayjs(currentDate).endOf('month').endOf('week');
+    const monthStart = dayjs(currentDate).startOf('month');
+    const monthEnd = dayjs(currentDate).endOf('month');
+
+    // Calculate the start of the calendar grid
+    let start = monthStart.day() - weekStartDay;
+    if (start < 0) start += 7;
+    const calendarStart = monthStart.subtract(start, 'day');
+
+    // Calculate the end of the calendar grid
+    let end = 6 - (monthEnd.day() - weekStartDay);
+    if (end < 0) end += 7;
+    if (end === 7) end = 0;
+    const calendarEnd = monthEnd.add(end, 'day');
 
     const result: Date[][] = [];
-    let current = start;
+    let current = calendarStart;
 
-    while (current.isBefore(end)) {
+    while (current.isBefore(calendarEnd) || current.isSame(calendarEnd, 'day')) {
       const week: Date[] = [];
       for (let i = 0; i < 7; i++) {
         week.push(current.toDate());
@@ -32,7 +60,7 @@ export default function MiniCalendar({
     }
 
     return result;
-  }, [currentDate]);
+  }, [currentDate, weekStartDay]);
 
   const today = dayjs().startOf('day');
   const currentMonth = dayjs(currentDate).month();
@@ -81,7 +109,7 @@ export default function MiniCalendar({
 
       {/* Day headers */}
       <div className="grid grid-cols-7 gap-1 mb-1">
-        {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, i) => (
+        {dayHeaders.map((day, i) => (
           <div
             key={i}
             className="text-xs font-medium text-gray-500 text-center py-1"
@@ -106,9 +134,9 @@ export default function MiniCalendar({
                 w-7 h-7 text-xs rounded-full flex items-center justify-center
                 transition-colors
                 ${!inMonth ? 'text-gray-300' : 'text-gray-700'}
-                ${selected ? 'bg-blue-500 text-white' : ''}
-                ${todayDate && !selected ? 'bg-blue-100 text-blue-600 font-semibold' : ''}
-                ${!selected && inMonth ? 'hover:bg-gray-100' : ''}
+                ${selected ? 'bg-[#977DFF] text-white' : ''}
+                ${todayDate && !selected ? 'bg-[#FFCCF2]/30 text-[#0033FF] font-semibold' : ''}
+                ${!selected && inMonth ? 'hover:bg-[#FFCCF2]/20' : ''}
               `}
             >
               {dayjs(date).date()}

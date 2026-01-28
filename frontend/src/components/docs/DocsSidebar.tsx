@@ -35,7 +35,8 @@ const DOC_TYPES = [
   { id: 'sheets', name: 'Spreadsheets', icon: Table, href: '/sheets', color: 'text-green-600' },
   { id: 'slides', name: 'Presentations', icon: Presentation, href: '/slides', color: 'text-yellow-600' },
   { id: 'videos', name: 'Videos', icon: Video, href: '/videos', color: 'text-red-600' },
-  { id: 'forms', name: 'Forms', icon: ClipboardList, href: '/forms', color: 'text-purple-600' },
+  { id: 'forms', name: 'Survey Forms', icon: ClipboardList, href: '/forms', color: 'text-purple-600' },
+  { id: 'oforms', name: 'Document Forms', icon: FileText, href: '/oforms', color: 'text-violet-600' },
 ];
 
 // Quick Access items
@@ -84,6 +85,7 @@ export default function DocsSidebar({
     if (path.startsWith('/sheets')) return 'sheets';
     if (path.startsWith('/slides')) return 'slides';
     if (path.startsWith('/videos')) return 'videos';
+    if (path.startsWith('/oforms')) return 'oforms';
     if (path.startsWith('/forms')) return 'forms';
     if (path === '/docs' && query.type === 'docs') return 'docs';
     if (path === '/docs') return 'home';
@@ -150,9 +152,9 @@ export default function DocsSidebar({
         <div className="relative">
           <button
             onClick={() => setShowCreateMenu(!showCreateMenu)}
-            className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-white border-2 border-gray-200 rounded-2xl hover:bg-gray-50 hover:border-gray-300 hover:shadow-md transition-all group"
+            className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-white border-2 border-gray-200 rounded-2xl hover:bg-[#FFCCF2]/10 hover:border-[#977DFF] hover:shadow-md transition-all group"
           >
-            <Plus size={20} className="text-gray-600 group-hover:text-blue-600" />
+            <Plus size={20} className="text-gray-600 group-hover:text-[#977DFF]" />
             <span className="font-medium text-gray-700 group-hover:text-gray-900">New</span>
           </button>
 
@@ -258,15 +260,15 @@ export default function DocsSidebar({
                   className={`
                     w-full flex items-center gap-3 px-3 py-2 rounded-r-full transition-all
                     ${isActive
-                      ? 'bg-blue-100 text-blue-800 font-medium'
-                      : 'text-gray-700 hover:bg-gray-100'
+                      ? 'bg-[#FFCCF2]/30 text-[#0033FF] font-medium'
+                      : 'text-gray-700 hover:bg-[#FFCCF2]/10'
                     }
                   `}
                 >
-                  <Icon size={18} className={isActive ? 'text-blue-600' : type.color} />
+                  <Icon size={18} className={isActive ? 'text-[#977DFF]' : type.color} />
                   <span className="flex-1 text-left text-sm">{type.name}</span>
                   {count > 0 && (
-                    <span className={`text-xs ${isActive ? 'text-blue-700' : 'text-gray-400'}`}>
+                    <span className={`text-xs ${isActive ? 'text-[#0033FF]' : 'text-gray-400'}`}>
                       {count}
                     </span>
                   )}
@@ -303,12 +305,12 @@ export default function DocsSidebar({
                   className={`
                     w-full flex items-center gap-3 px-3 py-2 rounded-r-full transition-all
                     ${isActive
-                      ? 'bg-blue-100 text-blue-800 font-medium'
-                      : 'text-gray-600 hover:bg-gray-100'
+                      ? 'bg-[#FFCCF2]/30 text-[#0033FF] font-medium'
+                      : 'text-gray-600 hover:bg-[#FFCCF2]/10'
                     }
                   `}
                 >
-                  <Icon size={16} className={isActive ? 'text-blue-600' : item.color} />
+                  <Icon size={16} className={isActive ? 'text-[#977DFF]' : item.color} />
                   <span className="flex-1 text-left text-sm">{item.name}</span>
                 </button>
               );
@@ -362,12 +364,12 @@ export default function DocsSidebar({
           <span className="text-sm text-gray-600">Storage</span>
         </div>
         <div className="w-full bg-gray-200 rounded-full h-1.5 mb-1">
-          <div className="bg-blue-500 h-1.5 rounded-full" style={{ width: '25%' }} />
+          <div className="bg-gradient-to-r from-[#FFCCF2] via-[#977DFF] to-[#0033FF] h-1.5 rounded-full" style={{ width: '25%' }} />
         </div>
         <p className="text-xs text-gray-500">2.5 GB of 15 GB used</p>
         <Link
           href="/drive"
-          className="text-xs text-blue-600 hover:underline mt-1 inline-block"
+          className="text-xs text-[#977DFF] hover:text-[#0033FF] hover:underline mt-1 inline-block"
         >
           Manage storage
         </Link>

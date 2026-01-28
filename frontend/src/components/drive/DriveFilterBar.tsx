@@ -112,18 +112,18 @@ function FilterDropdown({
         onClick={() => setIsOpen(!isOpen)}
         className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-colors ${
           hasActiveFilter
-            ? 'bg-blue-50 border-blue-200 text-blue-700'
-            : 'border-gray-200 text-gray-700 hover:bg-gray-50'
+            ? 'bg-[#FFCCF2]/20 border-[#977DFF]/30 text-[#0033FF]'
+            : 'border-gray-200 text-gray-700 hover:bg-[#FFCCF2]/10'
         }`}
       >
-        <Icon size={16} className={hasActiveFilter ? 'text-blue-600' : 'text-gray-500'} />
+        <Icon size={16} className={hasActiveFilter ? 'text-[#977DFF]' : 'text-gray-500'} />
         <span className="text-sm font-medium">
           {hasActiveFilter ? selectedOption?.label : label}
         </span>
         <ChevronDown
           size={14}
           className={`transition-transform ${isOpen ? 'rotate-180' : ''} ${
-            hasActiveFilter ? 'text-blue-600' : 'text-gray-400'
+            hasActiveFilter ? 'text-[#977DFF]' : 'text-gray-400'
           }`}
         />
       </button>
@@ -133,7 +133,7 @@ function FilterDropdown({
             e.stopPropagation();
             onChange(null);
           }}
-          className="p-1 hover:bg-blue-100 rounded text-blue-600"
+          className="p-1 hover:bg-[#FFCCF2]/30 rounded text-[#977DFF]"
           title="Clear filter"
         >
           <X size={14} />
@@ -149,7 +149,7 @@ function FilterDropdown({
                 placeholder="Search people..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#977DFF]"
               />
             </div>
           )}
@@ -167,17 +167,17 @@ function FilterDropdown({
                     setIsOpen(false);
                   }}
                   className={`w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors ${
-                    isSelected ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'
+                    isSelected ? 'bg-[#FFCCF2]/20 text-[#0033FF]' : 'text-gray-700 hover:bg-[#FFCCF2]/10'
                   }`}
                 >
                   {OptionIcon && (
                     <OptionIcon
                       size={18}
-                      className={option.color || (isSelected ? 'text-blue-600' : 'text-gray-400')}
+                      className={option.color || (isSelected ? 'text-[#977DFF]' : 'text-gray-400')}
                     />
                   )}
                   <span className="flex-1 text-sm">{option.label}</span>
-                  {isSelected && <Check size={16} className="text-blue-600" />}
+                  {isSelected && <Check size={16} className="text-[#977DFF]" />}
                 </button>
               );
             })}

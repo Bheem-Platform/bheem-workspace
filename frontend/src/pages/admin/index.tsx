@@ -74,15 +74,9 @@ export default function TenantAdminDashboard() {
     fetchActivityLogs(tenantId, { limit: 10 });
   }, [tenantId, fetchActivityLogs, isAuthenticated, authLoading]);
 
+  // Skip showing loading screen - LoginLoader already handles the transition
   if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#FFCCF2] via-[#977DFF] to-[#0033FF]">
-        <div className="text-center">
-          <div className="w-16 h-16 rounded-full border-4 border-white/30 border-t-white animate-spin mx-auto" />
-          <p className="mt-4 text-white font-medium">Loading dashboard...</p>
-        </div>
-      </div>
-    );
+    return null;
   }
 
   // Calculate storage breakdown for donut chart with brand colors

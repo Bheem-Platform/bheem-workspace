@@ -761,6 +761,93 @@ async def list_entity_types():
 
 
 # =============================================================================
+# NEXTCLOUD USER INITIALIZATION
+# =============================================================================
+
+@router.post("/user/initialize-storage")
+async def initialize_user_storage(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Initialize Nextcloud storage for the current user.
+
+    Creates a Nextcloud user account (if needed) and generates credentials
+    so documents are stored in the user's own Nextcloud folder.
+
+    This endpoint is called automatically when a user first accesses Bheem Docs,
+    but can also be called manually to reinitialize storage.
+    """
+    from services.nextcloud_credentials_service import get_nextcloud_credentials_service
+
+    user_id = current_user.get('id')
+    user_email = current_user.get('email', current_user.get('username', ''))
+    user_name = current_user.get('name', current_user.get('full_name', user_email.split('@')[0]))
+
+    if not user_id or not user_email:
+        raise HTTPException(status_code=400, detail="User ID and email required")
+
+    try:
+        cred_service = get_nextcloud_credentials_service()
+        credentials = await cred_service.ensure_user_credentials(
+            UUID(user_id),
+            user_email,
+            user_name
+        )
+
+        if credentials:
+            return {
+                "status": "success",
+                "message": "Nextcloud storage initialized",
+                "nextcloud_username": credentials['nextcloud_username']
+            }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to initialize Nextcloud storage"
+            )
+
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to initialize user storage: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/user/storage-status")
+async def get_user_storage_status(
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Check if the current user has Nextcloud storage initialized.
+    """
+    from services.nextcloud_credentials_service import get_nextcloud_credentials_service
+
+    user_id = current_user.get('id')
+
+    if not user_id:
+        raise HTTPException(status_code=400, detail="User ID required")
+
+    try:
+        cred_service = get_nextcloud_credentials_service()
+        credentials = await cred_service.get_user_credentials(UUID(user_id))
+
+        if credentials:
+            return {
+                "initialized": True,
+                "nextcloud_username": credentials['nextcloud_username']
+            }
+        else:
+            return {
+                "initialized": False,
+                "nextcloud_username": None
+            }
+
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to check storage status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
 # CREATE WORD DOCUMENT FOR ONLYOFFICE
 # =============================================================================
 
@@ -854,14 +941,15 @@ async def create_word_document(
     # Get user's email for Nextcloud folder
     user_email = current_user.get('email', current_user.get('username', ''))
 
-    # Upload to storage (user's Nextcloud folder)
+    # Upload to storage (user's Nextcloud folder with their credentials)
     try:
         storage_result = await storage.upload_file(
             file=io.BytesIO(file_content),
             filename=file_name,
             company_id=company_id,
             content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            nextcloud_user=user_email
+            nextcloud_user=user_email,
+            user_id=UUID(user_id) if user_id else None
         )
         storage_path = storage_result['storage_path']
         nextcloud_user = storage_result.get('nextcloud_user', user_email)
@@ -1057,32 +1145,42 @@ async def get_onlyoffice_editor_config(
             "customization": {
                 "autosave": True,
                 "comments": True,
-                "compactHeader": True,
+                "compactHeader": False,
                 "compactToolbar": False,
                 "feedback": False,
                 "forcesave": True,
                 "help": False,
                 "hideRightMenu": False,
                 "toolbarNoTabs": False,
-                "toolbarHideFileName": True,
-                "header": False,
+                "toolbarHideFileName": False,
                 "statusBar": True,
                 "leftMenu": True,
                 "rightMenu": True,
                 "toolbar": True,
                 "zoom": 100,
                 "logo": {
-                    "image": "https://workspace.bheem.cloud/bheem-logo.svg",
-                    "imageDark": "https://workspace.bheem.cloud/bheem-logo-dark.svg",
-                    "url": "https://bheem.cloud"
+                    "image": f"{settings.WORKSPACE_URL}/static/bheem-logo.svg",
+                    "imageDark": f"{settings.WORKSPACE_URL}/static/bheem-logo-dark.svg",
+                    "imageLight": f"{settings.WORKSPACE_URL}/static/bheem-logo-light.svg",
+                    "imageEmbedded": f"{settings.WORKSPACE_URL}/static/bheem-loader-logo.svg",
+                    "url": f"{settings.WORKSPACE_URL}/docs",
+                    "visible": True
                 },
                 "customer": {
-                    "logo": "https://workspace.bheem.cloud/bheem-logo.svg",
-                    "logoDark": "https://workspace.bheem.cloud/bheem-logo-dark.svg",
+                    "address": "Bheem Cloud Services",
+                    "info": "Bheem Workspace - Your productivity suite",
+                    "logo": f"{settings.WORKSPACE_URL}/static/bheem-logo.svg",
+                    "logoDark": f"{settings.WORKSPACE_URL}/static/bheem-logo-dark.svg",
+                    "mail": "support@bheem.cloud",
                     "name": "Bheem Docs",
                     "www": "https://bheem.cloud"
                 },
-                "loaderLogo": "https://workspace.bheem.cloud/bheem-logo.svg",
+                "goback": {
+                    "blank": False,
+                    "text": "Back to Bheem",
+                    "url": f"{settings.WORKSPACE_URL}/docs"
+                },
+                "loaderLogo": f"{settings.WORKSPACE_URL}/static/bheem-loader-logo.svg",
                 "loaderName": "Bheem Docs",
             },
         },
@@ -1227,8 +1325,45 @@ async def onlyoffice_document_callback(
             # Download the edited document from OnlyOffice
             logger.info(f"Downloading document from OnlyOffice: {document_url}")
 
+            content = None
+            download_auth = None
+
+            # Check if URL is from Nextcloud (requires authentication)
+            if settings.NEXTCLOUD_URL in document_url:
+                # Extract username from URL and get their credentials
+                import re
+                match = re.search(r'/files/([^/]+)/', document_url)
+                if match:
+                    nc_username = match.group(1)
+                    from services.nextcloud_credentials_service import get_nextcloud_credentials_service
+                    cred_service = get_nextcloud_credentials_service()
+
+                    # Get credentials by username
+                    try:
+                        db_config = {
+                            'host': settings.ERP_DB_HOST,
+                            'port': settings.ERP_DB_PORT,
+                            'database': settings.ERP_DB_NAME,
+                            'user': settings.ERP_DB_USER,
+                            'password': settings.ERP_DB_PASSWORD,
+                        }
+                        conn = psycopg2.connect(**db_config)
+                        cur = conn.cursor()
+                        cur.execute("""
+                            SELECT app_password FROM workspace.nextcloud_credentials
+                            WHERE nextcloud_username = %s AND is_active = true
+                        """, (nc_username,))
+                        row = cur.fetchone()
+                        cur.close()
+                        conn.close()
+                        if row:
+                            download_auth = aiohttp.BasicAuth(nc_username, row[0])
+                            logger.info(f"Using credentials for Nextcloud download: {nc_username}")
+                    except Exception as e:
+                        logger.warning(f"Could not get credentials for download: {e}")
+
             async with aiohttp.ClientSession() as session:
-                async with session.get(document_url, ssl=False) as response:
+                async with session.get(document_url, ssl=False, auth=download_auth) as response:
                     if response.status == 200:
                         content = await response.read()
                         logger.info(f"Downloaded {len(content)} bytes from OnlyOffice")
@@ -1244,68 +1379,94 @@ async def onlyoffice_document_callback(
                             logger.error(f"Document {document_id} has no storage_path")
                             return {"error": 1}
 
-                        # Upload to Nextcloud via WebDAV (overwrite existing file)
+                        # Upload to Nextcloud via WebDAV using user's own credentials
                         try:
                             import httpx
+                            from services.nextcloud_credentials_service import get_nextcloud_credentials_service
 
                             # Nextcloud settings
                             nextcloud_url = settings.NEXTCLOUD_URL
                             admin_user = settings.NEXTCLOUD_ADMIN_USER
                             admin_pass = settings.NEXTCLOUD_ADMIN_PASSWORD
 
-                            # Get the document owner's email to use as Nextcloud username
+                            # Get the document owner's credentials
                             created_by = doc.get('created_by')
-                            target_user = admin_user  # Default to admin
+                            storage_user = admin_user
+                            auth_user = admin_user
+                            auth_pass = admin_pass
 
                             if created_by:
-                                # Look up user's email
-                                try:
-                                    db_config = {
-                                        'host': settings.ERP_DB_HOST,
-                                        'port': settings.ERP_DB_PORT,
-                                        'database': settings.ERP_DB_NAME,
-                                        'user': settings.ERP_DB_USER,
-                                        'password': settings.ERP_DB_PASSWORD,
-                                    }
-                                    conn = psycopg2.connect(**db_config)
-                                    cur = conn.cursor()
-                                    cur.execute("SELECT email FROM auth.users WHERE id = %s", (str(created_by),))
-                                    row = cur.fetchone()
-                                    if row and row[0]:
-                                        target_user = row[0].lower()
-                                    cur.close()
-                                    conn.close()
-                                except Exception as e:
-                                    logger.warning(f"Could not get user email: {e}")
+                                # Try to get user's Nextcloud credentials
+                                cred_service = get_nextcloud_credentials_service()
+                                user_creds = await cred_service.get_user_credentials(UUID(str(created_by)))
 
-                            # Build WebDAV URL for the target user's folder
-                            webdav_url = f"{nextcloud_url}/remote.php/dav/files/{target_user}{storage_path}"
+                                if user_creds:
+                                    storage_user = user_creds['nextcloud_username']
+                                    auth_user = user_creds['nextcloud_username']
+                                    auth_pass = user_creds['app_password']
+                                    logger.info(f"Using user credentials for save: {storage_user}")
+                                else:
+                                    # Try to get user's email and create credentials
+                                    try:
+                                        db_config = {
+                                            'host': settings.ERP_DB_HOST,
+                                            'port': settings.ERP_DB_PORT,
+                                            'database': settings.ERP_DB_NAME,
+                                            'user': settings.ERP_DB_USER,
+                                            'password': settings.ERP_DB_PASSWORD,
+                                        }
+                                        conn = psycopg2.connect(**db_config)
+                                        cur = conn.cursor()
+                                        cur.execute("SELECT email FROM auth.users WHERE id = %s", (str(created_by),))
+                                        row = cur.fetchone()
+                                        if row and row[0]:
+                                            user_email = row[0].lower()
+                                            # Create credentials on-the-fly
+                                            user_creds = await cred_service.ensure_user_credentials(
+                                                UUID(str(created_by)), user_email, None
+                                            )
+                                            if user_creds:
+                                                storage_user = user_creds['nextcloud_username']
+                                                auth_user = user_creds['nextcloud_username']
+                                                auth_pass = user_creds['app_password']
+                                                logger.info(f"Created and using user credentials: {storage_user}")
+                                        cur.close()
+                                        conn.close()
+                                    except Exception as e:
+                                        logger.warning(f"Could not create user credentials: {e}")
+
+                            # Build WebDAV URL for user's folder
+                            webdav_url = f"{nextcloud_url}/remote.php/dav/files/{storage_user}{storage_path}"
 
                             # First, ensure the parent folder exists
                             parent_path = '/'.join(storage_path.split('/')[:-1])
                             if parent_path:
                                 async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
-                                    # Create folder hierarchy
+                                    # Create folder hierarchy in user's folder
                                     parts = parent_path.strip('/').split('/')
                                     current_path = ""
                                     for part in parts:
+                                        if not part:
+                                            continue
                                         current_path = f"{current_path}/{part}"
-                                        folder_url = f"{nextcloud_url}/remote.php/dav/files/{target_user}{current_path}"
+                                        folder_url = f"{nextcloud_url}/remote.php/dav/files/{storage_user}{current_path}"
                                         try:
-                                            await client.request(
+                                            response = await client.request(
                                                 method="MKCOL",
                                                 url=folder_url,
-                                                auth=(admin_user, admin_pass)
+                                                auth=(auth_user, auth_pass)
                                             )
-                                        except:
-                                            pass  # Folder may already exist
+                                            if response.status_code in [201, 204]:
+                                                logger.info(f"Created folder during save: {current_path}")
+                                        except Exception as e:
+                                            logger.debug(f"Folder creation during save: {e}")
 
-                            # Upload to Nextcloud (admin auth, user's folder)
+                            # Upload to user's Nextcloud folder with their credentials
                             async with httpx.AsyncClient(verify=False, timeout=120.0) as client:
                                 response = await client.put(
                                     url=webdav_url,
                                     content=content,
-                                    auth=(admin_user, admin_pass),
+                                    auth=(auth_user, auth_pass),
                                     headers={
                                         "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                                     }
@@ -1315,7 +1476,7 @@ async def onlyoffice_document_callback(
                                     logger.error(f"Failed to save to Nextcloud: {response.status_code} {response.text}")
                                     return {"error": 1}
 
-                            logger.info(f"Saved document {document_id} to Nextcloud: {target_user}:{storage_path}")
+                            logger.info(f"Saved document {document_id} to Nextcloud ({storage_user}): {storage_path}")
 
                             # Update document metadata in database
                             try:

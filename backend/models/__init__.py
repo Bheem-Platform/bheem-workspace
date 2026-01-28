@@ -116,6 +116,18 @@ from .migration_models import (
     Contact
 )
 
+from .nextcloud_models import (
+    NextcloudCredentials
+)
+
+from .oforms_models import (
+    OForm,
+    OFormVersion,
+    OFormResponse,
+    OFormShare,
+    OFormEditSession
+)
+
 __all__ = [
     # Admin models
     "Tenant",
@@ -201,5 +213,13 @@ __all__ = [
     # Migration models
     "MigrationConnection",
     "MigrationJob",
-    "Contact"
+    "Contact",
+    # Nextcloud models
+    "NextcloudCredentials",
+    # OForms models (OnlyOffice document forms)
+    "OForm",
+    "OFormVersion",
+    "OFormResponse",
+    "OFormShare",
+    "OFormEditSession"
 ]

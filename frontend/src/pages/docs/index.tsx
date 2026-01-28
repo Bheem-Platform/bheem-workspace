@@ -27,12 +27,14 @@ import * as docsEditorApi from '@/lib/docsEditorApi';
 import * as productivityApi from '@/lib/productivityApi';
 import WorkspaceLayout from '@/components/workspace/WorkspaceLayout';
 import AppLauncher from '@/components/shared/AppLauncher';
+import BheemLoader from '@/components/shared/BheemLoader';
 import FileGrid from '@/components/docs/FileGrid';
 import Breadcrumb from '@/components/docs/Breadcrumb';
 import { UploadModal } from '@/components/docs/UploadArea';
 import CreateFolderModal from '@/components/docs/CreateFolderModal';
 import ShareModal from '@/components/docs/ShareModal';
 import DocsSidebar from '@/components/docs/DocsSidebar';
+import Pagination from '@/components/shared/Pagination';
 import { useDocsStore } from '@/stores/docsStore';
 import { useCredentialsStore } from '@/stores/credentialsStore';
 import { useRequireAuth } from '@/stores/authStore';
@@ -86,6 +88,15 @@ export default function DocsPage() {
   const [unifiedDocs, setUnifiedDocs] = useState<productivityApi.UnifiedDocument[]>([]);
   const [unifiedLoading, setUnifiedLoading] = useState(false);
   const [stats, setStats] = useState<productivityApi.ProductivityStats | null>(null);
+
+  // Sorting state
+  const [sortBy, setSortBy] = useState<'title' | 'updated_at' | 'created_at'>('updated_at');
+  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  const [showSortMenu, setShowSortMenu] = useState(false);
+
+  // Pagination state for Recent Documents
+  const [recentDocsPage, setRecentDocsPage] = useState(1);
+  const [recentDocsPerPage, setRecentDocsPerPage] = useState(10);
 
   // Create new document (Word format for OnlyOffice editing)
   const handleCreateNewDocument = async () => {
@@ -155,6 +166,11 @@ export default function DocsPage() {
     }
   }, [showUnifiedHome, quickAccessFilter, isLoggedIn, authLoading, fetchUnifiedDocs]);
 
+  // Reset Recent Documents pagination when filters change
+  useEffect(() => {
+    setRecentDocsPage(1);
+  }, [quickAccessFilter, selectedTypes, searchQuery]);
+
   // Fetch files on mount only (not on every path change - navigation handles that)
   useEffect(() => {
     if (!authLoading && isLoggedIn) {
@@ -207,10 +223,33 @@ export default function DocsPage() {
     noKeyboard: true,
   });
 
-  // Filter files by search
-  const filteredFiles = files.filter((f) =>
-    f.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Filter and sort files
+  const filteredFiles = files
+    .filter((f) => f.name.toLowerCase().includes(searchQuery.toLowerCase()))
+    .sort((a, b) => {
+      let comparison = 0;
+      if (sortBy === 'title') {
+        comparison = a.name.localeCompare(b.name);
+      } else if (sortBy === 'updated_at') {
+        comparison = new Date(a.modified || 0).getTime() - new Date(b.modified || 0).getTime();
+      } else if (sortBy === 'created_at') {
+        comparison = new Date(a.created || 0).getTime() - new Date(b.created || 0).getTime();
+      }
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
+
+  // Sort unified docs
+  const sortedUnifiedDocs = [...unifiedDocs].sort((a, b) => {
+    let comparison = 0;
+    if (sortBy === 'title') {
+      comparison = a.title.localeCompare(b.title);
+    } else if (sortBy === 'updated_at') {
+      comparison = new Date(a.updated_at).getTime() - new Date(b.updated_at).getTime();
+    } else if (sortBy === 'created_at') {
+      comparison = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+    }
+    return sortOrder === 'asc' ? comparison : -comparison;
+  });
 
   const handleFileOpen = (file: FileItem) => {
     if (USE_V2_API) {
@@ -255,12 +294,24 @@ export default function DocsPage() {
     }
   };
 
+  // Brand colors
+  const brandColors = {
+    pink: '#FFCCF2',
+    purple: '#977DFF',
+    blue: '#0033FF',
+    gradient: 'from-[#FFCCF2] via-[#977DFF] to-[#0033FF]',
+  };
+
   // Show loading while checking auth
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500" />
-      </div>
+      <BheemLoader
+        size="lg"
+        variant="spinner"
+        text="Loading Docs..."
+        fullScreen
+        transparent
+      />
     );
   }
 
@@ -312,10 +363,10 @@ export default function DocsPage() {
 
           {/* Drag overlay */}
           {isDragActive && (
-            <div className="fixed inset-0 z-50 bg-purple-500/10 border-4 border-dashed border-purple-500 flex items-center justify-center pointer-events-none">
+            <div className="fixed inset-0 z-50 bg-[#977DFF]/10 border-4 border-dashed border-[#977DFF] flex items-center justify-center pointer-events-none">
               <div className="text-center">
-                <Upload size={64} className="mx-auto text-purple-500 mb-4" />
-                <p className="text-xl font-medium text-purple-700">Drop files to upload</p>
+                <Upload size={64} className="mx-auto text-[#977DFF] mb-4" />
+                <p className="text-xl font-medium text-[#0033FF]">Drop files to upload</p>
               </div>
             </div>
           )}
@@ -349,7 +400,7 @@ export default function DocsPage() {
                   <button
                     onClick={() => setShowNewDocDropdown(!showNewDocDropdown)}
                     disabled={isCreatingDoc}
-                    className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-blue-500 to-indigo-500 text-white font-medium rounded-lg hover:from-blue-600 hover:to-indigo-600 transition-all disabled:opacity-50"
+                    className="flex items-center gap-2 px-4 py-2.5 bg-gradient-to-r from-[#FFCCF2] via-[#977DFF] to-[#0033FF] text-white font-medium rounded-lg hover:opacity-90 transition-all disabled:opacity-50 shadow-md"
                   >
                     <FilePlus size={20} />
                     <span>{isCreatingDoc ? 'Creating...' : 'New Document'}</span>
@@ -397,7 +448,7 @@ export default function DocsPage() {
                 </button>
                 <button
                   onClick={openCreateFolderModal}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-purple-500 text-white font-medium rounded-lg hover:bg-purple-600 transition-colors"
+                  className="flex items-center gap-2 px-4 py-2.5 bg-[#977DFF] text-white font-medium rounded-lg hover:bg-[#0033FF] transition-colors"
                 >
                   <FolderPlus size={20} />
                   <span>New Folder</span>
@@ -467,8 +518,59 @@ export default function DocsPage() {
                       placeholder="Search files..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-10 pr-4 py-2 bg-gray-100 rounded-lg border-0 focus:ring-2 focus:ring-purple-500 text-sm w-64"
+                      className="pl-10 pr-4 py-2 bg-gray-100 rounded-lg border-0 focus:ring-2 focus:ring-[#977DFF] text-sm w-64"
                     />
+                  </div>
+
+                  {/* Sort */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowSortMenu(!showSortMenu)}
+                      className="flex items-center gap-1 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg"
+                    >
+                      <SortAsc size={18} />
+                      <span>Sort</span>
+                    </button>
+                    {showSortMenu && (
+                      <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-50">
+                        <button
+                          onClick={() => { setSortBy('updated_at'); setSortOrder('desc'); setShowSortMenu(false); }}
+                          className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-100 ${sortBy === 'updated_at' && sortOrder === 'desc' ? 'bg-purple-50 text-purple-700' : 'text-gray-700'}`}
+                        >
+                          Last Modified (Newest)
+                        </button>
+                        <button
+                          onClick={() => { setSortBy('updated_at'); setSortOrder('asc'); setShowSortMenu(false); }}
+                          className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-100 ${sortBy === 'updated_at' && sortOrder === 'asc' ? 'bg-purple-50 text-purple-700' : 'text-gray-700'}`}
+                        >
+                          Last Modified (Oldest)
+                        </button>
+                        <button
+                          onClick={() => { setSortBy('created_at'); setSortOrder('desc'); setShowSortMenu(false); }}
+                          className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-100 ${sortBy === 'created_at' && sortOrder === 'desc' ? 'bg-purple-50 text-purple-700' : 'text-gray-700'}`}
+                        >
+                          Created (Newest)
+                        </button>
+                        <button
+                          onClick={() => { setSortBy('created_at'); setSortOrder('asc'); setShowSortMenu(false); }}
+                          className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-100 ${sortBy === 'created_at' && sortOrder === 'asc' ? 'bg-purple-50 text-purple-700' : 'text-gray-700'}`}
+                        >
+                          Created (Oldest)
+                        </button>
+                        <button
+                          onClick={() => { setSortBy('title'); setSortOrder('asc'); setShowSortMenu(false); }}
+                          className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-100 ${sortBy === 'title' && sortOrder === 'asc' ? 'bg-purple-50 text-purple-700' : 'text-gray-700'}`}
+                        >
+                          Name (A-Z)
+                        </button>
+                        <button
+                          onClick={() => { setSortBy('title'); setSortOrder('desc'); setShowSortMenu(false); }}
+                          className={`w-full px-4 py-2 text-left text-sm hover:bg-gray-100 ${sortBy === 'title' && sortOrder === 'desc' ? 'bg-purple-50 text-purple-700' : 'text-gray-700'}`}
+                        >
+                          Name (Z-A)
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {/* View Toggle */}
@@ -481,7 +583,7 @@ export default function DocsPage() {
                     >
                       <Grid
                         size={18}
-                        className={viewMode === 'grid' ? 'text-purple-500' : 'text-gray-500'}
+                        className={viewMode === 'grid' ? 'text-[#977DFF]' : 'text-gray-500'}
                       />
                     </button>
                     <button
@@ -492,7 +594,7 @@ export default function DocsPage() {
                     >
                       <List
                         size={18}
-                        className={viewMode === 'list' ? 'text-purple-500' : 'text-gray-500'}
+                        className={viewMode === 'list' ? 'text-[#977DFF]' : 'text-gray-500'}
                       />
                     </button>
                   </div>
@@ -513,7 +615,7 @@ export default function DocsPage() {
                         <p className="text-sm text-gray-900 truncate">{item.filename}</p>
                         <div className="mt-1 w-full bg-gray-200 rounded-full h-1.5">
                           <div
-                            className="bg-purple-500 h-1.5 rounded-full transition-all"
+                            className="bg-gradient-to-r from-[#FFCCF2] via-[#977DFF] to-[#0033FF] h-1.5 rounded-full transition-all"
                             style={{ width: `${item.progress}%` }}
                           />
                         </div>
@@ -531,7 +633,7 @@ export default function DocsPage() {
                 {/* Show folders and files from the file system */}
                 {loading.files ? (
                   <div className="flex items-center justify-center py-10">
-                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-purple-500" />
+                    <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#977DFF]" />
                   </div>
                 ) : (
                   <>
@@ -546,27 +648,54 @@ export default function DocsPage() {
                     {/* Unified Documents from productivity API */}
                     {unifiedLoading ? (
                       <div className="flex items-center justify-center py-10">
-                        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-purple-500" />
+                        <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#977DFF]" />
                       </div>
-                    ) : unifiedDocs.length > 0 ? (
+                    ) : sortedUnifiedDocs.length > 0 ? (
                       <div>
                         <h2 className="text-lg font-semibold text-gray-900 mb-4">Recent Documents</h2>
-                        <div className={`grid gap-4 ${viewMode === 'grid' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : 'grid-cols-1'}`}>
-                          {unifiedDocs.map((doc) => (
-                            <UnifiedDocCard
-                              key={`${doc.type}-${doc.id}`}
-                              doc={doc}
-                              viewMode={viewMode}
-                              onOpen={() => handleUnifiedDocOpen(doc)}
-                              onStar={(e) => handleStarToggle(doc, e)}
-                            />
-                          ))}
-                        </div>
+                        {(() => {
+                          const totalRecentDocs = sortedUnifiedDocs.length;
+                          const totalRecentPages = Math.ceil(totalRecentDocs / recentDocsPerPage);
+                          const startIdx = (recentDocsPage - 1) * recentDocsPerPage;
+                          const paginatedDocs = sortedUnifiedDocs.slice(startIdx, startIdx + recentDocsPerPage);
+
+                          return (
+                            <>
+                              <div className={`grid gap-4 ${viewMode === 'grid' ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4' : 'grid-cols-1'}`}>
+                                {paginatedDocs.map((doc) => (
+                                  <UnifiedDocCard
+                                    key={`${doc.type}-${doc.id}`}
+                                    doc={doc}
+                                    viewMode={viewMode}
+                                    onOpen={() => handleUnifiedDocOpen(doc)}
+                                    onStar={(e) => handleStarToggle(doc, e)}
+                                  />
+                                ))}
+                              </div>
+                              {totalRecentDocs > 0 && (
+                                <div className="mt-6">
+                                  <Pagination
+                                    currentPage={recentDocsPage}
+                                    totalPages={totalRecentPages}
+                                    totalItems={totalRecentDocs}
+                                    itemsPerPage={recentDocsPerPage}
+                                    onPageChange={setRecentDocsPage}
+                                    onItemsPerPageChange={(value) => {
+                                      setRecentDocsPerPage(value);
+                                      setRecentDocsPage(1);
+                                    }}
+                                    className="bg-white rounded-xl border border-gray-200"
+                                  />
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
                       </div>
                     ) : null}
 
                     {/* Empty state when nothing is found */}
-                    {filteredFiles.length === 0 && unifiedDocs.length === 0 && !unifiedLoading && (
+                    {filteredFiles.length === 0 && sortedUnifiedDocs.length === 0 && !unifiedLoading && (
                       <div className="text-center py-20">
                         <FileText size={64} className="mx-auto text-gray-300 mb-4" />
                         <h3 className="text-lg font-medium text-gray-900 mb-2">No documents found</h3>
@@ -792,7 +921,7 @@ function NextcloudLoginPrompt({ onSuccess }: { onSuccess: () => void }) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-purple-500 to-pink-600">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-gradient-to-br from-[#FFCCF2] via-[#977DFF] to-[#0033FF]">
       <div className="w-full max-w-md mx-4">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-20 h-20 bg-white/20 backdrop-blur-sm rounded-2xl mb-4">
@@ -820,7 +949,7 @@ function NextcloudLoginPrompt({ onSuccess }: { onSuccess: () => void }) {
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="Your Nextcloud username"
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#977DFF] focus:border-[#977DFF]"
                 required
               />
             </div>
@@ -837,7 +966,7 @@ function NextcloudLoginPrompt({ onSuccess }: { onSuccess: () => void }) {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Your Nextcloud password"
-                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                  className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#977DFF] focus:border-[#977DFF]"
                   required
                 />
               </div>
@@ -846,7 +975,7 @@ function NextcloudLoginPrompt({ onSuccess }: { onSuccess: () => void }) {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-3 px-4 bg-gradient-to-r from-purple-500 to-pink-500 text-white font-medium rounded-lg hover:from-purple-600 hover:to-pink-600 disabled:opacity-50 transition-all"
+              className="w-full py-3 px-4 bg-gradient-to-r from-[#FFCCF2] via-[#977DFF] to-[#0033FF] text-white font-medium rounded-lg hover:opacity-90 disabled:opacity-50 transition-all shadow-md"
             >
               {isLoading ? 'Connecting...' : 'Connect Docs'}
             </button>

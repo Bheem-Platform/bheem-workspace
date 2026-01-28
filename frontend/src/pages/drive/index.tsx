@@ -40,6 +40,7 @@ import {
 } from '@/components/drive/DriveModals';
 import { useDriveStore } from '@/stores/driveStore';
 import { useRequireAuth } from '@/stores/authStore';
+import BheemLoader from '@/components/shared/BheemLoader';
 import type { DriveFile } from '@/lib/driveApi';
 import { getPreviewUrl, getDownloadUrl } from '@/lib/driveApi';
 
@@ -294,12 +295,13 @@ export default function DrivePage() {
   // Show loading while checking auth
   if (authLoading) {
     return (
-      <div className="min-h-screen bg-gray-100 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto" />
-          <p className="mt-4 text-gray-600">Loading Drive...</p>
-        </div>
-      </div>
+      <BheemLoader
+        size="lg"
+        variant="spinner"
+        text="Loading Drive..."
+        fullScreen
+        transparent
+      />
     );
   }
 
@@ -325,16 +327,16 @@ export default function DrivePage() {
       >
         <div
           {...getRootProps()}
-          className={`h-full bg-gray-50 ${isDragActive ? 'bg-blue-50' : ''}`}
+          className={`h-full bg-gray-50 ${isDragActive ? 'bg-[#FFCCF2]/10' : ''}`}
         >
           <input {...getInputProps()} />
 
           {/* Drag overlay */}
           {isDragActive && (
-            <div className="fixed inset-0 z-50 bg-blue-500/10 border-4 border-dashed border-blue-500 flex items-center justify-center pointer-events-none">
+            <div className="fixed inset-0 z-50 bg-[#977DFF]/10 border-4 border-dashed border-[#977DFF] flex items-center justify-center pointer-events-none">
               <div className="text-center">
-                <Upload size={64} className="mx-auto text-blue-500 mb-4" />
-                <p className="text-xl font-medium text-blue-700">Drop files to upload</p>
+                <Upload size={64} className="mx-auto text-[#977DFF] mb-4" />
+                <p className="text-xl font-medium text-[#0033FF]">Drop files to upload</p>
               </div>
             </div>
           )}
@@ -384,7 +386,7 @@ export default function DrivePage() {
                       placeholder="Search in Drive"
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="pl-10 pr-4 py-2 bg-gray-100 rounded-full border-0 focus:ring-2 focus:ring-blue-500 focus:bg-white text-sm w-80 transition-all"
+                      className="pl-10 pr-4 py-2 bg-gray-100 rounded-full border-0 focus:ring-2 focus:ring-[#977DFF] focus:bg-white text-sm w-80 transition-all"
                     />
                   </div>
 
@@ -399,7 +401,7 @@ export default function DrivePage() {
                     >
                       <LayoutGrid
                         size={18}
-                        className={viewMode === 'grid' ? 'text-blue-600' : 'text-gray-500'}
+                        className={viewMode === 'grid' ? 'text-[#977DFF]' : 'text-gray-500'}
                       />
                     </button>
                     <button
@@ -411,7 +413,7 @@ export default function DrivePage() {
                     >
                       <LayoutList
                         size={18}
-                        className={viewMode === 'list' ? 'text-blue-600' : 'text-gray-500'}
+                        className={viewMode === 'list' ? 'text-[#977DFF]' : 'text-gray-500'}
                       />
                     </button>
                   </div>
@@ -450,7 +452,7 @@ export default function DrivePage() {
                                 setShowSortMenu(false);
                               }}
                               className={`w-full flex items-center justify-between px-4 py-2.5 text-sm hover:bg-gray-50 ${
-                                sortBy === field ? 'text-blue-600 bg-blue-50' : 'text-gray-700'
+                                sortBy === field ? 'text-[#0033FF] bg-[#FFCCF2]/20' : 'text-gray-700'
                               }`}
                             >
                               <span className="capitalize">{field.replace('_', ' ')}</span>
@@ -471,7 +473,7 @@ export default function DrivePage() {
                   <button
                     onClick={handleToggleDetailsPanel}
                     className={`p-2 rounded-lg transition-colors ${
-                      showDetailsPanel ? 'bg-blue-100 text-blue-600' : 'hover:bg-gray-100 text-gray-600'
+                      showDetailsPanel ? 'bg-[#FFCCF2]/30 text-[#977DFF]' : 'hover:bg-gray-100 text-gray-600'
                     }`}
                     title="Details"
                   >
@@ -501,9 +503,9 @@ export default function DrivePage() {
 
               {/* Bulk Actions Bar */}
               {selectedFiles.length > 0 && (
-                <div className="mb-4 px-4 py-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center justify-between">
+                <div className="mb-4 px-4 py-3 bg-[#FFCCF2]/20 border border-[#977DFF]/30 rounded-lg flex items-center justify-between">
                   <div className="flex items-center gap-4">
-                    <span className="text-sm text-blue-700 font-medium">
+                    <span className="text-sm text-[#0033FF] font-medium">
                       {selectedFiles.length} selected
                     </span>
                     <button
@@ -516,7 +518,7 @@ export default function DrivePage() {
                   </div>
                   <button
                     onClick={clearSelection}
-                    className="text-sm text-blue-600 hover:text-blue-800"
+                    className="text-sm text-[#977DFF] hover:text-[#0033FF]"
                   >
                     Clear selection
                   </button>
@@ -550,7 +552,7 @@ export default function DrivePage() {
                           <div className="mt-1 w-full bg-gray-200 rounded-full h-1.5">
                             <div
                               className={`h-1.5 rounded-full transition-all ${
-                                item.status === 'error' ? 'bg-red-500' : 'bg-blue-500'
+                                item.status === 'error' ? 'bg-red-500' : 'bg-gradient-to-r from-[#FFCCF2] via-[#977DFF] to-[#0033FF]'
                               }`}
                               style={{ width: `${item.progress}%` }}
                             />

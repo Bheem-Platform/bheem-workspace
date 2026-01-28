@@ -26,6 +26,7 @@ import boto3
 from botocore.config import Config
 
 from core.config import settings
+from services.nextcloud_credentials_service import get_nextcloud_credentials_service
 
 logger = logging.getLogger(__name__)
 
@@ -110,13 +111,14 @@ class DocsStorageService:
         folder_path: str = ""
     ) -> str:
         """
-        Generate Nextcloud storage path within user's folder.
+        Generate Nextcloud storage path within user's own folder.
 
         Structure (all paths are relative to user's Nextcloud home):
         - /BheemDocs/  - All Bheem documents go here
-        - Files are organized by document, not by company (since each user has their own folder)
+        - Files are stored directly in user's own Nextcloud folder
         """
         base = "/BheemDocs"
+
         folder_path = folder_path.strip('/') if folder_path else ""
 
         if folder_path:
@@ -151,30 +153,22 @@ class DocsStorageService:
         auth = self._get_auth(username, password)
         webdav_url = self._get_webdav_url(target_user)
 
+        logger.info(f"Ensuring folder exists: {path} for user {target_user}, webdav_url: {webdav_url}")
+
         # Split path and create each level
         parts = path.strip('/').split('/')
         current_path = ""
 
         async with httpx.AsyncClient(verify=False, timeout=30.0) as client:
             for part in parts:
+                if not part:
+                    continue
                 current_path = f"{current_path}/{part}"
                 folder_url = f"{webdav_url}{current_path}"
 
-                # Check if exists first
+                # Try to create folder directly (MKCOL will return 405 if already exists)
                 try:
-                    response = await client.request(
-                        method="PROPFIND",
-                        url=folder_url,
-                        auth=auth,
-                        headers={"Depth": "0"}
-                    )
-                    if response.status_code == 207:
-                        continue  # Already exists
-                except:
-                    pass
-
-                # Create folder
-                try:
+                    logger.info(f"Creating folder: {folder_url}")
                     response = await client.request(
                         method="MKCOL",
                         url=folder_url,
@@ -182,10 +176,17 @@ class DocsStorageService:
                     )
                     if response.status_code in [201, 204]:
                         logger.info(f"Created folder: {current_path}")
-                    elif response.status_code != 405:  # 405 = already exists
-                        logger.warning(f"Failed to create folder {current_path}: {response.status_code}")
+                    elif response.status_code == 405:
+                        # 405 = Method Not Allowed, typically means folder already exists
+                        logger.debug(f"Folder already exists (405): {current_path}")
+                    elif response.status_code == 409:
+                        # 409 = Conflict, parent folder doesn't exist
+                        # This shouldn't happen as we create folders in order
+                        logger.warning(f"Conflict creating folder {current_path}: {response.status_code}")
+                    else:
+                        logger.warning(f"Folder creation returned {response.status_code} for {current_path}")
                 except Exception as e:
-                    logger.warning(f"Error creating folder {current_path}: {e}")
+                    logger.error(f"Error creating folder {current_path}: {e}")
 
         return True
 
@@ -200,10 +201,11 @@ class DocsStorageService:
         metadata: Optional[Dict[str, str]] = None,
         username: str = None,
         password: str = None,
-        nextcloud_user: str = None
+        nextcloud_user: str = None,
+        user_id: UUID = None
     ) -> Dict[str, Any]:
         """
-        Upload file to Nextcloud via WebDAV.
+        Upload file to Nextcloud via WebDAV using user's own credentials.
 
         Args:
             file: File-like object to upload
@@ -213,9 +215,10 @@ class DocsStorageService:
             folder_path: Path within storage
             content_type: MIME type
             metadata: Additional metadata
-            username: Auth username (defaults to admin)
-            password: Auth password (defaults to admin)
-            nextcloud_user: Target user's Nextcloud folder (e.g., user's email)
+            username: Auth username (overrides user credentials if provided)
+            password: Auth password (overrides user credentials if provided)
+            nextcloud_user: Target user's Nextcloud username (e.g., user's email)
+            user_id: User's UUID to look up credentials
 
         Returns:
             Dict with storage details
@@ -232,7 +235,7 @@ class DocsStorageService:
         if not is_valid:
             raise ValueError(error)
 
-        # Generate storage path
+        # Generate storage path (in user's own BheemDocs folder)
         storage_prefix = self.get_storage_path(company_id, tenant_id, folder_path)
         storage_path = f"{storage_prefix}/{filename}"
 
@@ -244,13 +247,49 @@ class DocsStorageService:
         # Calculate checksum
         checksum = hashlib.sha256(file_content).hexdigest()
 
-        # Ensure folder exists in the target user's folder
-        target_user = nextcloud_user or self.admin_user
-        await self.ensure_folder_exists(storage_prefix, username, password, target_user)
+        # Get user's Nextcloud credentials
+        storage_user = nextcloud_user
+        auth_user = username or self.admin_user
+        auth_pass = password or self.admin_pass
 
-        # Upload to Nextcloud (target user's folder, admin auth)
-        auth = self._get_auth(username, password)
-        webdav_url = f"{self._get_webdav_url(target_user)}{storage_path}"
+        if user_id and not (username and password):
+            # Try to get user's own credentials
+            cred_service = get_nextcloud_credentials_service()
+            user_creds = await cred_service.get_user_credentials(user_id)
+            if user_creds:
+                storage_user = user_creds['nextcloud_username']
+                auth_user = user_creds['nextcloud_username']
+                auth_pass = user_creds['app_password']
+                logger.info(f"Using user credentials for {storage_user}")
+            elif nextcloud_user:
+                # Try to create credentials on-the-fly
+                user_creds = await cred_service.ensure_user_credentials(
+                    user_id, nextcloud_user, None
+                )
+                if user_creds:
+                    storage_user = user_creds['nextcloud_username']
+                    auth_user = user_creds['nextcloud_username']
+                    auth_pass = user_creds['app_password']
+                    logger.info(f"Created and using user credentials for {storage_user}")
+
+        # Fall back to admin folder if no user credentials
+        if not storage_user:
+            storage_user = self.admin_user
+            logger.warning("No user credentials available, using admin folder")
+
+        logger.info(f"Uploading file to user's folder: {storage_user}, path: {storage_path}")
+
+        try:
+            await self.ensure_folder_exists(storage_prefix, auth_user, auth_pass, storage_user)
+        except Exception as e:
+            logger.error(f"Failed to ensure folder exists: {e}")
+            # Continue anyway - the upload will fail if there's really an issue
+
+        # Upload to user's Nextcloud folder with their credentials
+        auth = (auth_user, auth_pass)
+        webdav_url = f"{self._get_webdav_url(storage_user)}{storage_path}"
+
+        logger.info(f"Uploading to WebDAV URL: {webdav_url}")
 
         try:
             async with httpx.AsyncClient(verify=False, timeout=120.0) as client:
@@ -264,9 +303,32 @@ class DocsStorageService:
                 )
 
                 if response.status_code not in [201, 204]:
+                    # If 404, try creating the folder again and retry upload
+                    if response.status_code == 404:
+                        logger.warning(f"Got 404, attempting to create folder and retry: {storage_prefix}")
+                        await self.ensure_folder_exists(storage_prefix, auth_user, auth_pass, storage_user)
+
+                        response = await client.put(
+                            url=webdav_url,
+                            content=file_content,
+                            auth=auth,
+                            headers=headers
+                        )
+
+                        if response.status_code in [201, 204]:
+                            logger.info(f"Uploaded file after folder retry: {storage_path} ({file_size} bytes)")
+                            return {
+                                'storage_path': storage_path,
+                                'storage_bucket': 'nextcloud',
+                                'checksum': checksum,
+                                'file_size': file_size,
+                                'content_type': content_type,
+                                'nextcloud_user': storage_user
+                            }
+
                     raise Exception(f"Upload failed with status {response.status_code}: {response.text}")
 
-            logger.info(f"Uploaded file to Nextcloud: {target_user}:{storage_path} ({file_size} bytes)")
+            logger.info(f"Uploaded file to Nextcloud: {storage_user}:{storage_path} ({file_size} bytes)")
 
             return {
                 'storage_path': storage_path,
@@ -274,7 +336,7 @@ class DocsStorageService:
                 'checksum': checksum,
                 'file_size': file_size,
                 'content_type': content_type,
-                'nextcloud_user': target_user
+                'nextcloud_user': storage_user
             }
         except Exception as e:
             logger.error(f"Failed to upload to Nextcloud: {e}")
@@ -285,22 +347,38 @@ class DocsStorageService:
         storage_path: str,
         username: str = None,
         password: str = None,
-        nextcloud_user: str = None
+        nextcloud_user: str = None,
+        user_id: UUID = None
     ) -> Tuple[BinaryIO, Dict[str, Any]]:
         """
-        Download file from Nextcloud.
+        Download file from Nextcloud using user's own credentials.
 
         Args:
             storage_path: Path to file within user's folder
-            username: Auth username (defaults to admin)
-            password: Auth password (defaults to admin)
+            username: Auth username (overrides user credentials if provided)
+            password: Auth password (overrides user credentials if provided)
             nextcloud_user: Target user's Nextcloud folder
+            user_id: User's UUID to look up credentials
 
         Returns:
             Tuple of (file stream, metadata dict)
         """
-        target_user = nextcloud_user or self.admin_user
-        auth = self._get_auth(username, password)
+        # Get user's Nextcloud credentials
+        auth_user = username or self.admin_user
+        auth_pass = password or self.admin_pass
+        storage_user = nextcloud_user
+
+        if user_id and not (username and password):
+            # Try to get user's own credentials
+            cred_service = get_nextcloud_credentials_service()
+            user_creds = await cred_service.get_user_credentials(user_id)
+            if user_creds:
+                storage_user = user_creds['nextcloud_username']
+                auth_user = user_creds['nextcloud_username']
+                auth_pass = user_creds['app_password']
+                logger.debug(f"Using user credentials for download: {storage_user}")
+
+        auth = (auth_user, auth_pass)
 
         # Build list of paths to try (handle legacy S3-style paths)
         paths_to_try = [storage_path]
@@ -308,9 +386,11 @@ class DocsStorageService:
             # Legacy S3 path without leading slash - try with /Documents/ prefix
             paths_to_try.append(f"/Documents/{storage_path}")
 
-        # Try user's folder first, then admin folder for backward compatibility
-        users_to_try = [target_user]
-        if target_user != self.admin_user:
+        # Try user's folder first, then admin for backwards compatibility
+        users_to_try = []
+        if storage_user:
+            users_to_try.append(storage_user)
+        if self.admin_user not in users_to_try:
             users_to_try.append(self.admin_user)
 
         last_error = None
