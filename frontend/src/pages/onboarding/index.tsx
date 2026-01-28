@@ -90,6 +90,15 @@ export default function OnboardingPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // Workspace creation state (for new users without a workspace)
+  const [needsWorkspace, setNeedsWorkspace] = useState(false);
+  const [workspaceData, setWorkspaceData] = useState({
+    workspace_name: '',
+    industry: 'technology',
+    team_size: '1-10',
+  });
+  const [workspaceError, setWorkspaceError] = useState('');
+
   // Profile form state
   const [profileData, setProfileData] = useState({
     organization_name: '',
@@ -109,8 +118,63 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     if (!isAuthenticated || isLoading) return;
-    fetchProgress();
+    checkWorkspaceAndFetchProgress();
   }, [isAuthenticated, isLoading]);
+
+  const checkWorkspaceAndFetchProgress = async () => {
+    try {
+      // First check if user has a workspace
+      const checkRes = await api.get('/user-workspace/check');
+      const { has_workspace, needs_onboarding } = checkRes.data;
+
+      if (!has_workspace || needs_onboarding) {
+        // User needs to create a workspace first
+        setNeedsWorkspace(true);
+        setLoading(false);
+        return;
+      }
+
+      // User has a workspace, continue with normal onboarding
+      await fetchProgress();
+    } catch (err) {
+      console.error('Failed to check workspace:', err);
+      // If check fails, assume they need to create a workspace
+      setNeedsWorkspace(true);
+      setLoading(false);
+    }
+  };
+
+  const createWorkspace = async () => {
+    if (!workspaceData.workspace_name.trim()) {
+      setWorkspaceError('Please enter a workspace name');
+      return;
+    }
+
+    setSaving(true);
+    setWorkspaceError('');
+
+    try {
+      await api.post('/user-workspace/create', workspaceData);
+
+      // Workspace created! Now continue with onboarding
+      setNeedsWorkspace(false);
+
+      // Pre-fill profile data with workspace name
+      setProfileData(prev => ({
+        ...prev,
+        organization_name: workspaceData.workspace_name,
+        industry: workspaceData.industry,
+        team_size: workspaceData.team_size,
+      }));
+
+      await fetchProgress();
+    } catch (err: any) {
+      console.error('Failed to create workspace:', err);
+      setWorkspaceError(err.response?.data?.detail || 'Failed to create workspace. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const fetchProgress = async () => {
     try {
@@ -221,8 +285,142 @@ export default function OnboardingPage() {
 
   if (isLoading || loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-[#FFCCF2]/20 via-[#977DFF]/10 to-[#0033FF]/10">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#977DFF]"></div>
+      </div>
+    );
+  }
+
+  // Show workspace creation form for new users
+  if (needsWorkspace) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-[#FFCCF2]/20 via-[#977DFF]/10 to-[#0033FF]/10 py-12 px-4">
+        <div className="max-w-lg mx-auto">
+          {/* Header */}
+          <div className="text-center mb-8">
+            <div className="mx-auto h-16 w-16 bg-gradient-to-br from-[#FFCCF2] via-[#977DFF] to-[#0033FF] rounded-xl flex items-center justify-center mb-4">
+              <span className="text-2xl font-bold text-white">B</span>
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900">Create Your Workspace</h1>
+            <p className="text-gray-600 mt-2">Let's set up your team's collaboration space</p>
+          </div>
+
+          {/* Workspace Creation Form */}
+          <div className="bg-white rounded-2xl shadow-xl p-8">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-3 bg-gradient-to-br from-[#FFCCF2]/30 to-[#977DFF]/30 rounded-xl text-[#0033FF]">
+                <Building2 size={24} />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">Workspace Details</h2>
+                <p className="text-gray-600 text-sm">This will be your team's home</p>
+              </div>
+            </div>
+
+            {workspaceError && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                {workspaceError}
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Workspace Name *
+                </label>
+                <input
+                  type="text"
+                  value={workspaceData.workspace_name}
+                  onChange={(e) => setWorkspaceData({ ...workspaceData, workspace_name: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#977DFF] focus:border-[#977DFF]"
+                  placeholder="My Company"
+                  autoFocus
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  This is what your team will see as the workspace name
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Industry
+                </label>
+                <select
+                  value={workspaceData.industry}
+                  onChange={(e) => setWorkspaceData({ ...workspaceData, industry: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#977DFF] focus:border-[#977DFF]"
+                >
+                  <option value="technology">Technology</option>
+                  <option value="healthcare">Healthcare</option>
+                  <option value="finance">Finance</option>
+                  <option value="education">Education</option>
+                  <option value="retail">Retail</option>
+                  <option value="manufacturing">Manufacturing</option>
+                  <option value="consulting">Consulting</option>
+                  <option value="marketing">Marketing & Advertising</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Team Size
+                </label>
+                <select
+                  value={workspaceData.team_size}
+                  onChange={(e) => setWorkspaceData({ ...workspaceData, team_size: e.target.value })}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#977DFF] focus:border-[#977DFF]"
+                >
+                  <option value="1-5">Just me</option>
+                  <option value="1-10">2-10 people</option>
+                  <option value="11-50">11-50 people</option>
+                  <option value="51-200">51-200 people</option>
+                  <option value="201+">201+ people</option>
+                </select>
+              </div>
+            </div>
+
+            <button
+              onClick={createWorkspace}
+              disabled={saving || !workspaceData.workspace_name.trim()}
+              className="w-full mt-6 py-3 px-4 bg-gradient-to-r from-[#FFCCF2] via-[#977DFF] to-[#0033FF] text-white rounded-lg font-semibold hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {saving ? (
+                <>
+                  <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                  Creating Workspace...
+                </>
+              ) : (
+                <>
+                  Create Workspace
+                  <ArrowRight size={20} />
+                </>
+              )}
+            </button>
+
+            <p className="text-center text-xs text-gray-500 mt-4">
+              By creating a workspace, you agree to our Terms of Service and Privacy Policy
+            </p>
+          </div>
+
+          {/* Features preview */}
+          <div className="mt-8 grid grid-cols-2 gap-4">
+            {[
+              { icon: <Mail size={20} />, label: 'Email', color: '#0033FF' },
+              { icon: <Video size={20} />, label: 'Meetings', color: '#977DFF' },
+              { icon: <FileText size={20} />, label: 'Documents', color: '#FFCCF2' },
+              { icon: <Calendar size={20} />, label: 'Calendar', color: '#0033FF' },
+            ].map((feature) => (
+              <div
+                key={feature.label}
+                className="flex items-center gap-3 p-3 bg-white/80 rounded-xl"
+              >
+                <div style={{ color: feature.color }}>{feature.icon}</div>
+                <span className="text-sm font-medium text-gray-700">{feature.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     );
   }

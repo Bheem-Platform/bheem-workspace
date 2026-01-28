@@ -4,6 +4,7 @@ import Head from 'next/head';
 import { motion } from 'framer-motion';
 import { AlertCircle, RefreshCw } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
+import { api } from '@/lib/api';
 import LoginLoader from '@/components/shared/LoginLoader';
 
 const BRAND = {
@@ -19,6 +20,7 @@ export default function OAuthCallbackPage() {
   const [error, setError] = useState<string | null>(null);
   const [showLoader, setShowLoader] = useState(false);
   const [userName, setUserName] = useState('');
+  const [redirectTarget, setRedirectTarget] = useState('/dashboard');
 
   useEffect(() => {
     const handleCallback = async () => {
@@ -46,11 +48,46 @@ export default function OAuthCallbackPage() {
         await loginWithOAuth(accessToken, refreshToken || undefined);
 
         // Extract user name from token for loader
+        let extractedName = '';
         try {
           const payload = JSON.parse(atob(accessToken.split('.')[1]));
-          setUserName(payload.name || payload.full_name || payload.username?.split('@')[0] || '');
+          extractedName = payload.name || payload.full_name || payload.username?.split('@')[0] || '';
+          setUserName(extractedName);
         } catch {
           setUserName('');
+        }
+
+        // Check if user has a workspace
+        try {
+          const response = await api.get('/user-workspace/check');
+          const { has_workspace, needs_onboarding, workspace } = response.data;
+
+          if (needs_onboarding || !has_workspace) {
+            // User needs to create a workspace - redirect to onboarding
+            console.log('[OAuth] User needs onboarding - no workspace found');
+            setRedirectTarget('/onboarding');
+          } else if (workspace) {
+            // User has a workspace - determine redirect based on role
+            console.log('[OAuth] User has workspace:', workspace.name, 'Role:', workspace.role);
+
+            if (workspace.role === 'admin' || workspace.role === 'owner') {
+              // Check if onboarding is completed
+              setRedirectTarget('/dashboard');
+            } else {
+              setRedirectTarget('/dashboard');
+            }
+          }
+        } catch (checkError: any) {
+          console.warn('[OAuth] Could not check workspace:', checkError);
+          // If we can't check, assume user needs onboarding (safe default)
+          // But if it's a 401/403, the token might be invalid
+          if (checkError.response?.status === 401 || checkError.response?.status === 403) {
+            // Token might be invalid for this service, still try dashboard
+            setRedirectTarget('/dashboard');
+          } else {
+            // Network error or service unavailable, try onboarding
+            setRedirectTarget('/onboarding');
+          }
         }
 
         // Show branded loader before redirecting
@@ -68,14 +105,9 @@ export default function OAuthCallbackPage() {
   }, [loginWithOAuth]);
 
   const handleLoaderComplete = () => {
-    // Determine redirect based on user role
-    let targetUrl = '/dashboard';
-    if (user?.role === 'SuperAdmin') {
-      targetUrl = '/super-admin';
-    } else if (user?.workspace_role === 'admin') {
-      targetUrl = '/admin';
-    }
-    router.push(targetUrl);
+    // Use the determined redirect target
+    console.log('[OAuth] Redirecting to:', redirectTarget);
+    router.push(redirectTarget);
   };
 
   const handleRetry = () => {
