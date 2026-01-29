@@ -14,6 +14,8 @@ from models.drive_models import DriveFile
 from models.productivity_models import Spreadsheet, Presentation, Form
 from models.meet_models import MeetingRoom
 from models.calendar_models import SearchIndexLog
+from models.notes_models import Note
+from models.sites_models import Site, SitePage
 
 
 class SearchService:
@@ -61,7 +63,7 @@ class SearchService:
         """
         # Default to all apps if none specified
         if not apps:
-            apps = ['mail', 'drive', 'docs', 'sheets', 'slides', 'forms', 'meet', 'contacts']
+            apps = ['mail', 'drive', 'docs', 'sheets', 'slides', 'forms', 'meet', 'contacts', 'notes', 'sites']
 
         results = {
             'query': query,
@@ -124,6 +126,18 @@ class SearchService:
                 tenant_id, user_id, query, skip, limit
             )
             results['results'].extend(contact_results)
+
+        if 'notes' in apps:
+            notes_results = await self._search_notes(
+                tenant_id, user_id, query, date_from, date_to, skip, limit
+            )
+            results['results'].extend(notes_results)
+
+        if 'sites' in apps:
+            sites_results = await self._search_sites(
+                tenant_id, user_id, query, date_from, date_to, skip, limit
+            )
+            results['results'].extend(sites_results)
 
         # Sort by relevance score (descending) and then by date
         results['results'].sort(key=lambda x: (-x.get('score', 0), x.get('updated_at', '')), reverse=False)
@@ -573,6 +587,155 @@ class SearchService:
             }
             for contact in contacts
         ]
+
+    async def _search_notes(
+        self,
+        tenant_id: UUID,
+        user_id: UUID,
+        query: str,
+        date_from: Optional[datetime],
+        date_to: Optional[datetime],
+        skip: int,
+        limit: int
+    ) -> List[Dict]:
+        """Search notes"""
+        conditions = [
+            Note.tenant_id == tenant_id,
+            Note.owner_id == user_id,
+            Note.is_trashed == False,
+            or_(
+                Note.title.ilike(f'%{query}%'),
+                Note.content.ilike(f'%{query}%')
+            )
+        ]
+
+        if date_from:
+            conditions.append(Note.created_at >= date_from)
+        if date_to:
+            conditions.append(Note.created_at <= date_to)
+
+        result = await self.db.execute(
+            select(Note)
+            .where(and_(*conditions))
+            .order_by(Note.updated_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+
+        notes = result.scalars().all()
+
+        return [
+            {
+                'id': str(note.id),
+                'type': 'notes',
+                'title': note.title or 'Untitled Note',
+                'snippet': (note.content or '')[:200],
+                'color': note.color,
+                'is_pinned': note.is_pinned,
+                'score': self._calculate_score(query, note.title, note.content),
+                'created_at': note.created_at.isoformat() if note.created_at else None,
+                'updated_at': note.updated_at.isoformat() if note.updated_at else None
+            }
+            for note in notes
+        ]
+
+    async def _search_sites(
+        self,
+        tenant_id: UUID,
+        user_id: UUID,
+        query: str,
+        date_from: Optional[datetime],
+        date_to: Optional[datetime],
+        skip: int,
+        limit: int
+    ) -> List[Dict]:
+        """Search sites and pages"""
+        results = []
+
+        # Search sites
+        site_conditions = [
+            Site.tenant_id == tenant_id,
+            Site.is_archived == False,
+            or_(
+                Site.name.ilike(f'%{query}%'),
+                Site.description.ilike(f'%{query}%')
+            )
+        ]
+
+        if date_from:
+            site_conditions.append(Site.created_at >= date_from)
+        if date_to:
+            site_conditions.append(Site.created_at <= date_to)
+
+        site_result = await self.db.execute(
+            select(Site)
+            .where(and_(*site_conditions))
+            .order_by(Site.updated_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+
+        sites = site_result.scalars().all()
+
+        for site in sites:
+            results.append({
+                'id': str(site.id),
+                'type': 'sites',
+                'subtype': 'site',
+                'title': site.name,
+                'snippet': site.description or '',
+                'slug': site.slug,
+                'visibility': site.visibility.value if site.visibility else 'private',
+                'score': self._calculate_score(query, site.name, site.description),
+                'created_at': site.created_at.isoformat() if site.created_at else None,
+                'updated_at': site.updated_at.isoformat() if site.updated_at else None
+            })
+
+        # Search pages
+        page_conditions = [
+            SitePage.tenant_id == tenant_id,
+            or_(
+                SitePage.title.ilike(f'%{query}%'),
+                SitePage.content.ilike(f'%{query}%')
+            )
+        ]
+
+        if date_from:
+            page_conditions.append(SitePage.created_at >= date_from)
+        if date_to:
+            page_conditions.append(SitePage.created_at <= date_to)
+
+        page_result = await self.db.execute(
+            select(SitePage)
+            .where(and_(*page_conditions))
+            .order_by(SitePage.updated_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+
+        pages = page_result.scalars().all()
+
+        for page in pages:
+            # Strip HTML from content for snippet
+            content_text = (page.content or '').replace('<', ' <')
+            import re
+            content_text = re.sub(r'<[^>]+>', '', content_text)[:200]
+
+            results.append({
+                'id': str(page.id),
+                'type': 'sites',
+                'subtype': 'page',
+                'title': page.title,
+                'snippet': content_text,
+                'site_id': str(page.site_id),
+                'path': page.path,
+                'is_draft': page.is_draft,
+                'score': self._calculate_score(query, page.title, page.content),
+                'created_at': page.created_at.isoformat() if page.created_at else None,
+                'updated_at': page.updated_at.isoformat() if page.updated_at else None
+            })
+
+        return results
 
     def _calculate_score(
         self,

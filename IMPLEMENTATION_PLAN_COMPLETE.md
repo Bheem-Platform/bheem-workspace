@@ -1795,3 +1795,4 @@ This implementation plan brings Bheem Workspace to full Google Workspace/Zoho Wo
 - **Desktop**: Windows and macOS app
 
 The dual-mode architecture ensures both internal employees (ERP-integrated) and external customers (self-service) have a seamless experience with proper isolation and customization.
+

@@ -5,11 +5,20 @@ const nextConfig = {
     domains: ['docs.bheem.cloud', 'workspace.bheem.cloud', 'office.bheem.cloud'],
   },
   async rewrites() {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    // NEXT_PUBLIC_API_URL should be the base backend URL (e.g., http://localhost:8000)
+    // Remove any trailing /api/v1 if accidentally included
+    let apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    apiUrl = apiUrl.replace(/\/api\/v1\/?$/, '');
+
     return [
       {
         source: '/api/v1/:path*',
         destination: `${apiUrl}/api/v1/:path*`,
+      },
+      {
+        // Proxy Drive API (for public share links)
+        source: '/api/drive/:path*',
+        destination: `${apiUrl}/api/drive/:path*`,
       },
       {
         // Proxy static files (logos, branding) from backend

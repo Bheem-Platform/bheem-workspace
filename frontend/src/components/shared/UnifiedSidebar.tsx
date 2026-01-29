@@ -25,6 +25,8 @@ import {
   Bell,
   User,
   LayoutGrid,
+  StickyNote,
+  Globe,
   type LucideIcon,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
@@ -36,6 +38,8 @@ import {
   BheemDriveIcon,
   BheemChatIcon,
   BheemDashboardIcon,
+  BheemNotesIcon,
+  BheemSitesIcon,
 } from './AppIcons';
 
 // Brand colors
@@ -45,7 +49,7 @@ const BRAND = {
   blue: '#0033FF',
 };
 
-export type AppId = 'dashboard' | 'mail' | 'calendar' | 'meet' | 'docs' | 'drive' | 'chat' | 'sheets' | 'slides' | 'videos';
+export type AppId = 'dashboard' | 'mail' | 'calendar' | 'meet' | 'docs' | 'drive' | 'chat' | 'sheets' | 'slides' | 'videos' | 'notes' | 'sites';
 
 interface AppItem {
   id: AppId;
@@ -62,6 +66,8 @@ const apps: AppItem[] = [
   { id: 'meet', name: 'Meet', href: '/meet', icon: BheemMeetIcon, lucideIcon: Video },
   { id: 'docs', name: 'Docs', href: '/docs', icon: BheemDocsIcon, lucideIcon: FileText },
   { id: 'drive', name: 'Drive', href: '/drive', icon: BheemDriveIcon, lucideIcon: HardDrive },
+  { id: 'notes', name: 'Notes', href: '/notes', icon: BheemNotesIcon, lucideIcon: StickyNote },
+  { id: 'sites', name: 'Sites', href: '/sites', icon: BheemSitesIcon, lucideIcon: Globe },
   { id: 'chat', name: 'Chat', href: '/chat', icon: BheemChatIcon, lucideIcon: MessageSquare },
 ];
 
@@ -78,6 +84,8 @@ function detectActiveApp(pathname: string): AppId {
   if (pathname.startsWith('/meet')) return 'meet';
   if (pathname.startsWith('/docs') || pathname.startsWith('/sheets') || pathname.startsWith('/slides')) return 'docs';
   if (pathname.startsWith('/drive')) return 'drive';
+  if (pathname.startsWith('/notes')) return 'notes';
+  if (pathname.startsWith('/sites')) return 'sites';
   if (pathname.startsWith('/chat')) return 'chat';
   if (pathname.startsWith('/videos')) return 'videos';
   return 'dashboard';

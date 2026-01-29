@@ -48,6 +48,7 @@ export default function MeetingControls({ onLeave, roomCode }: MeetingControlsPr
       const interval = setInterval(fetchWaitingParticipants, 10000);
       return () => clearInterval(interval);
     }
+    return undefined;
   }, [isHost, roomCode, fetchWaitingParticipants]);
 
   const copyMeetingLink = async () => {

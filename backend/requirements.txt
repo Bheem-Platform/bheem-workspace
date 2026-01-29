@@ -51,3 +51,16 @@ redis==5.0.1
 
 # FFmpeg wrapper (for video processing)
 ffmpeg-python==0.2.0
+
+# Error Tracking
+sentry-sdk[fastapi]==1.39.0
+
+# Testing
+pytest==8.0.0
+pytest-asyncio==0.23.3
+pytest-cov==4.1.0
+pytest-mock==3.12.0
+httpx==0.25.2
+factory-boy==3.3.0
+faker==22.0.0
+aiosqlite==0.19.0

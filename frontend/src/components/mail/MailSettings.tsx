@@ -24,16 +24,21 @@ import {
   AlertCircle,
   Copy,
   GripVertical,
+  Bell,
+  BellOff,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import * as mailApi from '@/lib/mailApi';
+import { nudgeApi, NudgeSettings as NudgeSettingsType } from '@/lib/mailEnhancedApi';
 
 interface MailSettingsProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: 'labels' | 'filters' | 'signatures' | 'templates' | 'vacation';
+  initialTab?: 'labels' | 'filters' | 'signatures' | 'templates' | 'vacation' | 'nudges';
 }
 
-type TabType = 'labels' | 'filters' | 'signatures' | 'templates' | 'vacation';
+type TabType = 'labels' | 'filters' | 'signatures' | 'templates' | 'vacation' | 'nudges';
 
 // Color palette for labels
 const LABEL_COLORS = [
@@ -54,6 +59,7 @@ export default function MailSettings({ isOpen, onClose, initialTab = 'labels' }:
     { id: 'signatures', label: 'Signatures', icon: <FileSignature size={18} /> },
     { id: 'templates', label: 'Templates', icon: <FileText size={18} /> },
     { id: 'vacation', label: 'Vacation Responder', icon: <Plane size={18} /> },
+    { id: 'nudges', label: 'Nudges & Reminders', icon: <Bell size={18} /> },
   ];
 
   return (
@@ -98,6 +104,7 @@ export default function MailSettings({ isOpen, onClose, initialTab = 'labels' }:
             {activeTab === 'signatures' && <SignaturesSettings />}
             {activeTab === 'templates' && <TemplatesSettings />}
             {activeTab === 'vacation' && <VacationSettings />}
+            {activeTab === 'nudges' && <NudgesSettings />}
           </div>
         </div>
       </div>
@@ -1105,6 +1112,342 @@ function VacationSettings() {
           <span className="text-sm text-gray-700">Only send to people in my contacts</span>
         </label>
       </div>
+
+      <div className="flex justify-end">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-50 transition-colors"
+        >
+          {saving ? 'Saving...' : 'Save Changes'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ===========================================
+// Nudges Settings
+// ===========================================
+function NudgesSettings() {
+  const [settings, setSettings] = useState<NudgeSettingsType | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [newExcludedEmail, setNewExcludedEmail] = useState('');
+  const [newExcludedDomain, setNewExcludedDomain] = useState('');
+
+  useEffect(() => {
+    fetchSettings();
+  }, []);
+
+  const fetchSettings = async () => {
+    try {
+      const data = await nudgeApi.getSettings();
+      setSettings(data);
+    } catch (error) {
+      console.error('Failed to fetch nudge settings:', error);
+      // Set defaults
+      setSettings({
+        nudges_enabled: true,
+        sent_no_reply_days: 3,
+        received_no_reply_days: 3,
+        nudge_sent_emails: true,
+        nudge_received_emails: true,
+        nudge_important_only: false,
+        quiet_hours_start: undefined,
+        quiet_hours_end: undefined,
+        quiet_weekends: false,
+        excluded_senders: [],
+        excluded_domains: [],
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!settings) return;
+    setSaving(true);
+    try {
+      await nudgeApi.updateSettings(settings);
+    } catch (error) {
+      console.error('Failed to save nudge settings:', error);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addExcludedSender = () => {
+    if (!newExcludedEmail.trim() || !settings) return;
+    setSettings({
+      ...settings,
+      excluded_senders: [...settings.excluded_senders, newExcludedEmail.trim()],
+    });
+    setNewExcludedEmail('');
+  };
+
+  const removeExcludedSender = (email: string) => {
+    if (!settings) return;
+    setSettings({
+      ...settings,
+      excluded_senders: settings.excluded_senders.filter((e) => e !== email),
+    });
+  };
+
+  const addExcludedDomain = () => {
+    if (!newExcludedDomain.trim() || !settings) return;
+    setSettings({
+      ...settings,
+      excluded_domains: [...settings.excluded_domains, newExcludedDomain.trim()],
+    });
+    setNewExcludedDomain('');
+  };
+
+  const removeExcludedDomain = (domain: string) => {
+    if (!settings) return;
+    setSettings({
+      ...settings,
+      excluded_domains: settings.excluded_domains.filter((d) => d !== domain),
+    });
+  };
+
+  if (loading) {
+    return <div className="text-center py-8 text-gray-500">Loading settings...</div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-gray-900">Nudges & Reminders</h3>
+          <p className="text-sm text-gray-500">Get reminded to follow up on emails</p>
+        </div>
+        <button
+          onClick={() => setSettings(settings ? { ...settings, nudges_enabled: !settings.nudges_enabled } : null)}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${
+            settings?.nudges_enabled
+              ? 'bg-green-100 text-green-700 hover:bg-green-200'
+              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+          }`}
+        >
+          {settings?.nudges_enabled ? <Bell size={20} /> : <BellOff size={20} />}
+          <span>{settings?.nudges_enabled ? 'Enabled' : 'Disabled'}</span>
+        </button>
+      </div>
+
+      {/* Info Panel */}
+      <div className="flex items-start gap-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+        <Bell className="text-blue-600 mt-0.5" size={20} />
+        <div>
+          <p className="font-medium text-blue-800">How nudges work</p>
+          <p className="text-sm text-blue-600">
+            Bheem will remind you about emails that haven't received replies. You'll see nudge notifications
+            at the top of your inbox based on your settings below.
+          </p>
+        </div>
+      </div>
+
+      {/* Settings Form */}
+      {settings?.nudges_enabled && (
+        <div className="space-y-6">
+          {/* Timing Settings */}
+          <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <h4 className="font-medium text-gray-900 mb-4">Nudge Timing</h4>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Remind about sent emails after (days)
+                </label>
+                <select
+                  value={settings.sent_no_reply_days}
+                  onChange={(e) => setSettings({ ...settings, sent_no_reply_days: Number(e.target.value) })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                >
+                  <option value={1}>1 day</option>
+                  <option value={2}>2 days</option>
+                  <option value={3}>3 days</option>
+                  <option value={5}>5 days</option>
+                  <option value={7}>1 week</option>
+                  <option value={14}>2 weeks</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Remind about received emails after (days)
+                </label>
+                <select
+                  value={settings.received_no_reply_days}
+                  onChange={(e) => setSettings({ ...settings, received_no_reply_days: Number(e.target.value) })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                >
+                  <option value={1}>1 day</option>
+                  <option value={2}>2 days</option>
+                  <option value={3}>3 days</option>
+                  <option value={5}>5 days</option>
+                  <option value={7}>1 week</option>
+                  <option value={14}>2 weeks</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Email Types */}
+          <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <h4 className="font-medium text-gray-900 mb-4">Email Types</h4>
+            <div className="space-y-3">
+              <label className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={settings.nudge_sent_emails}
+                  onChange={(e) => setSettings({ ...settings, nudge_sent_emails: e.target.checked })}
+                  className="rounded border-gray-300 text-orange-500 focus:ring-orange-500"
+                />
+                <span className="text-sm text-gray-700">Nudge about sent emails that haven't received replies</span>
+              </label>
+              <label className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={settings.nudge_received_emails}
+                  onChange={(e) => setSettings({ ...settings, nudge_received_emails: e.target.checked })}
+                  className="rounded border-gray-300 text-orange-500 focus:ring-orange-500"
+                />
+                <span className="text-sm text-gray-700">Nudge about received emails I haven't replied to</span>
+              </label>
+              <label className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={settings.nudge_important_only}
+                  onChange={(e) => setSettings({ ...settings, nudge_important_only: e.target.checked })}
+                  className="rounded border-gray-300 text-orange-500 focus:ring-orange-500"
+                />
+                <span className="text-sm text-gray-700">Only nudge for important emails (starred/flagged)</span>
+              </label>
+            </div>
+          </div>
+
+          {/* Quiet Hours */}
+          <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <h4 className="font-medium text-gray-900 mb-4">Quiet Hours</h4>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <Clock size={14} className="inline mr-1" />
+                    Quiet start time
+                  </label>
+                  <input
+                    type="time"
+                    value={settings.quiet_hours_start || ''}
+                    onChange={(e) => setSettings({ ...settings, quiet_hours_start: e.target.value || undefined })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    <Clock size={14} className="inline mr-1" />
+                    Quiet end time
+                  </label>
+                  <input
+                    type="time"
+                    value={settings.quiet_hours_end || ''}
+                    onChange={(e) => setSettings({ ...settings, quiet_hours_end: e.target.value || undefined })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                  />
+                </div>
+              </div>
+              <label className="flex items-center gap-3">
+                <input
+                  type="checkbox"
+                  checked={settings.quiet_weekends}
+                  onChange={(e) => setSettings({ ...settings, quiet_weekends: e.target.checked })}
+                  className="rounded border-gray-300 text-orange-500 focus:ring-orange-500"
+                />
+                <span className="text-sm text-gray-700">Don't show nudges on weekends</span>
+              </label>
+            </div>
+          </div>
+
+          {/* Exclusions */}
+          <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <h4 className="font-medium text-gray-900 mb-4">Excluded Senders</h4>
+            <p className="text-sm text-gray-500 mb-3">Don't nudge for emails from these addresses</p>
+            <div className="flex gap-2 mb-3">
+              <input
+                type="email"
+                value={newExcludedEmail}
+                onChange={(e) => setNewExcludedEmail(e.target.value)}
+                placeholder="email@example.com"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                onKeyDown={(e) => e.key === 'Enter' && addExcludedSender()}
+              />
+              <button
+                onClick={addExcludedSender}
+                className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600"
+              >
+                <Plus size={18} />
+              </button>
+            </div>
+            {settings.excluded_senders.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {settings.excluded_senders.map((email) => (
+                  <span
+                    key={email}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-gray-200 rounded-full text-sm"
+                  >
+                    {email}
+                    <button
+                      onClick={() => removeExcludedSender(email)}
+                      className="text-gray-400 hover:text-red-500"
+                    >
+                      <X size={14} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Excluded Domains */}
+          <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <h4 className="font-medium text-gray-900 mb-4">Excluded Domains</h4>
+            <p className="text-sm text-gray-500 mb-3">Don't nudge for emails from these domains</p>
+            <div className="flex gap-2 mb-3">
+              <input
+                type="text"
+                value={newExcludedDomain}
+                onChange={(e) => setNewExcludedDomain(e.target.value)}
+                placeholder="example.com"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500"
+                onKeyDown={(e) => e.key === 'Enter' && addExcludedDomain()}
+              />
+              <button
+                onClick={addExcludedDomain}
+                className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600"
+              >
+                <Plus size={18} />
+              </button>
+            </div>
+            {settings.excluded_domains.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {settings.excluded_domains.map((domain) => (
+                  <span
+                    key={domain}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 bg-white border border-gray-200 rounded-full text-sm"
+                  >
+                    @{domain}
+                    <button
+                      onClick={() => removeExcludedDomain(domain)}
+                      className="text-gray-400 hover:text-red-500"
+                    >
+                      <X size={14} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="flex justify-end">
         <button

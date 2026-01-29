@@ -217,3 +217,152 @@ class MeetingWhiteboard(Base):
 
     def __repr__(self):
         return f"<MeetingWhiteboard(id={self.id}, name={self.name})>"
+
+
+# =============================================
+# AI Meeting Summaries
+# =============================================
+
+class MeetingSummary(Base):
+    """AI-generated meeting summaries"""
+    __tablename__ = "meeting_summaries"
+    __table_args__ = (
+        Index('idx_meeting_summaries_meeting', 'meeting_id'),
+        Index('idx_meeting_summaries_created', 'created_at'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    meeting_id = Column(UUID(as_uuid=True), nullable=False)  # References meeting_rooms
+
+    # Summary content
+    title = Column(String(500))  # AI-generated meeting title
+    summary = Column(Text)  # Executive summary
+    key_points = Column(JSONB, default=[])  # List of key discussion points
+    decisions = Column(JSONB, default=[])  # Key decisions made
+
+    # Topics discussed
+    topics = Column(JSONB, default=[])  # [{topic, duration_minutes, participants}]
+
+    # Sentiment analysis
+    overall_sentiment = Column(String(20))  # positive, neutral, negative
+    engagement_score = Column(Integer)  # 0-100
+
+    # Source info
+    source_type = Column(String(20), default='transcript')  # transcript, recording, notes
+    transcript_id = Column(UUID(as_uuid=True))  # If generated from transcript
+    recording_id = Column(UUID(as_uuid=True))  # If generated from recording
+
+    # Processing status
+    status = Column(String(20), default='pending')  # pending, processing, completed, failed
+    error_message = Column(Text)
+    ai_model = Column(String(50))  # Which AI model was used
+
+    # Sharing
+    is_shared = Column(Boolean, default=False)
+    shared_with = Column(JSONB, default=[])  # User IDs
+
+    # Timestamps
+    meeting_date = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    action_items = relationship("MeetingActionItem", back_populates="summary", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return f"<MeetingSummary(id={self.id}, meeting_id={self.meeting_id})>"
+
+
+class MeetingActionItem(Base):
+    """Action items extracted from meetings"""
+    __tablename__ = "meeting_action_items"
+    __table_args__ = (
+        Index('idx_meeting_action_items_summary', 'summary_id'),
+        Index('idx_meeting_action_items_assignee', 'assignee_id'),
+        Index('idx_meeting_action_items_status', 'status'),
+        Index('idx_meeting_action_items_due', 'due_date'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    summary_id = Column(UUID(as_uuid=True), ForeignKey("workspace.meeting_summaries.id", ondelete="CASCADE"), nullable=False)
+    meeting_id = Column(UUID(as_uuid=True), nullable=False)
+
+    # Action item content
+    title = Column(String(500), nullable=False)
+    description = Column(Text)
+    priority = Column(String(20), default='medium')  # low, medium, high, urgent
+
+    # Assignment
+    assignee_id = Column(UUID(as_uuid=True))
+    assignee_name = Column(String(255))
+    assignee_email = Column(String(320))
+
+    # Due date (AI suggested or manually set)
+    due_date = Column(DateTime)
+    is_due_date_ai_suggested = Column(Boolean, default=False)
+
+    # Status
+    status = Column(String(20), default='open')  # open, in_progress, completed, cancelled
+    completed_at = Column(DateTime)
+
+    # Context from meeting
+    context = Column(Text)  # Relevant excerpt from transcript
+    timestamp_start = Column(Integer)  # Seconds into meeting
+    timestamp_end = Column(Integer)
+
+    # Linked items
+    linked_task_id = Column(UUID(as_uuid=True))  # If converted to a task
+    linked_calendar_event_id = Column(String(255))  # If added to calendar
+
+    # AI confidence
+    confidence_score = Column(Integer)  # 0-100
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    summary = relationship("MeetingSummary", back_populates="action_items")
+
+    def __repr__(self):
+        return f"<MeetingActionItem(id={self.id}, title={self.title[:30] if self.title else ''})>"
+
+
+class MeetingHighlight(Base):
+    """Key moments/highlights from meetings"""
+    __tablename__ = "meeting_highlights"
+    __table_args__ = (
+        Index('idx_meeting_highlights_meeting', 'meeting_id'),
+        Index('idx_meeting_highlights_type', 'highlight_type'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    meeting_id = Column(UUID(as_uuid=True), nullable=False)
+    summary_id = Column(UUID(as_uuid=True), ForeignKey("workspace.meeting_summaries.id", ondelete="CASCADE"))
+
+    # Highlight info
+    highlight_type = Column(String(30), nullable=False)  # decision, question, concern, agreement, action, important
+    title = Column(String(500))
+    content = Column(Text, nullable=False)
+
+    # Timestamp in meeting
+    timestamp_seconds = Column(Integer)  # Seconds into recording/meeting
+
+    # Participants involved
+    participants = Column(JSONB, default=[])  # [{id, name}]
+
+    # AI extracted
+    is_ai_generated = Column(Boolean, default=True)
+    confidence_score = Column(Integer)  # 0-100
+
+    # User interaction
+    is_bookmarked = Column(Boolean, default=False)
+    bookmarked_by = Column(JSONB, default=[])  # User IDs
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<MeetingHighlight(id={self.id}, type={self.highlight_type})>"

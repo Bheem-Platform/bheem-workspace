@@ -1,6 +1,8 @@
-import { Plus, Check, User, Briefcase, Globe } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Plus, Check, User, Briefcase, Globe, Clock, Focus, Target, ChevronDown, ChevronUp, X, Settings } from 'lucide-react';
 import { useCalendarStore } from '@/stores/calendarStore';
 import MiniCalendar from './MiniCalendar';
+import { worldClockApi, focusTimeApi, WorldClockCity, FocusBlock } from '@/lib/calendarEnhancedApi';
 import type { EventSource } from '@/types/calendar';
 
 interface CalendarSidebarProps {
@@ -20,9 +22,73 @@ export default function CalendarSidebar({ onCreateEvent }: CalendarSidebarProps)
     setSourceFilter,
   } = useCalendarStore();
 
+  // World Clock state
+  const [worldClockCities, setWorldClockCities] = useState<WorldClockCity[]>([]);
+  const [showWorldClock, setShowWorldClock] = useState(true);
+  const [loadingWorldClock, setLoadingWorldClock] = useState(false);
+
+  // Focus Time state
+  const [focusBlocks, setFocusBlocks] = useState<FocusBlock[]>([]);
+  const [showFocusTime, setShowFocusTime] = useState(true);
+  const [loadingFocusTime, setLoadingFocusTime] = useState(false);
+
+  // Fetch world clock and focus blocks on mount
+  useEffect(() => {
+    fetchWorldClock();
+    fetchFocusBlocks();
+  }, []);
+
+  const fetchWorldClock = async () => {
+    setLoadingWorldClock(true);
+    try {
+      const cities = await worldClockApi.getWorldClock();
+      setWorldClockCities(cities);
+    } catch (error) {
+      console.error('Failed to fetch world clock:', error);
+      // Set some default cities for demo
+      setWorldClockCities([
+        { city: 'Local', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, offset: '', current_time: new Date().toLocaleTimeString(), is_dst: false },
+      ]);
+    } finally {
+      setLoadingWorldClock(false);
+    }
+  };
+
+  const fetchFocusBlocks = async () => {
+    setLoadingFocusTime(true);
+    try {
+      const blocks = await focusTimeApi.listBlocks();
+      setFocusBlocks(blocks);
+    } catch (error) {
+      console.error('Failed to fetch focus blocks:', error);
+    } finally {
+      setLoadingFocusTime(false);
+    }
+  };
+
   const handleDateSelect = (date: Date) => {
     selectDate(date);
     goToDate(date);
+  };
+
+  // Format time for world clock display
+  const formatWorldClockTime = (timezone: string) => {
+    try {
+      return new Date().toLocaleTimeString('en-US', {
+        timeZone: timezone,
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true
+      });
+    } catch {
+      return '--:--';
+    }
+  };
+
+  // Get day of week name
+  const getDayName = (dayNum: number) => {
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    return days[dayNum];
   };
 
   return (
@@ -141,6 +207,97 @@ export default function CalendarSidebar({ onCreateEvent }: CalendarSidebarProps)
           <p className="text-sm text-gray-500 text-center py-4">
             No calendars found
           </p>
+        )}
+      </div>
+
+      {/* World Clock Section */}
+      <div className="border-t border-gray-200">
+        <button
+          onClick={() => setShowWorldClock(!showWorldClock)}
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50"
+        >
+          <div className="flex items-center gap-2">
+            <Globe size={16} className="text-gray-500" />
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">World Clock</span>
+          </div>
+          {showWorldClock ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+        </button>
+        {showWorldClock && (
+          <div className="px-4 pb-3 space-y-2">
+            {loadingWorldClock ? (
+              <p className="text-xs text-gray-400">Loading...</p>
+            ) : worldClockCities.length > 0 ? (
+              worldClockCities.map((city, idx) => (
+                <div key={idx} className="flex items-center justify-between py-1.5 px-2 bg-gray-50 rounded-lg">
+                  <div>
+                    <p className="text-sm font-medium text-gray-700">{city.city}</p>
+                    <p className="text-xs text-gray-400">{city.timezone.split('/').pop()?.replace('_', ' ')}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-mono font-medium text-gray-900">
+                      {formatWorldClockTime(city.timezone)}
+                    </p>
+                    <p className="text-xs text-gray-400">{city.offset}</p>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="text-center py-2">
+                <p className="text-xs text-gray-400 mb-2">No cities added</p>
+                <button className="text-xs text-[#977DFF] hover:underline">Add cities</button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Focus Time Section */}
+      <div className="border-t border-gray-200">
+        <button
+          onClick={() => setShowFocusTime(!showFocusTime)}
+          className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50"
+        >
+          <div className="flex items-center gap-2">
+            <Target size={16} className="text-orange-500" />
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Focus Time</span>
+          </div>
+          {showFocusTime ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+        </button>
+        {showFocusTime && (
+          <div className="px-4 pb-3 space-y-2">
+            {loadingFocusTime ? (
+              <p className="text-xs text-gray-400">Loading...</p>
+            ) : focusBlocks.length > 0 ? (
+              <>
+                {focusBlocks.slice(0, 3).map((block) => (
+                  <div
+                    key={block.id}
+                    className="flex items-center gap-2 py-1.5 px-2 rounded-lg"
+                    style={{ backgroundColor: `${block.color}15` }}
+                  >
+                    <div
+                      className="w-2 h-2 rounded-full"
+                      style={{ backgroundColor: block.color }}
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-700 truncate">{block.title}</p>
+                      <p className="text-xs text-gray-500">
+                        {getDayName(block.day_of_week)} {block.start_time} - {block.end_time}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+                {focusBlocks.length > 3 && (
+                  <p className="text-xs text-gray-400 text-center">+{focusBlocks.length - 3} more blocks</p>
+                )}
+              </>
+            ) : (
+              <div className="text-center py-2">
+                <p className="text-xs text-gray-400 mb-2">No focus time scheduled</p>
+                <button className="text-xs text-orange-500 hover:underline">Schedule focus time</button>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

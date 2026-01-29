@@ -45,6 +45,7 @@ import {
   Table,
   Presentation,
   FormInput,
+  StickyNote,
 } from 'lucide-react';
 import WorkspaceLayout from '@/components/workspace/WorkspaceLayout';
 import { useAuthStore, useRequireAuth } from '@/stores/authStore';
@@ -78,6 +79,8 @@ const availableApps = [
   { id: 'calendar', name: 'Bheem Calendar', icon: Calendar, description: 'Scheduling and events', color: BRAND.purple },
   { id: 'meet', name: 'Bheem Meet', icon: Video, description: 'Video conferencing', color: '#10b981' },
   { id: 'drive', name: 'Bheem Drive', icon: HardDrive, description: 'Cloud storage', color: BRAND.blue },
+  { id: 'notes', name: 'Bheem Notes', icon: StickyNote, description: 'Quick notes and reminders', color: '#f59e0b' },
+  { id: 'sites', name: 'Bheem Sites', icon: Globe, description: 'Internal wikis and websites', color: BRAND.blue },
   { id: 'chat', name: 'Bheem Chat', icon: MessageCircle, description: 'Team messaging', color: BRAND.purple },
   { id: 'forms', name: 'Bheem Forms', icon: FormInput, description: 'Surveys and forms', color: BRAND.pink },
 ];
@@ -280,6 +283,8 @@ export default function SettingsPage() {
       calendar: true,
       meet: true,
       drive: true,
+      notes: true,
+      sites: true,
       chat: true,
       forms: true,
     },

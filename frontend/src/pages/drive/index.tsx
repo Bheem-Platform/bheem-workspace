@@ -29,6 +29,7 @@ import FileGrid from '@/components/drive/FileGrid';
 import FileDetailsPanel from '@/components/drive/FileDetailsPanel';
 import ActivityFeed from '@/components/drive/ActivityFeed';
 import HomeView from '@/components/drive/HomeView';
+import DriveFeaturesCarousel from '@/components/drive/DriveFeaturesCarousel';
 import {
   CreateFolderModal,
   RenameModal,
@@ -565,6 +566,11 @@ export default function DrivePage() {
                     ))}
                   </div>
                 </div>
+              )}
+
+              {/* Features Carousel - Show on Home view */}
+              {activeFilter === 'home' && (
+                <DriveFeaturesCarousel />
               )}
 
               {/* Home View - Quick Access */}

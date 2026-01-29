@@ -621,6 +621,22 @@ try:
 except Exception as e:
     print(f"Could not load oforms router: {e}")
 
+# Bheem Notes API (Keep-like Notes)
+try:
+    from api.notes import router as notes_router
+    app.include_router(notes_router, prefix="/api/v1", tags=["Bheem Notes"])
+    logger.info("Bheem Notes API loaded", action="notes_loaded")
+except Exception as e:
+    print(f"Could not load notes router: {e}")
+
+# Bheem Sites API (Website Builder)
+try:
+    from api.sites import router as sites_router
+    app.include_router(sites_router, prefix="/api/v1", tags=["Bheem Sites"])
+    logger.info("Bheem Sites API loaded", action="sites_loaded")
+except Exception as e:
+    print(f"Could not load sites router: {e}")
+
 # =============================================
 # Phase 3: Drive, Workflows, Meet Enhancements, Appointments
 # =============================================
@@ -1180,6 +1196,50 @@ async def oforms_proxy(request: Request, path: str = ""):
             )
         except httpx.RequestError as e:
             return HTMLResponse(content=f"<h1>OForms service unavailable</h1><p>{str(e)}</p>", status_code=503)
+
+# Bheem Notes - Proxy to Next.js server
+@app.api_route("/notes/{path:path}", methods=["GET"])
+@app.api_route("/notes", methods=["GET"])
+async def notes_proxy(request: Request, path: str = ""):
+    """Proxy notes routes to Next.js server"""
+    target_url = f"{NEXTJS_URL}/notes/{path}" if path else f"{NEXTJS_URL}/notes"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Notes service unavailable</h1><p>{str(e)}</p>", status_code=503)
+
+# Bheem Sites - Proxy to Next.js server
+@app.api_route("/sites/{path:path}", methods=["GET"])
+@app.api_route("/sites", methods=["GET"])
+async def sites_proxy(request: Request, path: str = ""):
+    """Proxy sites routes to Next.js server"""
+    target_url = f"{NEXTJS_URL}/sites/{path}" if path else f"{NEXTJS_URL}/sites"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Sites service unavailable</h1><p>{str(e)}</p>", status_code=503)
 
 # Bheem Videos - Proxy to Next.js server
 @app.api_route("/videos/{path:path}", methods=["GET"])

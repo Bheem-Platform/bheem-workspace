@@ -16,6 +16,7 @@ import logging
 from core.database import get_db
 from core.security import get_current_user, get_optional_user, decode_token, validate_token_via_passport
 from services.drive_service import DriveService
+from services.mailgun_service import mailgun_service
 
 logger = logging.getLogger(__name__)
 
@@ -721,14 +722,25 @@ async def share_file(
     tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
 
+    # Get file info for email notification
+    file_info = await service.get_file(file_id, tenant_id)
+    if not file_info:
+        raise HTTPException(status_code=404, detail="File not found")
+
     # Handle link share (public link)
     if request.is_link_share:
+        # Convert expires_at to expires_in_days if provided
+        expires_in_days = None
+        if request.expires_at:
+            days_diff = (request.expires_at - datetime.utcnow()).days
+            expires_in_days = max(1, days_diff) if days_diff > 0 else 7
+
         share = await service.create_public_link(
             file_id=file_id,
             tenant_id=tenant_id,
             shared_by=owner_id,
             permission=request.permission,
-            expires_at=request.expires_at
+            expires_in_days=expires_in_days
         )
         if not share:
             raise HTTPException(status_code=404, detail="File not found")
@@ -758,6 +770,80 @@ async def share_file(
     if not share:
         raise HTTPException(status_code=404, detail="File not found")
 
+    # Send email notification to the shared user
+    try:
+        sharer_name = current_user.get("name") or current_user.get("full_name") or current_user.get("username") or current_user.get("email", "Someone")
+        sharer_email = current_user.get("email") or current_user.get("username", "")
+        file_name = file_info.name if hasattr(file_info, 'name') else file_info.get('name', 'a file')
+        permission_text = "view" if request.permission == "view" else "edit" if request.permission == "edit" else request.permission
+
+        # Build share URL
+        share_url = f"https://workspace.bheem.cloud/drive?shared=true"
+
+        # Email HTML template
+        email_html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        </head>
+        <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
+                <div style="background: linear-gradient(135deg, #FFCCF2 0%, #977DFF 50%, #0033FF 100%); padding: 3px; border-radius: 16px;">
+                    <div style="background-color: #ffffff; border-radius: 14px; padding: 40px;">
+                        <!-- Logo -->
+                        <div style="text-align: center; margin-bottom: 30px;">
+                            <h1 style="margin: 0; font-size: 28px; background: linear-gradient(135deg, #FFCCF2 0%, #977DFF 50%, #0033FF 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">Bheem Drive</h1>
+                        </div>
+
+                        <!-- Content -->
+                        <div style="text-align: center;">
+                            <h2 style="color: #333; font-size: 22px; margin-bottom: 20px;">
+                                {sharer_name} shared a file with you
+                            </h2>
+
+                            <div style="background-color: #f8f9fa; border-radius: 12px; padding: 20px; margin: 20px 0;">
+                                <p style="color: #666; margin: 0 0 10px 0; font-size: 14px;">File Name</p>
+                                <p style="color: #333; font-size: 18px; font-weight: 600; margin: 0; word-break: break-word;">
+                                    {file_name}
+                                </p>
+                            </div>
+
+                            <p style="color: #666; font-size: 14px; margin: 20px 0;">
+                                Permission: <strong style="color: #333;">{permission_text.capitalize()}</strong>
+                            </p>
+
+                            <a href="{share_url}" style="display: inline-block; background: linear-gradient(135deg, #977DFF 0%, #0033FF 100%); color: #ffffff; text-decoration: none; padding: 14px 40px; border-radius: 8px; font-weight: 600; font-size: 16px; margin-top: 20px;">
+                                Open in Bheem Drive
+                            </a>
+                        </div>
+
+                        <!-- Footer -->
+                        <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #eee; text-align: center;">
+                            <p style="color: #999; font-size: 12px; margin: 0;">
+                                This email was sent by Bheem Workspace on behalf of {sharer_email}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+
+        # Send email notification
+        await mailgun_service.send_email(
+            to=[email],
+            subject=f"{sharer_name} shared \"{file_name}\" with you",
+            html=email_html,
+            tags=["drive-share", "notification"]
+        )
+        logger.info(f"Share notification email sent to {email} for file {file_name}")
+    except Exception as e:
+        # Log error but don't fail the share operation
+        logger.error(f"Failed to send share notification email to {email}: {e}")
+
     return {
         "id": str(share.id),
         "file_id": str(file_id),
@@ -778,8 +864,23 @@ async def list_file_shares(
     tenant_id, _ = await get_user_ids_with_ensure(current_user, db)
     service = DriveService(db)
     shares = await service.get_file_shares(file_id, tenant_id)
-    # Return array directly for frontend compatibility
-    return shares if isinstance(shares, list) else []
+
+    # Transform to frontend-expected format
+    result = []
+    for share in (shares if isinstance(shares, list) else []):
+        share_dict = share if isinstance(share, dict) else share.__dict__
+        result.append({
+            "id": str(share_dict.get("id", "")),
+            "file_id": str(share_dict.get("file_id", "")),
+            "user_id": str(share_dict.get("user_id")) if share_dict.get("user_id") else None,
+            "user_email": share_dict.get("email"),  # Map email -> user_email
+            "permission": share_dict.get("permission", "view"),
+            "is_link_share": share_dict.get("is_public", False),  # Map is_public -> is_link_share
+            "link_token": share_dict.get("link_token"),
+            "expires_at": str(share_dict.get("expires_at")) if share_dict.get("expires_at") else None,
+            "created_at": str(share_dict.get("created_at", "")),
+        })
+    return result
 
 
 @router.delete("/files/{file_id}/shares/{share_id}")
@@ -796,6 +897,25 @@ async def remove_share(
     if not success:
         raise HTTPException(status_code=404, detail="Share not found")
     return {"status": "removed"}
+
+
+@router.get("/files/{file_id}/activity")
+async def get_file_activity(
+    file_id: UUID,
+    limit: int = 20,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get activity log for a specific file"""
+    tenant_id, owner_id = await get_user_ids_with_ensure(current_user, db)
+    service = DriveService(db)
+    activity = await service.get_activity(
+        tenant_id=tenant_id,
+        owner_id=owner_id,
+        file_id=file_id,
+        limit=limit
+    )
+    return activity  # Return array directly
 
 
 @router.get("/shared-with-me")
@@ -859,6 +979,70 @@ async def access_public_file(
             detail="Invalid or expired link"
         )
     return file
+
+
+@router.get("/public/{share_token}/download")
+async def download_public_file(
+    share_token: str,
+    password: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Download a file via public link"""
+    service = DriveService(db)
+    file = await service.access_public_link(share_token, password)
+    if not file:
+        raise HTTPException(
+            status_code=404,
+            detail="Invalid or expired link"
+        )
+
+    if file.file_type == 'folder':
+        raise HTTPException(status_code=400, detail="Cannot download a folder")
+
+    # Download from Nextcloud
+    content = await service.download_file(file.id, file.tenant_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="File content not found")
+
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type=file.mime_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{file.name}"'
+        }
+    )
+
+
+@router.get("/public/{share_token}/preview")
+async def preview_public_file(
+    share_token: str,
+    password: Optional[str] = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """Preview a file via public link (inline view)"""
+    service = DriveService(db)
+    file = await service.access_public_link(share_token, password)
+    if not file:
+        raise HTTPException(
+            status_code=404,
+            detail="Invalid or expired link"
+        )
+
+    if file.file_type == 'folder':
+        raise HTTPException(status_code=400, detail="Cannot preview a folder")
+
+    # Download from Nextcloud
+    content = await service.download_file(file.id, file.tenant_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="File content not found")
+
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type=file.mime_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'inline; filename="{file.name}"'
+        }
+    )
 
 
 # =============================================

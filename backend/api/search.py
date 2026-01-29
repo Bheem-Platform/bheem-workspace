@@ -91,6 +91,8 @@ async def search(
     - forms: Forms
     - meet: Meetings
     - contacts: Contacts
+    - notes: Notes
+    - sites: Sites and wiki pages
     """
     service = SearchService(db)
 
@@ -433,6 +435,60 @@ async def search_contacts(
         user_id=current_user["user_id"],
         query=q,
         apps=["contacts"],
+        skip=skip,
+        limit=limit
+    )
+
+    return results
+
+
+@router.get("/notes", response_model=SearchResponse)
+async def search_notes(
+    q: str = Query(..., min_length=1, max_length=500),
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: dict = Depends(get_current_user),
+    db = Depends(get_db)
+):
+    """Search notes only"""
+    service = SearchService(db)
+
+    results = await service.search(
+        tenant_id=current_user["tenant_id"],
+        user_id=current_user["user_id"],
+        query=q,
+        apps=["notes"],
+        date_from=date_from,
+        date_to=date_to,
+        skip=skip,
+        limit=limit
+    )
+
+    return results
+
+
+@router.get("/sites", response_model=SearchResponse)
+async def search_sites(
+    q: str = Query(..., min_length=1, max_length=500),
+    date_from: Optional[datetime] = None,
+    date_to: Optional[datetime] = None,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    current_user: dict = Depends(get_current_user),
+    db = Depends(get_db)
+):
+    """Search sites and wiki pages"""
+    service = SearchService(db)
+
+    results = await service.search(
+        tenant_id=current_user["tenant_id"],
+        user_id=current_user["user_id"],
+        query=q,
+        apps=["sites"],
+        date_from=date_from,
+        date_to=date_to,
         skip=skip,
         limit=limit
     )

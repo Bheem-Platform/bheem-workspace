@@ -410,11 +410,27 @@ export async function getRecentFiles(limit: number = 20): Promise<DriveFile[]> {
 }
 
 export async function getStarredFiles(): Promise<DriveFile[]> {
-  return listFiles({ is_starred: true });
+  const response = await fetch(`${API_BASE}/starred`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to get starred files');
+  }
+
+  return response.json();
 }
 
 export async function getTrashFiles(): Promise<DriveFile[]> {
-  return listFiles({ is_trashed: true });
+  const response = await fetch(`${API_BASE}/trash`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to get trash files');
+  }
+
+  return response.json();
 }
 
 export async function emptyTrash(): Promise<void> {
@@ -447,6 +463,18 @@ export async function getActivity(limit: number = 50): Promise<DriveActivity[]> 
 
   if (!response.ok) {
     throw new Error('Failed to get activity');
+  }
+
+  return response.json();
+}
+
+export async function getFileActivity(fileId: string, limit: number = 20): Promise<DriveActivity[]> {
+  const response = await fetch(`${API_BASE}/files/${fileId}/activity?limit=${limit}`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to get file activity');
   }
 
   return response.json();

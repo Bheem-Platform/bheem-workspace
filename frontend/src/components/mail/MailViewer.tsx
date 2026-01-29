@@ -21,8 +21,14 @@ import {
   FileText,
   Loader2,
   MousePointerClick,
+  Bell,
+  Clock,
+  X,
+  Lock,
+  Shield,
 } from 'lucide-react';
 import * as mailApi from '@/lib/mailApi';
+import { nudgeApi } from '@/lib/mailEnhancedApi';
 import { useMailStore } from '@/stores/mailStore';
 import EmptyState from '@/components/shared/EmptyState';
 import CalendarEventDetector, { ICSAttachment } from './CalendarEventDetector';
@@ -53,6 +59,10 @@ export default function MailViewer({ email }: MailViewerProps) {
   const [summary, setSummary] = useState<{ summary: string; key_points: string[]; action_items: string[]; sentiment: string } | null>(null);
   const [loadingSummary, setLoadingSummary] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
+
+  // Nudge/Reminder state
+  const [showNudgeMenu, setShowNudgeMenu] = useState(false);
+  const [nudgeCreating, setNudgeCreating] = useState(false);
 
   // Fetch smart replies when email changes
   useEffect(() => {
@@ -107,6 +117,30 @@ export default function MailViewer({ email }: MailViewerProps) {
       replyType: 'reply',
       originalEmail: email,
     });
+  };
+
+  const handleCreateNudge = async (hours: number) => {
+    if (!email) return;
+    setNudgeCreating(true);
+    try {
+      const remindAt = new Date();
+      remindAt.setHours(remindAt.getHours() + hours);
+
+      await nudgeApi.create({
+        message_id: email.messageId,
+        nudge_type: 'custom',
+        remind_at: remindAt,
+        subject: email.subject,
+        recipient_email: email.from.email,
+        note: `Follow up on: ${email.subject}`,
+      });
+      setShowNudgeMenu(false);
+      // Show success toast or notification
+    } catch (error) {
+      console.error('Failed to create nudge:', error);
+    } finally {
+      setNudgeCreating(false);
+    }
   };
 
   // Handle reply/forward - must be defined before any conditional returns
@@ -330,6 +364,47 @@ export default function MailViewer({ email }: MailViewerProps) {
             )}
             <span className="text-sm font-medium">Summary</span>
           </button>
+
+          {/* Nudge/Reminder Button */}
+          <div className="relative">
+            <button
+              onClick={() => setShowNudgeMenu(!showNudgeMenu)}
+              className="flex items-center gap-1 px-3 py-2 text-orange-600 hover:bg-orange-50 rounded-lg"
+              title="Set reminder"
+            >
+              <Bell size={18} />
+              <span className="text-sm font-medium">Remind</span>
+            </button>
+            {showNudgeMenu && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setShowNudgeMenu(false)} />
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="absolute right-0 top-full mt-1 w-48 bg-white rounded-xl shadow-xl border border-gray-200 z-20 py-1"
+                >
+                  <p className="px-3 py-1.5 text-xs font-medium text-gray-500 uppercase">Remind me in</p>
+                  {[
+                    { label: '1 hour', hours: 1 },
+                    { label: '4 hours', hours: 4 },
+                    { label: 'Tomorrow morning', hours: 24 },
+                    { label: 'Next week', hours: 168 },
+                  ].map((opt) => (
+                    <button
+                      key={opt.hours}
+                      onClick={() => handleCreateNudge(opt.hours)}
+                      disabled={nudgeCreating}
+                      className="w-full text-left px-3 py-2 text-sm text-gray-700 hover:bg-orange-50 hover:text-orange-700 flex items-center gap-2 disabled:opacity-50"
+                    >
+                      <Clock size={14} />
+                      {opt.label}
+                    </button>
+                  ))}
+                </motion.div>
+              </>
+            )}
+          </div>
+
           <button className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg">
             <MoreHorizontal size={18} />
           </button>

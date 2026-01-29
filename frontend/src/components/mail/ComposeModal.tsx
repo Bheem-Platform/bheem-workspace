@@ -32,6 +32,15 @@ import {
   CheckCircle,
   Lightbulb,
   Loader2,
+  Lock,
+  Shield,
+  Ban,
+  Download,
+  Copy,
+  Forward,
+  Printer,
+  Timer,
+  Key,
 } from 'lucide-react';
 import { useMailStore } from '@/stores/mailStore';
 import { useCredentialsStore } from '@/stores/credentialsStore';
@@ -81,6 +90,19 @@ export default function ComposeModal({ onClose }: ComposeModalProps) {
   const [showToneMenu, setShowToneMenu] = useState(false);
   const [showSubjectSuggestions, setShowSubjectSuggestions] = useState(false);
   const [subjectSuggestions, setSubjectSuggestions] = useState<string[]>([]);
+
+  // Confidential Mode state
+  const [showConfidentialPanel, setShowConfidentialPanel] = useState(false);
+  const [confidentialEnabled, setConfidentialEnabled] = useState(false);
+  const [confidentialSettings, setConfidentialSettings] = useState({
+    expiresInHours: 168, // 1 week default
+    passcodeType: 'none' as 'sms' | 'email' | 'none',
+    passcode: '',
+    noForward: true,
+    noCopy: false,
+    noPrint: false,
+    noDownload: false,
+  });
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -173,6 +195,17 @@ export default function ComposeModal({ onClose }: ComposeModalProps) {
       attachments: attachments.length > 0 ? attachments : undefined,
       inReplyTo: composeData.inReplyTo,
       references: composeData.references,
+      // Confidential mode settings
+      confidential: confidentialEnabled ? {
+        enabled: true,
+        expiresInHours: confidentialSettings.expiresInHours,
+        passcode: confidentialSettings.passcode || undefined,
+        passcodeType: confidentialSettings.passcodeType,
+        noForward: confidentialSettings.noForward,
+        noCopy: confidentialSettings.noCopy,
+        noPrint: confidentialSettings.noPrint,
+        noDownload: confidentialSettings.noDownload,
+      } : undefined,
     };
 
     if (sendWithUndo) {
@@ -642,6 +675,22 @@ export default function ComposeModal({ onClose }: ComposeModalProps) {
                     )}
                   </AnimatePresence>
                 </div>
+
+                {/* Confidential Mode */}
+                <button
+                  onClick={() => setShowConfidentialPanel(!showConfidentialPanel)}
+                  className={`flex items-center gap-1 px-2 py-1.5 text-sm rounded-lg transition-colors ${
+                    confidentialEnabled
+                      ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                      : showConfidentialPanel
+                        ? 'bg-gray-200 text-gray-700'
+                        : 'text-gray-600 hover:bg-gray-200'
+                  }`}
+                  title="Confidential mode"
+                >
+                  <Lock size={16} />
+                  {confidentialEnabled && <span className="hidden sm:inline text-xs">On</span>}
+                </button>
               </div>
 
               {/* AI Compose Panel */}
@@ -698,6 +747,160 @@ export default function ComposeModal({ onClose }: ComposeModalProps) {
                 )}
               </AnimatePresence>
 
+              {/* Confidential Mode Panel */}
+              <AnimatePresence>
+                {showConfidentialPanel && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    className="flex-shrink-0 p-4 bg-gradient-to-r from-amber-50 to-orange-50 border-b border-amber-200 overflow-hidden"
+                  >
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center gap-2">
+                        <Shield size={16} className="text-amber-600" />
+                        <span className="text-sm font-medium text-gray-800">Confidential Mode</span>
+                      </div>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <span className="text-xs text-gray-600">Enable</span>
+                        <div
+                          onClick={() => setConfidentialEnabled(!confidentialEnabled)}
+                          className={`relative w-10 h-5 rounded-full transition-colors ${
+                            confidentialEnabled ? 'bg-amber-500' : 'bg-gray-300'
+                          }`}
+                        >
+                          <div
+                            className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${
+                              confidentialEnabled ? 'translate-x-5' : 'translate-x-0.5'
+                            }`}
+                          />
+                        </div>
+                      </label>
+                    </div>
+
+                    {confidentialEnabled && (
+                      <div className="space-y-3">
+                        {/* Expiration */}
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2 text-gray-600">
+                            <Timer size={14} />
+                            <span className="text-xs">Expires in:</span>
+                          </div>
+                          <select
+                            value={confidentialSettings.expiresInHours}
+                            onChange={(e) => setConfidentialSettings({
+                              ...confidentialSettings,
+                              expiresInHours: Number(e.target.value)
+                            })}
+                            className="px-2 py-1 text-xs border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-500/50 bg-white"
+                          >
+                            <option value={24}>1 day</option>
+                            <option value={72}>3 days</option>
+                            <option value={168}>1 week</option>
+                            <option value={336}>2 weeks</option>
+                            <option value={720}>1 month</option>
+                            <option value={0}>Never</option>
+                          </select>
+                        </div>
+
+                        {/* Passcode */}
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2 text-gray-600">
+                            <Key size={14} />
+                            <span className="text-xs">Passcode:</span>
+                          </div>
+                          <select
+                            value={confidentialSettings.passcodeType}
+                            onChange={(e) => setConfidentialSettings({
+                              ...confidentialSettings,
+                              passcodeType: e.target.value as 'sms' | 'email' | 'none'
+                            })}
+                            className="px-2 py-1 text-xs border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-500/50 bg-white"
+                          >
+                            <option value="none">No passcode</option>
+                            <option value="email">Send via email</option>
+                            <option value="sms">Send via SMS</option>
+                          </select>
+                          {confidentialSettings.passcodeType !== 'none' && (
+                            <input
+                              type="text"
+                              value={confidentialSettings.passcode}
+                              onChange={(e) => setConfidentialSettings({
+                                ...confidentialSettings,
+                                passcode: e.target.value
+                              })}
+                              placeholder="Custom passcode (optional)"
+                              className="flex-1 px-2 py-1 text-xs border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-500/50 bg-white"
+                            />
+                          )}
+                        </div>
+
+                        {/* Restrictions */}
+                        <div className="flex flex-wrap items-center gap-3">
+                          <span className="text-xs text-gray-600">Restrict:</span>
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={confidentialSettings.noForward}
+                              onChange={(e) => setConfidentialSettings({
+                                ...confidentialSettings,
+                                noForward: e.target.checked
+                              })}
+                              className="w-3.5 h-3.5 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                            />
+                            <Forward size={12} className="text-gray-500" />
+                            <span className="text-xs text-gray-700">Forward</span>
+                          </label>
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={confidentialSettings.noCopy}
+                              onChange={(e) => setConfidentialSettings({
+                                ...confidentialSettings,
+                                noCopy: e.target.checked
+                              })}
+                              className="w-3.5 h-3.5 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                            />
+                            <Copy size={12} className="text-gray-500" />
+                            <span className="text-xs text-gray-700">Copy</span>
+                          </label>
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={confidentialSettings.noPrint}
+                              onChange={(e) => setConfidentialSettings({
+                                ...confidentialSettings,
+                                noPrint: e.target.checked
+                              })}
+                              className="w-3.5 h-3.5 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                            />
+                            <Printer size={12} className="text-gray-500" />
+                            <span className="text-xs text-gray-700">Print</span>
+                          </label>
+                          <label className="flex items-center gap-1.5 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={confidentialSettings.noDownload}
+                              onChange={(e) => setConfidentialSettings({
+                                ...confidentialSettings,
+                                noDownload: e.target.checked
+                              })}
+                              className="w-3.5 h-3.5 rounded border-amber-400 text-amber-600 focus:ring-amber-500"
+                            />
+                            <Download size={12} className="text-gray-500" />
+                            <span className="text-xs text-gray-700">Download</span>
+                          </label>
+                        </div>
+
+                        <p className="text-xs text-amber-700 bg-amber-100 px-2 py-1.5 rounded-lg">
+                          Recipients can view this email until it expires. They cannot {confidentialSettings.noForward && 'forward, '}{confidentialSettings.noCopy && 'copy, '}{confidentialSettings.noPrint && 'print, '}{confidentialSettings.noDownload && 'download attachments from '}this email.
+                        </p>
+                      </div>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
               {/* Body */}
               <div className="flex-1 overflow-y-auto p-4">
                 <div
@@ -748,6 +951,13 @@ export default function ComposeModal({ onClose }: ComposeModalProps) {
               {/* Footer */}
               <div className="flex-shrink-0 flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50">
                 <div className="flex items-center gap-2">
+                  {/* Confidential indicator */}
+                  {confidentialEnabled && (
+                    <div className="flex items-center gap-1.5 px-2.5 py-1.5 bg-amber-100 text-amber-700 rounded-lg text-xs font-medium">
+                      <Lock size={12} />
+                      <span>Confidential</span>
+                    </div>
+                  )}
                   {/* Send button with dropdown */}
                   <div className="flex">
                     <motion.button

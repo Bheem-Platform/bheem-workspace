@@ -12,8 +12,12 @@ import {
   X,
   LogOut,
   Bell,
-  Search,
+  HardDrive,
+  StickyNote,
+  Globe,
+  Calendar,
 } from 'lucide-react';
+import { GlobalSearch, SearchTrigger } from '@/components/search';
 
 interface LayoutProps {
   children: ReactNode;
@@ -22,9 +26,13 @@ interface LayoutProps {
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: Home },
-  { name: 'Meet', href: '/meet', icon: Video },
-  { name: 'Docs', href: '/docs', icon: FileText },
   { name: 'Mail', href: '/mail', icon: Mail },
+  { name: 'Drive', href: '/drive', icon: HardDrive },
+  { name: 'Docs', href: '/docs', icon: FileText },
+  { name: 'Meet', href: '/meet', icon: Video },
+  { name: 'Calendar', href: '/calendar', icon: Calendar },
+  { name: 'Notes', href: '/notes', icon: StickyNote },
+  { name: 'Sites', href: '/sites', icon: Globe },
   { name: 'Team', href: '/team', icon: Users },
   { name: 'Settings', href: '/settings', icon: Settings },
 ];
@@ -32,14 +40,6 @@ const navigation = [
 export default function Layout({ children, tenantName = 'Bheem Workspace' }: LayoutProps) {
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (searchQuery.trim()) {
-      router.push(`/search?q=${encodeURIComponent(searchQuery)}`);
-    }
-  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -125,18 +125,9 @@ export default function Layout({ children, tenantName = 'Bheem Workspace' }: Lay
             </button>
 
             {/* Search */}
-            <form onSubmit={handleSearch} className="flex-1 max-w-lg mx-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
-                <input
-                  type="text"
-                  placeholder="Search meetings, documents, emails..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 bg-gray-100 border-0 rounded-lg focus:bg-white focus:ring-2 focus:ring-bheem-primary"
-                />
-              </div>
-            </form>
+            <div className="flex-1 max-w-lg mx-4">
+              <SearchTrigger variant="input" />
+            </div>
 
             {/* Actions */}
             <div className="flex items-center space-x-3">
@@ -154,6 +145,9 @@ export default function Layout({ children, tenantName = 'Bheem Workspace' }: Lay
         {/* Page content */}
         <main className="p-6">{children}</main>
       </div>
+
+      {/* Global Search Modal */}
+      <GlobalSearch />
     </div>
   );
 }

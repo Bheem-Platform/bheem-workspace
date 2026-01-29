@@ -66,6 +66,30 @@ export interface ComposeEmail {
   references?: string[];
   replyType?: 'reply' | 'replyAll' | 'forward';
   originalEmail?: Email;
+  // Confidential mode settings
+  confidential?: {
+    enabled: boolean;
+    expiresInHours?: number;
+    passcode?: string;
+    passcodeType?: 'sms' | 'email' | 'none';
+    noForward?: boolean;
+    noCopy?: boolean;
+    noPrint?: boolean;
+    noDownload?: boolean;
+  };
+}
+
+export interface EmailNudge {
+  id: string;
+  messageId: string;
+  nudgeType: 'sent_no_reply' | 'received_no_reply' | 'custom';
+  remindAt: string;
+  snoozeUntil?: string;
+  status: 'pending' | 'shown' | 'dismissed' | 'replied' | 'snoozed';
+  subject?: string;
+  recipientEmail?: string;
+  sentAt?: string;
+  note?: string;
 }
 
 export interface MailCredentials {

@@ -750,13 +750,20 @@ class DriveService:
         details: Optional[Dict] = None
     ):
         """Log file activity"""
-        activity = DriveActivity(
-            file_id=file_id,
-            user_id=user_id,
-            action=action,
-            details=details or {}
-        )
-        self.db.add(activity)
+        try:
+            activity = DriveActivity(
+                file_id=file_id,
+                user_id=user_id,
+                action=action,
+                details=details or {}
+            )
+            self.db.add(activity)
+            await self.db.commit()
+        except Exception as e:
+            # Don't fail the main operation if activity logging fails
+            await self.db.rollback()
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to log activity: {e}")
 
     # =============================================
     # Activity

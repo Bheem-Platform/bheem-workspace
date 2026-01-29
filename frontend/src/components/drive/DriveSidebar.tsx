@@ -63,6 +63,7 @@ export default function DriveSidebar({ onNewFolder, onUpload }: DriveSidebarProp
     fetchStarredFiles,
     fetchTrashFiles,
     fetchHomeFiles,
+    fetchActivityFiles,
     fetchWorkspaceFiles,
     fetchSharedWithMe,
     fetchSpamFiles,
@@ -87,7 +88,7 @@ export default function DriveSidebar({ onNewFolder, onUpload }: DriveSidebarProp
         fetchHomeFiles();
         break;
       case 'activity':
-        setActiveFilter('activity');
+        fetchActivityFiles();
         break;
       case 'workspace':
         fetchWorkspaceFiles();

@@ -28,9 +28,10 @@ import {
   Info,
   History,
   Users,
+  FileUp,
 } from 'lucide-react';
-import type { DriveFile } from '@/lib/driveApi';
-import { formatFileSize, getFileIcon, getShares } from '@/lib/driveApi';
+import type { DriveFile, DriveActivity } from '@/lib/driveApi';
+import { formatFileSize, getFileIcon, getShares, getFileActivity } from '@/lib/driveApi';
 import type { DriveShare } from '@/lib/driveApi';
 
 interface FileDetailsPanelProps {
@@ -57,12 +58,17 @@ export default function FileDetailsPanel({
   const [activeTab, setActiveTab] = useState<'details' | 'activity'>('details');
   const [shares, setShares] = useState<DriveShare[]>([]);
   const [loadingShares, setLoadingShares] = useState(false);
+  const [activities, setActivities] = useState<DriveActivity[]>([]);
+  const [loadingActivities, setLoadingActivities] = useState(false);
 
   useEffect(() => {
     if (file && isOpen) {
       fetchShares();
+      if (activeTab === 'activity') {
+        fetchActivities();
+      }
     }
-  }, [file?.id, isOpen]);
+  }, [file?.id, isOpen, activeTab]);
 
   const fetchShares = async () => {
     if (!file) return;
@@ -76,7 +82,50 @@ export default function FileDetailsPanel({
     setLoadingShares(false);
   };
 
-  if (!isOpen || !file) return null;
+  const fetchActivities = async () => {
+    if (!file) return;
+    setLoadingActivities(true);
+    try {
+      const data = await getFileActivity(file.id);
+      setActivities(data);
+    } catch (err) {
+      console.error('Failed to fetch activities:', err);
+    }
+    setLoadingActivities(false);
+  };
+
+  if (!isOpen) return null;
+
+  // Show empty state when no file is selected
+  if (!file) {
+    return (
+      <div className="w-80 h-full bg-white border-l border-gray-200 flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+          <h3 className="font-medium text-gray-900">Details</h3>
+          <button
+            onClick={onClose}
+            className="p-1 hover:bg-gray-100 rounded-lg transition-colors"
+          >
+            <X size={18} className="text-gray-500" />
+          </button>
+        </div>
+
+        {/* Empty state */}
+        <div className="flex-1 flex items-center justify-center p-8">
+          <div className="text-center">
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-gray-100 flex items-center justify-center">
+              <Info size={32} className="text-gray-300" />
+            </div>
+            <h4 className="text-gray-700 font-medium mb-2">No file selected</h4>
+            <p className="text-sm text-gray-400">
+              Select a file to view its details
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const FileIcon = getIconComponent(file);
   const createdDate = new Date(file.created_at).toLocaleDateString('en-US', {
@@ -329,11 +378,41 @@ export default function FileDetailsPanel({
         ) : (
           <div className="p-4">
             {/* Activity tab */}
-            <div className="text-center text-gray-400 py-8">
-              <History size={48} className="mx-auto mb-3 text-gray-300" />
-              <p className="text-sm">Activity tracking coming soon</p>
-              <p className="text-xs mt-1">View edits, comments, and shares</p>
-            </div>
+            {loadingActivities ? (
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500" />
+              </div>
+            ) : activities.length > 0 ? (
+              <div className="space-y-3">
+                {activities.map((activity) => (
+                  <div key={activity.id} className="flex items-start gap-3 p-2 hover:bg-gray-50 rounded-lg">
+                    <div className={`p-1.5 rounded-lg ${getActivityColor(activity.action)}`}>
+                      {getActivityIcon(activity.action)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm text-gray-900">
+                        <span className="font-medium">{activity.actor_name || 'You'}</span>{' '}
+                        {getActivityText(activity.action)}
+                      </p>
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {new Date(activity.created_at).toLocaleDateString('en-US', {
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-center text-gray-400 py-8">
+                <History size={48} className="mx-auto mb-3 text-gray-300" />
+                <p className="text-sm">No activity yet</p>
+                <p className="text-xs mt-1">Activity will appear here when changes are made</p>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -367,5 +446,118 @@ function getIconComponent(file: DriveFile) {
       return FileCode;
     default:
       return File;
+  }
+}
+
+// Helper to get activity background color
+function getActivityColor(action: string): string {
+  switch (action) {
+    case 'upload':
+    case 'create':
+      return 'bg-green-100';
+    case 'edit':
+    case 'update':
+    case 'rename':
+      return 'bg-blue-100';
+    case 'share':
+    case 'share_link':
+      return 'bg-purple-100';
+    case 'download':
+    case 'view':
+      return 'bg-gray-100';
+    case 'move':
+    case 'copy':
+      return 'bg-yellow-100';
+    case 'delete':
+    case 'trash':
+      return 'bg-red-100';
+    case 'restore':
+      return 'bg-teal-100';
+    case 'star':
+    case 'unstar':
+      return 'bg-amber-100';
+    case 'comment':
+      return 'bg-indigo-100';
+    default:
+      return 'bg-gray-100';
+  }
+}
+
+// Helper to get activity icon
+function getActivityIcon(action: string) {
+  const size = 14;
+  switch (action) {
+    case 'upload':
+    case 'create':
+      return <FileUp size={size} className="text-green-600" />;
+    case 'edit':
+    case 'update':
+      return <Pencil size={size} className="text-blue-600" />;
+    case 'rename':
+      return <FileText size={size} className="text-blue-600" />;
+    case 'share':
+    case 'share_link':
+      return <Share2 size={size} className="text-purple-600" />;
+    case 'download':
+      return <Download size={size} className="text-gray-600" />;
+    case 'view':
+      return <Eye size={size} className="text-gray-600" />;
+    case 'move':
+    case 'copy':
+      return <Folder size={size} className="text-yellow-600" />;
+    case 'delete':
+    case 'trash':
+      return <Trash2 size={size} className="text-red-600" />;
+    case 'restore':
+      return <History size={size} className="text-teal-600" />;
+    case 'star':
+      return <Star size={size} className="text-amber-500 fill-amber-500" />;
+    case 'unstar':
+      return <Star size={size} className="text-amber-500" />;
+    case 'comment':
+      return <FileText size={size} className="text-indigo-600" />;
+    default:
+      return <Clock size={size} className="text-gray-500" />;
+  }
+}
+
+// Helper to get activity text
+function getActivityText(action: string): string {
+  switch (action) {
+    case 'upload':
+      return 'uploaded this file';
+    case 'create':
+      return 'created this item';
+    case 'edit':
+    case 'update':
+      return 'edited this file';
+    case 'rename':
+      return 'renamed this item';
+    case 'share':
+      return 'shared this item';
+    case 'share_link':
+      return 'created a share link';
+    case 'download':
+      return 'downloaded this file';
+    case 'view':
+      return 'viewed this file';
+    case 'move':
+      return 'moved this item';
+    case 'copy':
+      return 'copied this item';
+    case 'delete':
+      return 'deleted this item';
+    case 'trash':
+      return 'moved to trash';
+    case 'restore':
+      return 'restored this item';
+    case 'star':
+      return 'starred this item';
+    case 'unstar':
+      return 'removed star';
+    case 'comment':
+      return 'commented on this item';
+    default:
+      return `performed ${action}`;
   }
 }

@@ -225,6 +225,47 @@ export function BheemVideosIcon({ size = 48, className = '' }: IconProps) {
   );
 }
 
+// Modern Notes Icon - Sticky note
+export function BheemNotesIcon({ size = 48, className = '' }: IconProps) {
+  const id = `notes-${Math.random().toString(36).substr(2, 9)}`;
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className}>
+      <defs>
+        <linearGradient id={`${id}-bg`} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor={BHEEM_COLORS.pink} />
+          <stop offset="50%" stopColor={BHEEM_COLORS.purple} />
+          <stop offset="100%" stopColor={BHEEM_COLORS.blue} />
+        </linearGradient>
+      </defs>
+      <rect x="4" y="4" width="40" height="40" rx="12" fill={`url(#${id}-bg)`} />
+      <path d="M12 12 L30 12 L36 18 L36 36 L12 36 Z" fill="white" />
+      <path d="M30 12 L30 18 L36 18" fill="white" stroke={BHEEM_COLORS.purple} strokeWidth="1" />
+      <rect x="16" y="22" width="16" height="2" rx="1" fill={BHEEM_COLORS.purple} opacity="0.6" />
+      <rect x="16" y="27" width="12" height="2" rx="1" fill={BHEEM_COLORS.purple} opacity="0.4" />
+    </svg>
+  );
+}
+
+// Modern Sites Icon - Globe/Website
+export function BheemSitesIcon({ size = 48, className = '' }: IconProps) {
+  const id = `sites-${Math.random().toString(36).substr(2, 9)}`;
+  return (
+    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" className={className}>
+      <defs>
+        <linearGradient id={`${id}-bg`} x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stopColor={BHEEM_COLORS.pink} />
+          <stop offset="50%" stopColor={BHEEM_COLORS.purple} />
+          <stop offset="100%" stopColor={BHEEM_COLORS.blue} />
+        </linearGradient>
+      </defs>
+      <rect x="4" y="4" width="40" height="40" rx="12" fill={`url(#${id}-bg)`} />
+      <circle cx="24" cy="24" r="12" stroke="white" strokeWidth="2.5" fill="none" />
+      <ellipse cx="24" cy="24" rx="5" ry="12" stroke="white" strokeWidth="2" fill="none" />
+      <line x1="12" y1="24" x2="36" y2="24" stroke="white" strokeWidth="2" />
+    </svg>
+  );
+}
+
 // Modern Dashboard Icon - 4 squares with gradient colors
 export function BheemDashboardIcon({ size = 48, className = '' }: IconProps) {
   return (

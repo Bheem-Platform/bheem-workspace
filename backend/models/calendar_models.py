@@ -73,12 +73,129 @@ class UserCalendarSettings(Base):
 
     # Timezone
     timezone = Column(String(100), default='UTC')
+    secondary_timezone = Column(String(100))  # Dual timezone view
+    show_secondary_timezone = Column(Boolean, default=False)
+
+    # World clock - favorite timezones to display
+    world_clock_timezones = Column(JSONB, default=[])  # ["America/New_York", "Europe/London"]
 
     # Working hours
     working_hours_start = Column(String(5), default='09:00')
     working_hours_end = Column(String(5), default='17:00')
     working_days = Column(JSONB, default=['MO', 'TU', 'WE', 'TH', 'FR'])
 
+    # Focus time preferences
+    focus_time_enabled = Column(Boolean, default=False)
+    focus_time_duration = Column(Integer, default=120)  # minutes
+    focus_time_days = Column(JSONB, default=['MO', 'TU', 'WE', 'TH', 'FR'])
+    focus_time_start = Column(String(5), default='09:00')
+    focus_time_end = Column(String(5), default='11:00')
+    focus_time_auto_decline = Column(Boolean, default=False)
+
+    # Time insights preferences
+    show_time_insights = Column(Boolean, default=True)
+    insights_goal_meeting_hours = Column(Integer, default=20)  # per week
+    insights_goal_focus_hours = Column(Integer, default=10)  # per week
+
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# =============================================
+# Focus Time Blocks
+# =============================================
+
+class FocusTimeBlock(Base):
+    """Scheduled focus time blocks for uninterrupted work"""
+    __tablename__ = "focus_time_blocks"
+    __table_args__ = (
+        Index('idx_focus_time_user', 'user_id'),
+        Index('idx_focus_time_start', 'start_time'),
+        Index('idx_focus_time_status', 'status'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+
+    # Time block details
+    title = Column(String(255), default='Focus Time')
+    start_time = Column(DateTime(timezone=True), nullable=False)
+    end_time = Column(DateTime(timezone=True), nullable=False)
+
+    # Status: scheduled, active, completed, cancelled
+    status = Column(String(20), default='scheduled')
+
+    # Settings
+    auto_decline_meetings = Column(Boolean, default=False)
+    show_as_busy = Column(Boolean, default=True)
+    calendar_event_id = Column(String(255))  # Linked calendar event
+
+    # Recurrence (optional)
+    is_recurring = Column(Boolean, default=False)
+    recurrence_rule = Column(String(500))  # iCal RRULE format
+
+    # Analytics
+    was_interrupted = Column(Boolean, default=False)
+    actual_focus_minutes = Column(Integer)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
+    completed_at = Column(DateTime(timezone=True))
+
+
+# =============================================
+# Time Insights / Analytics
+# =============================================
+
+class CalendarTimeInsight(Base):
+    """Weekly time insights and analytics"""
+    __tablename__ = "calendar_time_insights"
+    __table_args__ = (
+        Index('idx_time_insights_user', 'user_id'),
+        Index('idx_time_insights_week', 'week_start'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+
+    # Week period
+    week_start = Column(DateTime(timezone=True), nullable=False)  # Monday of the week
+    week_end = Column(DateTime(timezone=True), nullable=False)  # Sunday of the week
+
+    # Meeting metrics
+    total_meeting_hours = Column(Integer, default=0)  # minutes
+    meeting_count = Column(Integer, default=0)
+    avg_meeting_duration = Column(Integer, default=0)  # minutes
+    longest_meeting = Column(Integer, default=0)  # minutes
+
+    # Meeting breakdown by type
+    one_on_one_hours = Column(Integer, default=0)  # minutes
+    team_meeting_hours = Column(Integer, default=0)  # minutes
+    external_meeting_hours = Column(Integer, default=0)  # minutes
+    recurring_meeting_hours = Column(Integer, default=0)  # minutes
+
+    # Focus time metrics
+    total_focus_hours = Column(Integer, default=0)  # minutes
+    focus_blocks_count = Column(Integer, default=0)
+    focus_blocks_completed = Column(Integer, default=0)
+    focus_time_interrupted = Column(Integer, default=0)  # count
+
+    # Availability metrics
+    fragmented_time_hours = Column(Integer, default=0)  # minutes - time between meetings
+    largest_free_block = Column(Integer, default=0)  # minutes
+    meetings_outside_hours = Column(Integer, default=0)  # count
+
+    # Day distribution
+    busiest_day = Column(String(10))  # MO, TU, etc.
+    meeting_hours_by_day = Column(JSONB, default={})  # {"MO": 120, "TU": 90, ...}
+
+    # Trends
+    meeting_hours_change = Column(Integer, default=0)  # vs last week (minutes)
+    focus_hours_change = Column(Integer, default=0)  # vs last week (minutes)
+
+    # Timestamps
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
 

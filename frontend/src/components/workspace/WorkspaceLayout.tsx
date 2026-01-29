@@ -29,6 +29,8 @@ import {
   Table,
   Presentation,
   FormInput,
+  StickyNote,
+  Globe,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useSettingsStore, useShowAppNames, useCompactMode, useEnabledApps } from '@/stores/settingsStore';
@@ -40,6 +42,8 @@ import {
   BheemDriveIcon,
   BheemChatIcon,
   BheemDashboardIcon,
+  BheemNotesIcon,
+  BheemSitesIcon,
 } from '@/components/shared/AppIcons';
 
 // Brand colors
@@ -71,6 +75,8 @@ const navigationItems = [
   { name: 'Calendar', href: '/calendar', icon: Calendar, bheemIcon: BheemCalendarIcon, appId: 'calendar' },
   { name: 'Meet', href: '/meet', icon: Video, bheemIcon: BheemMeetIcon, appId: 'meet' },
   { name: 'Drive', href: '/drive', icon: HardDrive, bheemIcon: BheemDriveIcon, appId: 'drive' },
+  { name: 'Notes', href: '/notes', icon: StickyNote, bheemIcon: BheemNotesIcon, appId: 'notes' },
+  { name: 'Sites', href: '/sites', icon: Globe, bheemIcon: BheemSitesIcon, appId: 'sites' },
   { name: 'Chat', href: '/chat', icon: MessageCircle, bheemIcon: BheemChatIcon, appId: 'chat' },
   { name: 'Forms', href: '/oforms', icon: FormInput, appId: 'forms' },
 ];

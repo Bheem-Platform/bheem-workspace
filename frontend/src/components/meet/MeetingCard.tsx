@@ -11,7 +11,12 @@ import {
   ExternalLink,
   Trash2,
   Play,
+  Sparkles,
+  FileText,
+  ListTodo,
+  Loader2,
 } from 'lucide-react';
+import { summaryApi, MeetingSummary } from '@/lib/meetAiApi';
 import { MeetAvatar, MeetAvatarGroup } from './ui';
 import type { Meeting } from '@/types/meet';
 
@@ -51,10 +56,30 @@ function formatTime(date: string): string {
 export default function MeetingCard({ meeting, onJoin, onEnd, onCopyLink }: MeetingCardProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
+  const [summary, setSummary] = useState<MeetingSummary | null>(null);
+  const [loadingSummary, setLoadingSummary] = useState(false);
 
   const isLive = meeting.status === 'active';
   const isScheduled = meeting.status === 'scheduled';
   const isPast = meeting.status === 'ended';
+
+  const fetchSummary = async () => {
+    if (summary || loadingSummary) {
+      setShowSummary(!showSummary);
+      return;
+    }
+    setLoadingSummary(true);
+    try {
+      const data = await summaryApi.getMeetingSummary(meeting.id);
+      setSummary(data);
+      setShowSummary(true);
+    } catch (error) {
+      console.error('Failed to fetch meeting summary:', error);
+    } finally {
+      setLoadingSummary(false);
+    }
+  };
 
   const handleCopy = async () => {
     if (meeting.joinUrl) {
@@ -147,6 +172,59 @@ export default function MeetingCard({ meeting, onJoin, onEnd, onCopyLink }: Meet
         </div>
       </div>
 
+      {/* AI Summary Panel (for past meetings) */}
+      {isPast && showSummary && summary && (
+        <motion.div
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          exit={{ opacity: 0, height: 0 }}
+          className="mt-4 p-4 bg-gradient-to-r from-purple-50 to-indigo-50 rounded-xl border border-purple-100"
+        >
+          <div className="flex items-center gap-2 mb-3">
+            <Sparkles size={16} className="text-purple-600" />
+            <span className="text-sm font-semibold text-purple-900">AI Summary</span>
+            {summary.overall_sentiment && (
+              <span className={`px-2 py-0.5 text-xs rounded-full ${
+                summary.overall_sentiment === 'positive' ? 'bg-green-100 text-green-700' :
+                summary.overall_sentiment === 'negative' ? 'bg-red-100 text-red-700' :
+                'bg-gray-100 text-gray-700'
+              }`}>
+                {summary.overall_sentiment}
+              </span>
+            )}
+          </div>
+
+          {summary.summary && (
+            <p className="text-sm text-gray-700 mb-3">{summary.summary}</p>
+          )}
+
+          {summary.key_points && summary.key_points.length > 0 && (
+            <div className="mb-3">
+              <p className="text-xs font-medium text-purple-700 mb-1">Key Points:</p>
+              <ul className="text-sm text-gray-600 list-disc list-inside space-y-0.5">
+                {summary.key_points.slice(0, 3).map((point, idx) => (
+                  <li key={idx}>{point}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {summary.decisions && summary.decisions.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-purple-700 mb-1">Decisions:</p>
+              <ul className="text-sm text-gray-600 space-y-0.5">
+                {summary.decisions.slice(0, 2).map((decision, idx) => (
+                  <li key={idx} className="flex items-center gap-2">
+                    <Check size={12} className="text-green-500" />
+                    {decision}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </motion.div>
+      )}
+
       {/* Actions */}
       <div className={`
         flex items-center gap-2 mt-4 pt-4 border-t border-gray-200
@@ -169,6 +247,32 @@ export default function MeetingCard({ meeting, onJoin, onEnd, onCopyLink }: Meet
           >
             <Play size={16} />
             <span>{isLive ? 'Join Now' : 'Start'}</span>
+          </motion.button>
+        )}
+
+        {/* AI Summary button for past meetings */}
+        {isPast && (
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={fetchSummary}
+            disabled={loadingSummary}
+            className={`
+              flex-1 flex items-center justify-center gap-2
+              py-2.5 rounded-xl font-medium text-sm
+              transition-colors duration-150
+              ${showSummary
+                ? 'bg-purple-100 text-purple-700'
+                : 'bg-gradient-to-r from-purple-500 to-indigo-500 text-white hover:from-purple-600 hover:to-indigo-600'
+              }
+            `}
+          >
+            {loadingSummary ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : (
+              <Sparkles size={16} />
+            )}
+            <span>{showSummary ? 'Hide Summary' : 'AI Summary'}</span>
           </motion.button>
         )}
 

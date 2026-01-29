@@ -587,3 +587,127 @@ class MailReadReceipt(Base):
 
     def __repr__(self):
         return f"<MailReadReceipt(message_id={self.message_id}, is_read={self.is_read})>"
+
+
+# ═══════════════════════════════════════════════════════════════════
+# Confidential Mode & Email Nudges
+# ═══════════════════════════════════════════════════════════════════
+
+class ConfidentialEmail(Base):
+    """Confidential/expiring email settings"""
+    __tablename__ = "confidential_emails"
+    __table_args__ = (
+        Index('idx_confidential_emails_user', 'user_id'),
+        Index('idx_confidential_emails_message', 'message_id'),
+        Index('idx_confidential_emails_expires', 'expires_at'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+    message_id = Column(String(500), nullable=False)  # Sent email Message-ID
+
+    # Confidential settings
+    expires_at = Column(DateTime)  # Email expiration time
+    passcode = Column(String(100))  # Optional SMS/email passcode
+    passcode_type = Column(String(20))  # 'sms', 'email', 'none'
+
+    # Restrictions
+    no_forward = Column(Boolean, default=True)
+    no_copy = Column(Boolean, default=True)
+    no_print = Column(Boolean, default=True)
+    no_download = Column(Boolean, default=True)
+
+    # Status
+    is_revoked = Column(Boolean, default=False)
+    revoked_at = Column(DateTime)
+
+    # Recipient access tracking
+    recipient_accesses = Column(JSONB, default=[])  # [{email, accessed_at, ip}]
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<ConfidentialEmail(message_id={self.message_id}, expires_at={self.expires_at})>"
+
+
+class EmailNudge(Base):
+    """Follow-up reminders for sent emails without response"""
+    __tablename__ = "email_nudges"
+    __table_args__ = (
+        Index('idx_email_nudges_user', 'user_id'),
+        Index('idx_email_nudges_message', 'message_id'),
+        Index('idx_email_nudges_remind', 'remind_at'),
+        Index('idx_email_nudges_status', 'status'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False)
+    message_id = Column(String(500), nullable=False)  # Original sent email
+
+    # Nudge type: 'sent_no_reply', 'received_no_reply', 'custom'
+    nudge_type = Column(String(30), nullable=False, default='sent_no_reply')
+
+    # Reminder settings
+    remind_at = Column(DateTime, nullable=False)  # When to show nudge
+    snooze_until = Column(DateTime)  # If snoozed, when to remind again
+
+    # Status: 'pending', 'shown', 'dismissed', 'replied', 'snoozed'
+    status = Column(String(20), default='pending')
+
+    # Email context
+    subject = Column(Text)
+    recipient_email = Column(String(320))
+    sent_at = Column(DateTime)
+
+    # Custom note
+    note = Column(Text)
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    shown_at = Column(DateTime)
+    dismissed_at = Column(DateTime)
+
+    def __repr__(self):
+        return f"<EmailNudge(message_id={self.message_id}, status={self.status})>"
+
+
+class EmailNudgeSettings(Base):
+    """User settings for email nudges"""
+    __tablename__ = "email_nudge_settings"
+    __table_args__ = (
+        Index('idx_email_nudge_settings_user', 'user_id'),
+        {"schema": "workspace"}
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), nullable=False, unique=True)
+
+    # Nudge preferences
+    nudges_enabled = Column(Boolean, default=True)
+    sent_no_reply_days = Column(Integer, default=3)  # Days before nudge for sent emails
+    received_no_reply_days = Column(Integer, default=2)  # Days before nudge for received
+
+    # What to nudge about
+    nudge_sent_emails = Column(Boolean, default=True)
+    nudge_received_emails = Column(Boolean, default=True)
+    nudge_important_only = Column(Boolean, default=False)
+
+    # Quiet hours (no nudges during these times)
+    quiet_hours_start = Column(String(5))  # e.g., "22:00"
+    quiet_hours_end = Column(String(5))  # e.g., "08:00"
+    quiet_weekends = Column(Boolean, default=True)
+
+    # Excluded senders/domains
+    excluded_senders = Column(ARRAY(String), default=[])
+    excluded_domains = Column(ARRAY(String), default=[])
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<EmailNudgeSettings(user_id={self.user_id}, enabled={self.nudges_enabled})>"
