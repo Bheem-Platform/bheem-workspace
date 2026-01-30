@@ -77,16 +77,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
     try {
       console.log('[Auth] Refreshing access token...');
-      const response = await fetch(`${PASSPORT_URL}/api/v1/auth/refresh`, {
+      // Bheem Passport expects refresh_token as query parameter
+      const response = await fetch(`${PASSPORT_URL}/api/v1/auth/refresh?refresh_token=${encodeURIComponent(refreshToken)}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ refresh_token: refreshToken }),
       });
 
       if (!response.ok) {
-        console.error('[Auth] Token refresh failed:', response.status);
+        const errorText = await response.text();
+        console.error('[Auth] Token refresh failed:', response.status, errorText);
         return false;
       }
 
