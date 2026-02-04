@@ -128,6 +128,16 @@ from .oforms_models import (
     OFormEditSession
 )
 
+from .chat_models import (
+    ExternalContact,
+    Conversation,
+    ConversationParticipant,
+    ChatInvitation,
+    CallLog,
+    DirectMessage,
+    MessageAttachment
+)
+
 __all__ = [
     # Admin models
     "Tenant",
@@ -221,5 +231,13 @@ __all__ = [
     "OFormVersion",
     "OFormResponse",
     "OFormShare",
-    "OFormEditSession"
+    "OFormEditSession",
+    # Chat models (Direct Messages & Calls)
+    "ExternalContact",
+    "Conversation",
+    "ConversationParticipant",
+    "ChatInvitation",
+    "CallLog",
+    "DirectMessage",
+    "MessageAttachment"
 ]

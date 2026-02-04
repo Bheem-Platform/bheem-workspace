@@ -57,12 +57,19 @@ class UserSettings(Base):
     two_factor_enabled = Column(Boolean, default=False)
     session_timeout = Column(Integer, default=30)  # minutes, 0 = never
 
+    # Chat Privacy Settings
+    read_receipts_enabled = Column(Boolean, default=True)  # Show when user reads messages
+    show_last_seen = Column(Boolean, default=True)  # Show last seen status to others
+
     # Language & Region
     language = Column(String(10), default='en')
     timezone = Column(String(50), default='UTC')
     date_format = Column(String(20), default='MM/DD/YYYY')
     time_format = Column(String(5), default='12h')  # 12h, 24h
     week_start = Column(String(10), default='sunday')  # sunday, monday
+
+    # Profile
+    avatar_url = Column(String(500), nullable=True)
 
     # Timestamps
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -103,6 +110,10 @@ class UserSettings(Base):
                 "twoFactorEnabled": self.two_factor_enabled,
                 "sessionTimeout": self.session_timeout,
                 "passwordLastChanged": self.updated_at.isoformat() if self.updated_at else None
+            },
+            "chat": {
+                "readReceiptsEnabled": self.read_receipts_enabled if self.read_receipts_enabled is not None else True,
+                "showLastSeen": self.show_last_seen if self.show_last_seen is not None else True
             },
             "language": {
                 "language": self.language,

@@ -2,7 +2,7 @@
  * Workspace Settings Page - Customize your Bheem Workspace
  * Brand Colors: #FFCCF2 (Pink), #977DFF (Purple), #0033FF (Blue)
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -46,11 +46,14 @@ import {
   Presentation,
   FormInput,
   StickyNote,
+  Camera,
+  Loader2,
 } from 'lucide-react';
 import WorkspaceLayout from '@/components/workspace/WorkspaceLayout';
 import { useAuthStore, useRequireAuth } from '@/stores/authStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { api } from '@/lib/api';
+import axios from 'axios';
 
 // Brand colors
 const BRAND = {
@@ -65,6 +68,7 @@ const settingsSections = [
   { id: 'appearance', name: 'Appearance', icon: Palette, description: 'Theme, colors & branding' },
   { id: 'apps', name: 'Apps & Features', icon: LayoutGrid, description: 'Enable or disable workspace apps' },
   { id: 'notifications', name: 'Notifications', icon: Bell, description: 'Email & push notification settings' },
+  { id: 'chat', name: 'Chat Privacy', icon: MessageCircle, description: 'Read receipts & last seen settings' },
   { id: 'security', name: 'Security', icon: Shield, description: 'Password, 2FA & sessions' },
   { id: 'language', name: 'Language & Region', icon: Globe, description: 'Language, timezone & date format' },
   { id: 'account', name: 'Account', icon: User, description: 'Profile, data export & deletion' },
@@ -173,6 +177,10 @@ interface WorkspaceSettings {
     timeFormat: '12h' | '24h';
     weekStart: 'sunday' | 'monday';
   };
+  chat: {
+    readReceiptsEnabled: boolean;
+    showLastSeen: boolean;
+  };
 }
 
 // Toggle Switch Component
@@ -258,6 +266,72 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [hasChanges, setHasChanges] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [profilePhoto, setProfilePhoto] = useState<string | null>(null);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  // Load profile photo on mount
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        const response = await api.get('/settings/profile');
+        if (response.data?.avatar_url) {
+          setProfilePhoto(response.data.avatar_url);
+        }
+      } catch (error) {
+        console.error('Failed to load profile:', error);
+      }
+    };
+    loadProfile();
+  }, []);
+
+  // Handle profile photo upload
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      alert('Please select an image file');
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Image size should be less than 5MB');
+      return;
+    }
+
+    setUploadingPhoto(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      // Use axios directly to avoid Content-Type header override from api instance
+      const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
+      const response = await axios.post(
+        '/api/v1/settings/profile-photo',
+        formData,
+        {
+          headers: {
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          withCredentials: true,
+        }
+      );
+      if (response.data?.avatar_url) {
+        setProfilePhoto(response.data.avatar_url);
+      }
+    } catch (error) {
+      console.error('Failed to upload profile photo:', error);
+      alert('Failed to upload profile photo');
+    } finally {
+      setUploadingPhoto(false);
+      if (photoInputRef.current) {
+        photoInputRef.current.value = '';
+      }
+    }
+  };
 
   // Settings state
   const [settings, setSettings] = useState<WorkspaceSettings>({
@@ -310,6 +384,10 @@ export default function SettingsPage() {
       timeFormat: '12h',
       weekStart: 'sunday',
     },
+    chat: {
+      readReceiptsEnabled: true,
+      showLastSeen: true,
+    },
   });
 
   // Load settings on mount
@@ -326,6 +404,7 @@ export default function SettingsPage() {
             notifications: { ...settings.notifications, ...response.data.notifications },
             security: { ...settings.security, ...response.data.security },
             language: { ...settings.language, ...response.data.language },
+            chat: { ...settings.chat, ...response.data.chat },
           };
           setSettings(loadedSettings);
           // Also sync to global store so other components see the settings
@@ -812,6 +891,69 @@ export default function SettingsPage() {
           </motion.div>
         );
 
+      case 'chat':
+        return (
+          <motion.div
+            key="chat"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+          >
+            <SettingsCard title="Chat Privacy" description="Control your privacy settings for Bheem Chat">
+              <SettingsRow
+                label="Read receipts"
+                description="Let others know when you've read their messages. If disabled, you also won't see read receipts from others."
+              >
+                <ToggleSwitch
+                  enabled={settings.chat.readReceiptsEnabled}
+                  onChange={(v) => updateSetting('chat', 'readReceiptsEnabled', v)}
+                />
+              </SettingsRow>
+              <SettingsRow
+                label="Last seen"
+                description="Show others when you were last active. If disabled, you also won't see others' last seen status."
+              >
+                <ToggleSwitch
+                  enabled={settings.chat.showLastSeen}
+                  onChange={(v) => updateSetting('chat', 'showLastSeen', v)}
+                />
+              </SettingsRow>
+            </SettingsCard>
+
+            <SettingsCard title="Privacy Notes">
+              <div className="space-y-3 text-sm text-gray-600">
+                <div className="flex items-start gap-3">
+                  <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Eye size={14} className="text-blue-600" />
+                  </div>
+                  <p>
+                    <strong>Read receipts:</strong> When enabled, others see blue double ticks when you read their messages.
+                    You'll also see when they read yours.
+                  </p>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-6 h-6 rounded-full bg-purple-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Clock size={14} className="text-purple-600" />
+                  </div>
+                  <p>
+                    <strong>Last seen:</strong> When enabled, others can see when you were last active (e.g., "5 mins ago").
+                    You'll also see when they were last active.
+                  </p>
+                </div>
+                <div className="flex items-start gap-3">
+                  <div className="w-6 h-6 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <EyeOff size={14} className="text-gray-600" />
+                  </div>
+                  <p>
+                    <strong>Privacy is reciprocal:</strong> If you disable a feature, you won't be able to see that information
+                    from others either.
+                  </p>
+                </div>
+              </div>
+            </SettingsCard>
+          </motion.div>
+        );
+
       case 'language':
         return (
           <motion.div
@@ -908,15 +1050,51 @@ export default function SettingsPage() {
             exit={{ opacity: 0, y: -10 }}
           >
             <SettingsCard title="Profile Information">
+              {/* Hidden file input for photo upload */}
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handlePhotoUpload}
+              />
+
               <div className="flex items-center gap-6 mb-6">
-                <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#FFCCF2] via-[#977DFF] to-[#0033FF] flex items-center justify-center text-white text-2xl font-bold">
-                  {user?.username?.charAt(0).toUpperCase() || 'U'}
+                {/* Profile Photo with Upload */}
+                <div
+                  onClick={() => photoInputRef.current?.click()}
+                  className="relative w-20 h-20 rounded-full cursor-pointer group"
+                >
+                  {profilePhoto ? (
+                    <img
+                      src={profilePhoto}
+                      alt={user?.username || 'Profile'}
+                      className="w-20 h-20 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#FFCCF2] via-[#977DFF] to-[#0033FF] flex items-center justify-center text-white text-2xl font-bold">
+                      {user?.username?.charAt(0).toUpperCase() || 'U'}
+                    </div>
+                  )}
+                  {/* Camera overlay */}
+                  <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                    {uploadingPhoto ? (
+                      <Loader2 size={24} className="text-white animate-spin" />
+                    ) : (
+                      <Camera size={24} className="text-white" />
+                    )}
+                  </div>
                 </div>
+
                 <div>
                   <p className="font-semibold text-gray-900 text-lg">{user?.username || 'User'}</p>
                   <p className="text-gray-500">{user?.email || ''}</p>
-                  <button className="mt-2 text-sm text-[#977DFF] hover:text-[#0033FF] font-medium">
-                    Edit Profile
+                  <button
+                    onClick={() => photoInputRef.current?.click()}
+                    disabled={uploadingPhoto}
+                    className="mt-2 text-sm text-[#977DFF] hover:text-[#0033FF] font-medium disabled:opacity-50"
+                  >
+                    {uploadingPhoto ? 'Uploading...' : 'Change Photo'}
                   </button>
                 </div>
               </div>

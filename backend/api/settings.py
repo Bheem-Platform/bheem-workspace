@@ -2,7 +2,7 @@
 Bheem Workspace - Settings API
 Endpoints for managing user and workspace settings
 """
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, File, UploadFile
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -15,6 +15,7 @@ from core.database import get_db
 from core.security import get_current_user, require_tenant_member
 from models.settings_models import UserSettings
 from models.admin_models import Tenant
+from services.chat_file_service import ChatFileService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Settings"])
@@ -74,6 +75,11 @@ class AppsSettings(BaseModel):
     forms: Optional[bool] = True
 
 
+class ChatSettings(BaseModel):
+    readReceiptsEnabled: Optional[bool] = True  # Show when user reads messages
+    showLastSeen: Optional[bool] = True  # Show last seen status to others
+
+
 class FullSettingsUpdate(BaseModel):
     general: Optional[GeneralSettings] = None
     appearance: Optional[AppearanceSettings] = None
@@ -81,6 +87,7 @@ class FullSettingsUpdate(BaseModel):
     notifications: Optional[NotificationSettings] = None
     security: Optional[SecuritySettings] = None
     language: Optional[LanguageSettings] = None
+    chat: Optional[ChatSettings] = None
 
 
 class SettingsResponse(BaseModel):
@@ -90,6 +97,7 @@ class SettingsResponse(BaseModel):
     notifications: Dict[str, Any]
     security: Dict[str, Any]
     language: Dict[str, Any]
+    chat: Dict[str, Any]
 
 
 # ============== Helper Functions ==============
@@ -242,6 +250,14 @@ async def update_settings(
         if lang.weekStart is not None:
             settings.week_start = lang.weekStart
 
+    # Update chat privacy settings
+    if settings_update.chat:
+        chat = settings_update.chat
+        if chat.readReceiptsEnabled is not None:
+            settings.read_receipts_enabled = chat.readReceiptsEnabled
+        if chat.showLastSeen is not None:
+            settings.show_last_seen = chat.showLastSeen
+
     # Update general settings (workspace settings - admin only)
     if settings_update.general and tenant_id:
         if tenant_role in ["admin", "owner"]:
@@ -373,6 +389,37 @@ async def update_apps_settings(
     )
 
 
+@router.get("/chat")
+async def get_chat_settings(
+    current_user: dict = Depends(require_tenant_member()),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """Get chat privacy settings"""
+    user_id = str(current_user.get("user_id") or current_user.get("id"))
+    tenant_id = current_user.get("tenant_id")
+
+    settings = await get_or_create_user_settings(db, user_id, str(tenant_id) if tenant_id else None)
+
+    return {
+        "readReceiptsEnabled": settings.read_receipts_enabled if settings.read_receipts_enabled is not None else True,
+        "showLastSeen": settings.show_last_seen if settings.show_last_seen is not None else True
+    }
+
+
+@router.put("/chat")
+async def update_chat_settings(
+    chat: ChatSettings,
+    current_user: dict = Depends(require_tenant_member()),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """Update chat privacy settings"""
+    return await update_settings(
+        FullSettingsUpdate(chat=chat),
+        current_user,
+        db
+    )
+
+
 @router.post("/reset")
 async def reset_settings(
     current_user: dict = Depends(require_tenant_member()),
@@ -402,3 +449,91 @@ async def reset_settings(
     logger.info(f"Settings reset to defaults for user {user_id}")
 
     return settings.to_dict()
+
+
+@router.post("/profile-photo")
+async def upload_profile_photo(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(require_tenant_member()),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """Upload a profile photo for the current user"""
+    user_id = str(current_user.get("user_id") or current_user.get("id"))
+    tenant_id = current_user.get("tenant_id")
+
+    # Validate file type
+    if not file.content_type or not file.content_type.startswith('image/'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only image files are allowed"
+        )
+
+    # Validate file size (max 5MB)
+    file_content = await file.read()
+    if len(file_content) > 5 * 1024 * 1024:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File size must be less than 5MB"
+        )
+
+    try:
+        # Upload to S3/MinIO using chat file service
+        file_service = ChatFileService()
+        result = await file_service.upload_chat_attachment(
+            file_content=file_content,
+            file_name=file.filename or "profile.jpg",
+            content_type=file.content_type,
+            conversation_id="profile-photos",  # Use special folder
+            user_id=user_id,
+        )
+
+        avatar_url = result["file_url"]
+
+        # Update user settings with avatar URL
+        settings = await get_or_create_user_settings(db, user_id, str(tenant_id) if tenant_id else None)
+        settings.avatar_url = avatar_url
+        settings.updated_at = datetime.utcnow()
+
+        # Also update all chat participant records for this user so others see the new avatar
+        import uuid
+        from models.chat_models import ConversationParticipant
+        await db.execute(
+            update(ConversationParticipant)
+            .where(ConversationParticipant.user_id == uuid.UUID(user_id))
+            .values(user_avatar=avatar_url)
+        )
+
+        await db.commit()
+
+        logger.info(f"Profile photo updated for user {user_id}")
+
+        return {
+            "success": True,
+            "avatar_url": avatar_url,
+        }
+    except Exception as e:
+        logger.error(f"Failed to upload profile photo: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload profile photo: {str(e)}"
+        )
+
+
+@router.get("/profile")
+async def get_profile(
+    current_user: dict = Depends(require_tenant_member()),
+    db: AsyncSession = Depends(get_db)
+) -> Dict[str, Any]:
+    """Get current user's profile information including avatar"""
+    user_id = str(current_user.get("user_id") or current_user.get("id"))
+    tenant_id = current_user.get("tenant_id")
+
+    settings = await get_or_create_user_settings(db, user_id, str(tenant_id) if tenant_id else None)
+
+    return {
+        "user_id": user_id,
+        "username": current_user.get("username") or current_user.get("name"),
+        "email": current_user.get("email"),
+        "avatar_url": settings.avatar_url,
+        "tenant_role": current_user.get("tenant_role"),
+    }

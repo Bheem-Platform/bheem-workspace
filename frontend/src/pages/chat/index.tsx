@@ -1,325 +1,510 @@
 /**
- * Bheem Workspace - Team Chat (Mattermost Integration)
- * Embedded team chat interface
+ * Bheem Workspace - Native Chat System
+ * Real-time messaging with Team (internal) and Connect (external) tabs
  */
-import { useEffect, useState, useRef } from 'react';
+
+'use client';
+
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter } from 'next/router';
-import {
-  MessageCircle,
-  Users,
-  Hash,
-  Plus,
-  Search,
-  Settings,
-  Bell,
-  BellOff,
-  ExternalLink,
-  AlertCircle,
-  RefreshCw,
-  Loader2,
-} from 'lucide-react';
+import { MessageCircle, Loader2 } from 'lucide-react';
 import { useAuthStore, useRequireAuth } from '@/stores/authStore';
-import { api } from '@/lib/api';
+import {
+  useChatStore,
+  useTypingIndicator,
+  type Conversation,
+  type CallLog,
+} from '@/stores/chatStore';
 import WorkspaceLayout from '@/components/workspace/WorkspaceLayout';
-
-interface ChatConfig {
-  enabled: boolean;
-  url: string;
-  websocket_url: string;
-}
-
-interface Team {
-  id: string;
-  name: string;
-  display_name: string;
-}
-
-interface Channel {
-  id: string;
-  name: string;
-  display_name: string;
-  type: string;
-  header: string;
-  purpose: string;
-}
+import {
+  ConversationList,
+  MessageThread,
+  ChatHeader,
+  NewChatModal,
+  ChatLiveKitProvider,
+  CallModal,
+  IncomingCallModal,
+  ConversationInfoPanel,
+  ReadReceiptsModal,
+} from '@/components/chat';
+import { api } from '@/lib/api';
 
 export default function ChatPage() {
   const router = useRouter();
   const { user } = useAuthStore();
-  const { isAuthenticated, isLoading } = useRequireAuth();
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const { isAuthenticated, isLoading: authLoading } = useRequireAuth();
 
-  const [config, setConfig] = useState<ChatConfig | null>(null);
-  const [chatToken, setChatToken] = useState<string>('');
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string>('');
-  const [iframeLoaded, setIframeLoaded] = useState(false);
+  const {
+    activeConversation,
+    messages,
+    isLoading,
+    isSending,
+    error,
+    activeTab,
+    onlineUsers,
+    infoPanelOpen,
+    fetchConversations,
+    fetchMessages,
+    fetchUnreadCounts,
+    fetchChatToken,
+    sendMessage,
+    editMessage,
+    deleteMessage,
+    addReaction,
+    archiveConversation,
+    leaveConversation,
+    markAsRead,
+    setActiveConversation,
+    setInfoPanelOpen,
+    chatToken,
+    wsUrl,
+  } = useChatStore();
 
-  // Sidebar state
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [channels, setChannels] = useState<Channel[]>([]);
-  const [selectedTeam, setSelectedTeam] = useState<string>('');
-  const [showSidebar, setShowSidebar] = useState(true);
+  const [showNewChatModal, setShowNewChatModal] = useState(false);
+  const [liveKitReady, setLiveKitReady] = useState(false);
 
+  // Read receipts modal state
+  const [readReceiptsMessageId, setReadReceiptsMessageId] = useState<string | null>(null);
+
+  // Call state
+  const [isCallActive, setIsCallActive] = useState(false);
+  const [currentCall, setCurrentCall] = useState<CallLog | null>(null);
+  const [callToken, setCallToken] = useState<string | null>(null);
+  const [callWsUrl, setCallWsUrl] = useState<string | null>(null);
+  const [callType, setCallType] = useState<'audio' | 'video'>('audio');
+  const [isInitiatingCall, setIsInitiatingCall] = useState(false);
+
+  // Incoming call state (from store)
+  const { activeCall, incomingCall, initiateCall, answerCall, endCall, declineCall, setIncomingCall } = useChatStore();
+
+  // Get typing indicator text for active conversation
+  const typingText = useTypingIndicator(activeConversation?.id || '');
+
+  // Current user ID
+  const currentUserId = user?.id || user?.user_id || '';
+
+  // Initialize chat on mount
   useEffect(() => {
-    if (!isAuthenticated || isLoading) return;
-    fetchChatConfig();
-  }, [isAuthenticated, isLoading]);
+    if (!isAuthenticated || authLoading || !currentUserId) return;
 
-  const fetchChatConfig = async () => {
+    // Fetch conversations for the default tab (all)
+    fetchConversations();
+    fetchUnreadCounts();
+  }, [isAuthenticated, authLoading, currentUserId, fetchConversations, fetchUnreadCounts]);
+
+  // Poll for unread counts only (not full conversation refresh to avoid UI flicker)
+  // This ensures unread counts update even when not connected to a specific LiveKit room
+  useEffect(() => {
+    if (!isAuthenticated || authLoading || !currentUserId) return;
+
+    // Poll every 10 seconds for unread counts only (lightweight)
+    const pollInterval = setInterval(() => {
+      fetchUnreadCounts();
+    }, 10000);
+
+    return () => clearInterval(pollInterval);
+  }, [isAuthenticated, authLoading, currentUserId, fetchUnreadCounts]);
+
+  // Fetch LiveKit token when conversation changes
+  useEffect(() => {
+    if (activeConversation && currentUserId) {
+      fetchChatToken(activeConversation.id).then(() => {
+        setLiveKitReady(true);
+      });
+    } else {
+      setLiveKitReady(false);
+    }
+  }, [activeConversation?.id, currentUserId, fetchChatToken]);
+
+  // Check if other user in direct chat is online
+  const isOtherUserOnline = useCallback(
+    (conversation: Conversation | null) => {
+      if (!conversation || conversation.type !== 'direct') return false;
+      const other = conversation.participants.find((p) => p.user_id !== currentUserId);
+      return other?.user_id ? onlineUsers.has(other.user_id) : false;
+    },
+    [currentUserId, onlineUsers]
+  );
+
+  // Handle sending message
+  const handleSendMessage = useCallback(
+    async (content: string, files?: File[], replyToId?: string) => {
+      if (!activeConversation) return;
+      await sendMessage(activeConversation.id, content, files, replyToId);
+    },
+    [activeConversation, sendMessage]
+  );
+
+  // Handle edit message
+  const handleEditMessage = useCallback(
+    async (messageId: string, content: string) => {
+      if (!activeConversation) return;
+      await editMessage(activeConversation.id, messageId, content);
+    },
+    [activeConversation, editMessage]
+  );
+
+  // Handle delete message
+  const handleDeleteMessage = useCallback(
+    async (messageId: string) => {
+      if (!activeConversation) return;
+      await deleteMessage(activeConversation.id, messageId);
+    },
+    [activeConversation, deleteMessage]
+  );
+
+  // Handle reaction
+  const handleReaction = useCallback(
+    async (messageId: string, emoji: string) => {
+      if (!activeConversation) return;
+      await addReaction(activeConversation.id, messageId, emoji);
+    },
+    [activeConversation, addReaction]
+  );
+
+  // Handle typing indicator - broadcast via LiveKit
+  const { broadcastTypingFn } = useChatStore();
+  const handleTyping = useCallback((isTyping: boolean) => {
+    if (broadcastTypingFn) {
+      broadcastTypingFn(isTyping);
+    }
+  }, [broadcastTypingFn]);
+
+  // Handle load more messages
+  const handleLoadMore = useCallback(() => {
+    if (!activeConversation) return;
+    const currentMessages = messages[activeConversation.id] || [];
+    if (currentMessages.length > 0) {
+      fetchMessages(activeConversation.id, currentMessages[0].id);
+    }
+  }, [activeConversation, messages, fetchMessages]);
+
+  // Handle audio/video calls
+  const handleAudioCall = useCallback(async () => {
+    if (!activeConversation || isInitiatingCall) return;
+
+    setIsInitiatingCall(true);
+    setCallType('audio');
+
     try {
-      const res = await api.get('/team-chat/config');
-      setConfig(res.data);
+      // Initiate call via store
+      const result = await initiateCall(activeConversation.id, 'audio');
 
-      if (res.data.enabled) {
-        await fetchChatToken();
-        await fetchTeams();
+      if (result) {
+        setCurrentCall(result.call);
+        setCallToken(result.token);
+        setCallWsUrl(result.wsUrl);
+        setIsCallActive(true);
       }
-    } catch (err: any) {
-      console.error('Failed to fetch chat config:', err);
-      setError('Failed to load chat configuration');
+    } catch (error) {
+      console.error('Failed to initiate audio call:', error);
     } finally {
-      setLoading(false);
+      setIsInitiatingCall(false);
     }
-  };
+  }, [activeConversation, isInitiatingCall, initiateCall]);
 
-  const fetchChatToken = async () => {
-    try {
-      const res = await api.post('/team-chat/login-token');
-      setChatToken(res.data.token);
-    } catch (err) {
-      console.error('Failed to get chat token:', err);
-    }
-  };
+  const handleVideoCall = useCallback(async () => {
+    if (!activeConversation || isInitiatingCall) return;
 
-  const fetchTeams = async () => {
+    setIsInitiatingCall(true);
+    setCallType('video');
+
     try {
-      const res = await api.get('/team-chat/teams');
-      setTeams(res.data.teams || []);
-      if (res.data.teams?.length > 0) {
-        setSelectedTeam(res.data.teams[0].id);
-        fetchChannels(res.data.teams[0].id);
+      // Initiate call via store
+      const result = await initiateCall(activeConversation.id, 'video');
+
+      if (result) {
+        setCurrentCall(result.call);
+        setCallToken(result.token);
+        setCallWsUrl(result.wsUrl);
+        setIsCallActive(true);
       }
-    } catch (err) {
-      console.error('Failed to fetch teams:', err);
+    } catch (error) {
+      console.error('Failed to initiate video call:', error);
+    } finally {
+      setIsInitiatingCall(false);
     }
-  };
+  }, [activeConversation, isInitiatingCall, initiateCall]);
 
-  const fetchChannels = async (teamId: string) => {
+  // Handle answering incoming call
+  const handleAnswerCall = useCallback(async () => {
+    if (!incomingCall) return;
+
     try {
-      const res = await api.get(`/team-chat/teams/${teamId}/channels`);
-      setChannels(res.data.channels || []);
-    } catch (err) {
-      console.error('Failed to fetch channels:', err);
+      const result = await answerCall(incomingCall.id);
+
+      if (result) {
+        setCurrentCall(result.call);
+        setCallToken(result.token);
+        setCallWsUrl(result.wsUrl);
+        setCallType(result.call.call_type as 'audio' | 'video');
+        setIsCallActive(true);
+      }
+    } catch (error) {
+      console.error('Failed to answer call:', error);
     }
-  };
+  }, [incomingCall, answerCall]);
 
-  const handleTeamChange = (teamId: string) => {
-    setSelectedTeam(teamId);
-    fetchChannels(teamId);
-  };
+  // Handle declining incoming call
+  const handleDeclineCall = useCallback(async () => {
+    if (!incomingCall) return;
 
-  const openInNewTab = () => {
-    if (config?.url) {
-      window.open(config.url, '_blank');
+    try {
+      await declineCall(incomingCall.id);
+    } catch (error) {
+      console.error('Failed to decline call:', error);
     }
-  };
+  }, [incomingCall, declineCall]);
 
-  if (isLoading || loading) {
+  // Handle ending active call
+  const handleEndCall = useCallback(async () => {
+    if (!currentCall) return;
+
+    try {
+      await endCall(currentCall.id);
+    } catch (error) {
+      console.error('Failed to end call:', error);
+    } finally {
+      setIsCallActive(false);
+      setCurrentCall(null);
+      setCallToken(null);
+      setCallWsUrl(null);
+    }
+  }, [currentCall, endCall]);
+
+  // Close call modal
+  const handleCloseCallModal = useCallback(() => {
+    if (currentCall) {
+      handleEndCall();
+    } else {
+      setIsCallActive(false);
+    }
+  }, [currentCall, handleEndCall]);
+
+  // Close incoming call modal
+  const handleCloseIncomingCall = useCallback(() => {
+    setIncomingCall(null);
+  }, [setIncomingCall]);
+
+  // Get other participant name for call display
+  const getOtherParticipantName = useCallback(() => {
+    if (!activeConversation) return 'Unknown';
+    if (activeConversation.type === 'group') return activeConversation.name || 'Group Call';
+    const other = activeConversation.participants.find((p) => p.user_id !== currentUserId);
+    return other?.user_name || 'Unknown';
+  }, [activeConversation, currentUserId]);
+
+  // Get caller name for incoming call
+  const getCallerName = useCallback(() => {
+    return incomingCall?.caller_name || 'Unknown';
+  }, [incomingCall]);
+
+  // Handle archive
+  const handleArchive = useCallback(async () => {
+    if (!activeConversation) return;
+    await archiveConversation(activeConversation.id);
+  }, [activeConversation, archiveConversation]);
+
+  // Handle leave group
+  const handleLeave = useCallback(async () => {
+    if (!activeConversation) return;
+    await leaveConversation(activeConversation.id);
+  }, [activeConversation, leaveConversation]);
+
+  // Handle view info panel
+  const handleViewInfo = useCallback(() => {
+    setInfoPanelOpen(true);
+  }, [setInfoPanelOpen]);
+
+  // Handle show read receipts modal
+  const handleShowReadReceipts = useCallback((messageId: string) => {
+    setReadReceiptsMessageId(messageId);
+  }, []);
+
+  // Handle close info panel
+  const handleCloseInfoPanel = useCallback(() => {
+    setInfoPanelOpen(false);
+  }, [setInfoPanelOpen]);
+
+  // Loading state
+  if (authLoading) {
     return (
       <WorkspaceLayout title="Chat">
         <div className="flex items-center justify-center h-[calc(100vh-10rem)]">
           <div className="text-center">
-            <Loader2 size={40} className="animate-spin text-blue-600 mx-auto mb-4" />
-            <p className="text-gray-600">Loading Team Chat...</p>
+            <Loader2 size={40} className="animate-spin text-[#977DFF] mx-auto mb-4" />
+            <p className="text-gray-600">Loading Chat...</p>
           </div>
         </div>
       </WorkspaceLayout>
     );
   }
 
-  if (!config?.enabled) {
-    return (
-      <WorkspaceLayout title="Chat">
-        <div className="flex items-center justify-center h-[calc(100vh-10rem)]">
-          <div className="bg-white rounded-xl shadow-lg p-8 max-w-md text-center">
-            <div className="w-16 h-16 bg-gray-100 rounded-xl flex items-center justify-center mx-auto mb-4">
-              <MessageCircle size={32} className="text-gray-400" />
+  // Get messages for active conversation
+  const conversationMessages = activeConversation
+    ? messages[activeConversation.id] || []
+    : [];
+
+  // Render content with or without LiveKit provider
+  const renderChatContent = () => {
+    if (!activeConversation) {
+      return (
+        <div className="flex-1 flex items-center justify-center bg-gray-50">
+          <div className="text-center">
+            <div className="w-20 h-20 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <MessageCircle size={40} className="text-orange-600" />
             </div>
-            <h1 className="text-xl font-bold text-gray-900 mb-2">Team Chat Not Enabled</h1>
-            <p className="text-gray-600 mb-6">
-              Team chat is not configured for your workspace. Please contact your administrator to enable it.
+            <h2 className="text-xl font-semibold text-gray-900 mb-2">
+              Welcome to Bheem Chat
+            </h2>
+            <p className="text-gray-500 mb-4 max-w-sm">
+              Select a conversation from the sidebar or start a new chat to begin messaging.
             </p>
             <button
-              onClick={() => router.push('/dashboard')}
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              onClick={() => setShowNewChatModal(true)}
+              className="px-6 py-2 bg-orange-500 text-white rounded-lg font-medium hover:bg-orange-600 transition-colors"
             >
-              Go to Dashboard
+              Start New Chat
             </button>
           </div>
         </div>
-      </WorkspaceLayout>
-    );
-  }
+      );
+    }
 
-  if (error) {
-    return (
-      <WorkspaceLayout title="Chat">
-        <div className="flex items-center justify-center h-[calc(100vh-10rem)]">
-          <div className="bg-white rounded-xl shadow-lg p-8 max-w-md text-center">
-            <div className="w-16 h-16 bg-red-100 rounded-xl flex items-center justify-center mx-auto mb-4">
-              <AlertCircle size={32} className="text-red-600" />
-            </div>
-            <h1 className="text-xl font-bold text-gray-900 mb-2">Connection Error</h1>
-            <p className="text-gray-600 mb-6">{error}</p>
-            <button
-              onClick={fetchChatConfig}
-              className="inline-flex items-center gap-2 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <RefreshCw size={20} />
-              Try Again
-            </button>
-          </div>
-        </div>
-      </WorkspaceLayout>
-    );
-  }
+    const chatContent = (
+      <div className="flex-1 flex flex-col h-full">
+        {/* Chat header */}
+        <ChatHeader
+          conversation={activeConversation}
+          currentUserId={currentUserId}
+          isOnline={isOtherUserOnline(activeConversation)}
+          typingText={typingText}
+          onAudioCall={handleAudioCall}
+          onVideoCall={handleVideoCall}
+          onArchive={handleArchive}
+          onLeave={handleLeave}
+          onViewInfo={handleViewInfo}
+        />
 
-  // Build the Mattermost embed URL with SSO token
-  const chatUrl = chatToken
-    ? `${config.url}/login/token?token=${chatToken}&redirect_to=/`
-    : config.url;
-
-  return (
-    <WorkspaceLayout title="Chat">
-      <div className="h-[calc(100vh-8rem)] flex bg-gray-900 rounded-xl overflow-hidden -m-4 lg:-m-6">
-        {/* Sidebar */}
-        {showSidebar && (
-          <div className="w-64 bg-gray-800 flex flex-col">
-            {/* Header */}
-            <div className="p-4 border-b border-gray-700">
-              <div className="flex items-center justify-between">
-                <h1 className="text-lg font-bold text-white flex items-center gap-2">
-                  <MessageCircle size={20} />
-                  Team Chat
-                </h1>
-                <button
-                  onClick={openInNewTab}
-                  className="p-1 text-gray-400 hover:text-white transition-colors"
-                  title="Open in new tab"
-                >
-                  <ExternalLink size={18} />
-                </button>
-              </div>
-            </div>
-
-            {/* Team Selector */}
-            {teams.length > 0 && (
-              <div className="p-3 border-b border-gray-700">
-                <select
-                  value={selectedTeam}
-                  onChange={(e) => handleTeamChange(e.target.value)}
-                  className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg border-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {teams.map(team => (
-                    <option key={team.id} value={team.id}>
-                      {team.display_name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            {/* Channels */}
-            <div className="flex-1 overflow-y-auto py-2">
-              <div className="px-3 py-2 flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-                  Channels
-                </span>
-                <button className="p-1 text-gray-400 hover:text-white transition-colors">
-                  <Plus size={16} />
-                </button>
-              </div>
-              {channels
-                .filter(c => c.type === 'O' || c.type === 'P')
-                .map(channel => (
-                  <button
-                    key={channel.id}
-                    className="w-full px-3 py-2 text-left text-gray-300 hover:bg-gray-700 hover:text-white transition-colors flex items-center gap-2"
-                  >
-                    <Hash size={16} className="text-gray-500" />
-                    <span className="truncate">{channel.display_name}</span>
-                  </button>
-                ))}
-
-              <div className="px-3 py-2 flex items-center justify-between mt-4">
-                <span className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-                  Direct Messages
-                </span>
-                <button className="p-1 text-gray-400 hover:text-white transition-colors">
-                  <Plus size={16} />
-                </button>
-              </div>
-              {channels
-                .filter(c => c.type === 'D')
-                .map(channel => (
-                  <button
-                    key={channel.id}
-                    className="w-full px-3 py-2 text-left text-gray-300 hover:bg-gray-700 hover:text-white transition-colors flex items-center gap-2"
-                  >
-                    <div className="w-2 h-2 bg-green-500 rounded-full" />
-                    <span className="truncate">{channel.display_name}</span>
-                  </button>
-                ))}
-            </div>
-
-            {/* User Info */}
-            <div className="p-4 border-t border-gray-700">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-blue-600 rounded-full flex items-center justify-center text-white font-medium">
-                  {user?.username?.charAt(0) || 'U'}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-white font-medium truncate">
-                    {user?.username}
-                  </p>
-                  <p className="text-gray-400 text-sm truncate">{user?.email}</p>
-                </div>
-                <button className="p-2 text-gray-400 hover:text-white transition-colors">
-                  <Settings size={18} />
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Toggle Sidebar Button */}
-        <button
-          onClick={() => setShowSidebar(!showSidebar)}
-          className={`absolute top-1/2 -translate-y-1/2 z-10 p-2 bg-gray-700 text-white rounded-r-lg hover:bg-gray-600 transition-colors ${showSidebar ? 'left-64' : 'left-0'}`}
-        >
-          <Users size={16} />
-        </button>
-
-        {/* Chat Iframe */}
-        <div className="flex-1 relative">
-          {!iframeLoaded && (
-            <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
-              <div className="text-center">
-                <Loader2 size={40} className="animate-spin text-blue-600 mx-auto mb-4" />
-                <p className="text-gray-400">Connecting to chat...</p>
-              </div>
-            </div>
-          )}
-          <iframe
-            ref={iframeRef}
-            src={chatUrl}
-            className="w-full h-full border-none"
-            onLoad={() => setIframeLoaded(true)}
-            allow="microphone; camera; notifications"
+        {/* Message thread */}
+        <div className="flex-1 overflow-hidden relative">
+          <MessageThread
+            conversation={activeConversation}
+            messages={conversationMessages}
+            currentUserId={currentUserId}
+            typingText={typingText}
+            isLoading={isLoading}
+            isSending={isSending}
+            onSendMessage={handleSendMessage}
+            onEditMessage={handleEditMessage}
+            onDeleteMessage={handleDeleteMessage}
+            onReaction={handleReaction}
+            onTyping={handleTyping}
+            onLoadMore={handleLoadMore}
+            hasMoreMessages={conversationMessages.length >= 50}
+            onShowReadReceipts={handleShowReadReceipts}
           />
         </div>
       </div>
+    );
+
+    // Wrap with LiveKit provider if we have a token
+    if (liveKitReady && chatToken && wsUrl) {
+      return (
+        <ChatLiveKitProvider
+          conversationId={activeConversation.id}
+          token={chatToken}
+          wsUrl={wsUrl}
+          currentUserId={currentUserId}
+          currentUserName={user?.username || 'User'}
+        >
+          {chatContent}
+        </ChatLiveKitProvider>
+      );
+    }
+
+    return chatContent;
+  };
+
+  return (
+    <WorkspaceLayout title="Chat">
+      <div className="h-[calc(100vh-8rem)] flex bg-white rounded-xl shadow-sm overflow-hidden -m-4 lg:-m-6">
+        {/* Conversation list sidebar */}
+        <div className="w-80 flex-shrink-0 border-r border-gray-200">
+          <ConversationList
+            currentUserId={currentUserId}
+            onNewChat={() => setShowNewChatModal(true)}
+          />
+        </div>
+
+        {/* Main chat area */}
+        {renderChatContent()}
+      </div>
+
+      {/* New chat modal */}
+      <NewChatModal
+        isOpen={showNewChatModal}
+        onClose={() => setShowNewChatModal(false)}
+        activeTab={activeTab}
+        currentUserId={currentUserId}
+      />
+
+      {/* Error toast */}
+      {error && (
+        <div className="fixed bottom-4 right-4 bg-red-500 text-white px-4 py-2 rounded-lg shadow-lg">
+          {error}
+        </div>
+      )}
+
+      {/* Call Modal */}
+      <CallModal
+        isOpen={isCallActive}
+        call={currentCall}
+        token={callToken}
+        wsUrl={callWsUrl}
+        callType={callType}
+        participantName={user?.username || 'You'}
+        otherParticipantName={getOtherParticipantName()}
+        onEndCall={handleEndCall}
+        onClose={handleCloseCallModal}
+      />
+
+      {/* Incoming Call Modal */}
+      <IncomingCallModal
+        isOpen={!!incomingCall}
+        call={incomingCall}
+        callerName={getCallerName()}
+        onAnswer={handleAnswerCall}
+        onDecline={handleDeclineCall}
+        onClose={handleCloseIncomingCall}
+      />
+
+      {/* Conversation Info Panel */}
+      {activeConversation && (
+        <ConversationInfoPanel
+          conversation={activeConversation}
+          currentUserId={currentUserId}
+          isOpen={infoPanelOpen}
+          onClose={handleCloseInfoPanel}
+        />
+      )}
+
+      {/* Read Receipts Modal */}
+      <ReadReceiptsModal
+        messageId={readReceiptsMessageId || ''}
+        isOpen={!!readReceiptsMessageId}
+        onClose={() => setReadReceiptsMessageId(null)}
+      />
+
+      {/* Call initiating indicator */}
+      {isInitiatingCall && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-lg p-6 text-center">
+            <Loader2 size={32} className="animate-spin text-[#977DFF] mx-auto mb-3" />
+            <p className="text-gray-700">Starting call...</p>
+          </div>
+        </div>
+      )}
     </WorkspaceLayout>
   );
 }

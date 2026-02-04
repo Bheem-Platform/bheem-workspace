@@ -114,6 +114,14 @@ from models import (
     OFormResponse,
     OFormShare,
     OFormEditSession,
+    # Chat models
+    ExternalContact,
+    Conversation,
+    ConversationParticipant,
+    ChatInvitation,
+    CallLog,
+    DirectMessage,
+    MessageAttachment,
 )
 
 # Import settings model if it exists

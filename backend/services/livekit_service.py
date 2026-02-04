@@ -178,6 +178,128 @@ class LiveKitService:
             ttl_seconds=7200
         )
 
+    # ==========================================
+    # CHAT SYSTEM METHODS
+    # ==========================================
+
+    def create_chat_token(
+        self,
+        conversation_id: str,
+        participant_identity: str,
+        participant_name: str,
+        is_external: bool = False,
+        ttl_seconds: int = 86400  # 24 hours
+    ) -> str:
+        """
+        Create a LiveKit access token for chat room (data-only, no audio/video)
+        Used for real-time messaging, typing indicators, and presence
+
+        Args:
+            conversation_id: Conversation UUID
+            participant_identity: User's unique identifier
+            participant_name: User's display name
+            is_external: True if external user (adds prefix for tracking)
+            ttl_seconds: Token validity period
+
+        Returns:
+            JWT token string
+        """
+        token = api.AccessToken(
+            api_key=self.api_key,
+            api_secret=self.api_secret
+        )
+
+        # External users get a different identity prefix for tracking
+        identity = f"ext-{participant_identity}" if is_external else participant_identity
+
+        token.with_identity(identity)
+        token.with_name(participant_name)
+        token.with_ttl(timedelta(seconds=ttl_seconds))
+
+        # Chat room grants - data channel only, no video/audio
+        grants = api.VideoGrants(
+            room_join=True,
+            room=f"chat-{conversation_id}",
+            can_publish=False,         # No video/audio publishing
+            can_subscribe=False,       # No video/audio subscribing
+            can_publish_data=True,     # Allow data channel messages
+            can_update_own_metadata=True,  # For online status
+        )
+
+        token.with_grants(grants)
+        return token.to_jwt()
+
+    def create_call_token(
+        self,
+        call_room_name: str,
+        participant_identity: str,
+        participant_name: str,
+        is_caller: bool = False,
+        is_external: bool = False,
+        ttl_seconds: int = 3600  # 1 hour
+    ) -> str:
+        """
+        Create a LiveKit access token for audio/video calls in chat
+
+        Args:
+            call_room_name: Unique room name for the call
+            participant_identity: User's unique identifier
+            participant_name: User's display name
+            is_caller: Whether this is the call initiator
+            is_external: True if external user
+            ttl_seconds: Token validity period
+
+        Returns:
+            JWT token string
+        """
+        token = api.AccessToken(
+            api_key=self.api_key,
+            api_secret=self.api_secret
+        )
+
+        # External users get a different identity prefix
+        identity = f"ext-{participant_identity}" if is_external else participant_identity
+
+        token.with_identity(identity)
+        token.with_name(participant_name)
+        token.with_ttl(timedelta(seconds=ttl_seconds))
+
+        # Call room grants - audio/video enabled
+        grants = api.VideoGrants(
+            room_join=True,
+            room=call_room_name,
+            can_publish=True,          # Can publish audio/video
+            can_subscribe=True,        # Can subscribe to audio/video
+            can_publish_data=True,     # For call signaling
+            can_update_own_metadata=True,
+        )
+
+        # Caller gets admin permissions
+        if is_caller:
+            grants.room_admin = True
+
+        token.with_grants(grants)
+        return token.to_jwt()
+
+    def generate_call_room_name(self, conversation_id: str) -> str:
+        """
+        Generate unique room name for an audio/video call
+
+        Args:
+            conversation_id: The conversation UUID
+
+        Returns:
+            Unique room name like call-abc12345-xyz789
+        """
+        suffix = secrets.token_hex(4)
+        # Use first 8 chars of conversation_id for readability
+        conv_prefix = conversation_id.replace('-', '')[:8]
+        return f"call-{conv_prefix}-{suffix}"
+
+    def get_chat_ws_url(self) -> str:
+        """Get WebSocket URL for chat LiveKit connection"""
+        return self.ws_url
+
 
 # Singleton instance
 livekit_service = LiveKitService()

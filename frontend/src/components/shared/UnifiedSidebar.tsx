@@ -3,7 +3,7 @@
  * Consistent across all Bheem apps with brand gradient
  * #FFCCF2 → #977DFF → #0033FF
  */
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import {
@@ -30,6 +30,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
+import { useChatStore } from '@/stores/chatStore';
 import {
   BheemMailIcon,
   BheemCalendarIcon,
@@ -94,11 +95,19 @@ function detectActiveApp(pathname: string): AppId {
 export default function UnifiedSidebar({ children, activeApp, showAppContent = true }: UnifiedSidebarProps) {
   const router = useRouter();
   const { user, logout } = useAuthStore();
+  const { totalUnread, fetchUnreadCounts } = useChatStore();
   const [isExpanded, setIsExpanded] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [hoveredApp, setHoveredApp] = useState<string | null>(null);
 
   const currentApp = activeApp || detectActiveApp(router.pathname);
+
+  // Fetch unread counts on mount and periodically
+  useEffect(() => {
+    fetchUnreadCounts();
+    const interval = setInterval(fetchUnreadCounts, 30000); // Refresh every 30 seconds
+    return () => clearInterval(interval);
+  }, [fetchUnreadCounts]);
 
   const handleLogout = async () => {
     await logout();
@@ -174,7 +183,7 @@ export default function UnifiedSidebar({ children, activeApp, showAppContent = t
                   >
                     <div
                       className={`
-                        flex-shrink-0 transition-transform duration-200
+                        relative flex-shrink-0 transition-transform duration-200
                         ${isActive || isHovered ? 'scale-110' : 'scale-100'}
                       `}
                     >
@@ -188,6 +197,12 @@ export default function UnifiedSidebar({ children, activeApp, showAppContent = t
                         `}>
                           <LucideIcon size={isExpanded ? 18 : 20} />
                         </div>
+                      )}
+                      {/* Unread badge for chat */}
+                      {app.id === 'chat' && totalUnread > 0 && (
+                        <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] flex items-center justify-center bg-red-500 text-white text-xs font-bold rounded-full px-1">
+                          {totalUnread > 99 ? '99+' : totalUnread}
+                        </span>
                       )}
                     </div>
                     {isExpanded && (
@@ -318,7 +333,7 @@ export default function UnifiedSidebar({ children, activeApp, showAppContent = t
               >
                 <div
                   className={`
-                    w-10 h-10 rounded-xl flex items-center justify-center transition-all
+                    relative w-10 h-10 rounded-xl flex items-center justify-center transition-all
                     ${isActive
                       ? 'bg-gradient-to-br from-[#FFCCF2] via-[#977DFF] to-[#0033FF] text-white'
                       : 'text-gray-500'
@@ -326,6 +341,12 @@ export default function UnifiedSidebar({ children, activeApp, showAppContent = t
                   `}
                 >
                   <LucideIcon size={20} />
+                  {/* Unread badge for chat on mobile */}
+                  {app.id === 'chat' && totalUnread > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] flex items-center justify-center bg-red-500 text-white text-[10px] font-bold rounded-full px-1">
+                      {totalUnread > 99 ? '99+' : totalUnread}
+                    </span>
+                  )}
                 </div>
                 <span className={`text-xs ${isActive ? 'text-[#0033FF] font-medium' : 'text-gray-500'}`}>
                   {app.name}

@@ -163,6 +163,7 @@ async def api_info():
             "docs_v2": "/api/v1/docs/v2",
             "docs_erp": "/api/v1/docs/erp",
             "mail": "/api/v1/mail",
+            "messages": "/api/v1/messages",
             "workspace": "/api/v1/workspace",
             "tenants": "/api/v1/tenants",
             "recordings": "/api/v1/recordings",
@@ -488,6 +489,14 @@ try:
     logger.info("Team Chat API loaded", action="team_chat_loaded")
 except Exception as e:
     print(f"Could not load team_chat router: {e}")
+
+# Direct Messages & Chat API (Native Real-time Chat System)
+try:
+    from api.direct_messages import router as direct_messages_router
+    app.include_router(direct_messages_router, prefix="/api/v1", tags=["Direct Messages"])
+    logger.info("Direct Messages API loaded", action="direct_messages_loaded")
+except Exception as e:
+    print(f"Could not load direct_messages router: {e}")
 
 # Onboarding API
 try:
@@ -1262,6 +1271,28 @@ async def videos_proxy(request: Request, path: str = ""):
             )
         except httpx.RequestError as e:
             return HTMLResponse(content=f"<h1>Videos service unavailable</h1><p>{str(e)}</p>", status_code=503)
+
+# Bheem Chat - Proxy to Next.js server
+@app.api_route("/chat/{path:path}", methods=["GET"])
+@app.api_route("/chat", methods=["GET"])
+async def chat_page_proxy(request: Request, path: str = ""):
+    """Proxy chat routes to Next.js server"""
+    target_url = f"{NEXTJS_URL}/chat/{path}" if path else f"{NEXTJS_URL}/chat"
+
+    if request.query_params:
+        target_url += f"?{request.query_params}"
+
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(target_url, timeout=30.0)
+            return StreamingResponse(
+                iter([response.content]),
+                status_code=response.status_code,
+                headers={k: v for k, v in response.headers.items() if k.lower() not in ['content-encoding', 'transfer-encoding', 'content-length']},
+                media_type=response.headers.get('content-type', 'text/html')
+            )
+        except httpx.RequestError as e:
+            return HTMLResponse(content=f"<h1>Chat service unavailable</h1><p>{str(e)}</p>", status_code=503)
 
 # Bheem Booking Pages - Proxy to Next.js server
 @app.api_route("/book/{path:path}", methods=["GET"])
