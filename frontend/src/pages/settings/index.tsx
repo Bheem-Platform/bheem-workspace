@@ -53,7 +53,6 @@ import WorkspaceLayout from '@/components/workspace/WorkspaceLayout';
 import { useAuthStore, useRequireAuth } from '@/stores/authStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { api } from '@/lib/api';
-import axios from 'axios';
 
 // Brand colors
 const BRAND = {
@@ -307,16 +306,14 @@ export default function SettingsPage() {
       const formData = new FormData();
       formData.append('file', file);
 
-      // Use axios directly to avoid Content-Type header override from api instance
-      const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
-      const response = await axios.post(
-        '/api/v1/settings/profile-photo',
+      // Use api instance which handles token refresh automatically
+      const response = await api.post(
+        '/settings/profile-photo',
         formData,
         {
           headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            'Content-Type': 'multipart/form-data',
           },
-          withCredentials: true,
         }
       );
       if (response.data?.avatar_url) {

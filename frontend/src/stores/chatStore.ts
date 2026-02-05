@@ -4,7 +4,6 @@
  */
 
 import { create } from 'zustand';
-import axios from 'axios';
 import { api } from '@/lib/api';
 
 // ============================================
@@ -479,19 +478,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
           console.log(`  ${key}:`, value instanceof File ? `File(${value.name}, ${value.size} bytes)` : value);
         }
 
-        // Use axios directly to properly handle FormData
+        // Use api instance (which handles token refresh) with FormData
         // The browser will set the correct Content-Type with boundary
-        const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
         console.log('[chatStore] Making POST request to with-files endpoint...');
 
-        res = await axios.post(
-          `/api/v1/messages/conversations/${conversationId}/messages/with-files`,
+        res = await api.post(
+          `/messages/conversations/${conversationId}/messages/with-files`,
           formData,
           {
             headers: {
-              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+              'Content-Type': 'multipart/form-data',
             },
-            withCredentials: true,
           }
         );
         console.log('[chatStore] Response:', res.data);
@@ -857,16 +854,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const formData = new FormData();
       formData.append('avatar', file);
 
-      // Use axios directly to avoid Content-Type header issues with FormData
-      const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
-      const res = await axios.put(
-        `/api/v1/messages/conversations/${conversationId}/avatar`,
+      // Use api instance (which handles token refresh) with FormData
+      const res = await api.put(
+        `/messages/conversations/${conversationId}/avatar`,
         formData,
         {
           headers: {
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            'Content-Type': 'multipart/form-data',
           },
-          withCredentials: true,
         }
       );
 

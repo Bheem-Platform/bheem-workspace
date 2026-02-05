@@ -5,10 +5,16 @@
  * Phase 8: Search Enhancement
  */
 
-import axios from 'axios';
+import { api as baseApi } from '@/lib/api';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-const api = axios.create({ baseURL: `${API_BASE}/api/v1/search` });
+// Create a wrapper that prepends the search path
+const api = {
+  get: (url: string, config?: any) => baseApi.get(`/search${url}`, config),
+  post: (url: string, data?: any, config?: any) => baseApi.post(`/search${url}`, data, config),
+  put: (url: string, data?: any, config?: any) => baseApi.put(`/search${url}`, data, config),
+  patch: (url: string, data?: any, config?: any) => baseApi.patch(`/search${url}`, data, config),
+  delete: (url: string, config?: any) => baseApi.delete(`/search${url}`, config),
+};
 
 // Types
 export interface SearchResultItem {

@@ -640,6 +640,7 @@ async def duplicate_spreadsheet(
     result = await db.execute(text("""
         SELECT id, title, description FROM workspace.spreadsheets
         WHERE id = CAST(:id AS uuid) AND tenant_id = CAST(:tenant_id AS uuid)
+        AND is_deleted = FALSE
         AND (created_by = CAST(:user_id AS uuid) OR EXISTS (
             SELECT 1 FROM workspace.spreadsheet_shares
             WHERE spreadsheet_id = CAST(:id AS uuid) AND user_id = CAST(:user_id AS uuid)

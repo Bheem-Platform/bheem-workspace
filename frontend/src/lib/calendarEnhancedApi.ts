@@ -5,10 +5,16 @@
  * Phase 10: Calendar Enhancements
  */
 
-import axios from 'axios';
+import { api as baseApi } from '@/lib/api';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-const api = axios.create({ baseURL: `${API_BASE}/api/v1/calendar/enhanced` });
+// Create a wrapper that prepends the calendar/enhanced path
+const api = {
+  get: (url: string, config?: any) => baseApi.get(`/calendar/enhanced${url}`, config),
+  post: (url: string, data?: any, config?: any) => baseApi.post(`/calendar/enhanced${url}`, data, config),
+  put: (url: string, data?: any, config?: any) => baseApi.put(`/calendar/enhanced${url}`, data, config),
+  patch: (url: string, data?: any, config?: any) => baseApi.patch(`/calendar/enhanced${url}`, data, config),
+  delete: (url: string, config?: any) => baseApi.delete(`/calendar/enhanced${url}`, config),
+};
 
 // ============================================
 // Types - World Clock

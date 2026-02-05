@@ -5,10 +5,16 @@
  * Phase 9: Email Enhancements
  */
 
-import axios from 'axios';
+import { api as baseApi } from '@/lib/api';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-const api = axios.create({ baseURL: `${API_BASE}/api/v1/mail` });
+// Create a wrapper that prepends the mail path
+const api = {
+  get: (url: string, config?: any) => baseApi.get(`/mail${url}`, config),
+  post: (url: string, data?: any, config?: any) => baseApi.post(`/mail${url}`, data, config),
+  put: (url: string, data?: any, config?: any) => baseApi.put(`/mail${url}`, data, config),
+  patch: (url: string, data?: any, config?: any) => baseApi.patch(`/mail${url}`, data, config),
+  delete: (url: string, config?: any) => baseApi.delete(`/mail${url}`, config),
+};
 
 // ============================================
 // Types - Confidential Emails

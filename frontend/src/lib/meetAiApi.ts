@@ -5,10 +5,16 @@
  * Phase 11: AI Meeting Summaries
  */
 
-import axios from 'axios';
+import { api as baseApi } from '@/lib/api';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-const api = axios.create({ baseURL: `${API_BASE}/api/v1/meet/ai` });
+// Create a wrapper that prepends the meet/ai path
+const api = {
+  get: (url: string, config?: any) => baseApi.get(`/meet/ai${url}`, config),
+  post: (url: string, data?: any, config?: any) => baseApi.post(`/meet/ai${url}`, data, config),
+  put: (url: string, data?: any, config?: any) => baseApi.put(`/meet/ai${url}`, data, config),
+  patch: (url: string, data?: any, config?: any) => baseApi.patch(`/meet/ai${url}`, data, config),
+  delete: (url: string, config?: any) => baseApi.delete(`/meet/ai${url}`, config),
+};
 
 // ============================================
 // Types - Meeting Summary

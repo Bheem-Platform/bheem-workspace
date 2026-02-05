@@ -1,8 +1,5 @@
 import { create } from 'zustand';
-import { api } from '@/lib/api';
-
-// Bheem Passport URL for token refresh
-const PASSPORT_URL = process.env.NEXT_PUBLIC_PASSPORT_URL || 'https://platform.bheem.co.uk';
+import { api, refreshAccessToken as apiRefreshToken, startBackgroundRefresh, stopBackgroundRefresh } from '@/lib/api';
 
 interface User {
   id: string;
@@ -54,8 +51,7 @@ const decodeToken = (token: string): any => {
   }
 };
 
-// Token refresh timer
-let refreshTimer: NodeJS.Timeout | null = null;
+// Token refresh is now handled by api.ts background refresh
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
@@ -65,94 +61,39 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isLoading: true,
   tokenExpiresAt: null,
 
-  // Refresh access token using refresh token
+  // Refresh access token using the shared refresh function from api.ts
   refreshAccessToken: async () => {
     if (typeof window === 'undefined') return false;
 
-    const refreshToken = localStorage.getItem('refresh_token');
-    if (!refreshToken) {
-      console.log('[Auth] No refresh token available');
-      return false;
-    }
-
     try {
-      console.log('[Auth] Refreshing access token...');
-      // Bheem Passport expects refresh_token as query parameter
-      const response = await fetch(`${PASSPORT_URL}/api/v1/auth/refresh?refresh_token=${encodeURIComponent(refreshToken)}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
+      const newToken = await apiRefreshToken();
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[Auth] Token refresh failed:', response.status, errorText);
-        return false;
+      if (newToken) {
+        // Update state with new token
+        const payload = decodeToken(newToken);
+        const tokenExpiresAt = payload?.exp ? payload.exp * 1000 : Date.now() + 30 * 60 * 1000;
+        const refreshToken = localStorage.getItem('refresh_token');
+
+        set({
+          token: newToken,
+          refreshToken,
+          tokenExpiresAt,
+        });
+
+        return true;
       }
-
-      const data = await response.json();
-      const { access_token, refresh_token: newRefreshToken, expires_in } = data;
-
-      if (!access_token) {
-        console.error('[Auth] No access token in refresh response');
-        return false;
-      }
-
-      // Store new tokens
-      localStorage.setItem('auth_token', access_token);
-      if (newRefreshToken) {
-        localStorage.setItem('refresh_token', newRefreshToken);
-      }
-
-      // Update state
-      const payload = decodeToken(access_token);
-      const tokenExpiresAt = payload?.exp ? payload.exp * 1000 : Date.now() + (expires_in || 1800) * 1000;
-
-      set({
-        token: access_token,
-        refreshToken: newRefreshToken || refreshToken,
-        tokenExpiresAt,
-      });
-
-      // Schedule next refresh
-      get().scheduleTokenRefresh();
-
-      console.log('[Auth] Token refreshed successfully, expires at:', new Date(tokenExpiresAt));
-      return true;
+      return false;
     } catch (error) {
       console.error('[Auth] Token refresh error:', error);
       return false;
     }
   },
 
-  // Schedule automatic token refresh before expiration
+  // Schedule automatic token refresh - now handled by background refresh in api.ts
   scheduleTokenRefresh: () => {
-    if (typeof window === 'undefined') return;
-
-    // Clear existing timer
-    if (refreshTimer) {
-      clearTimeout(refreshTimer);
-      refreshTimer = null;
-    }
-
-    const { tokenExpiresAt, refreshAccessToken } = get();
-    if (!tokenExpiresAt) return;
-
-    // Refresh 5 minutes before expiration (or immediately if less than 5 min left)
-    const timeUntilExpiry = tokenExpiresAt - Date.now();
-    const refreshIn = Math.max(0, timeUntilExpiry - 5 * 60 * 1000); // 5 minutes before
-
-    if (refreshIn <= 0) {
-      // Token is about to expire or already expired, refresh now
-      console.log('[Auth] Token expiring soon, refreshing now...');
-      refreshAccessToken();
-    } else {
-      console.log(`[Auth] Scheduling token refresh in ${Math.round(refreshIn / 1000 / 60)} minutes`);
-      refreshTimer = setTimeout(() => {
-        refreshAccessToken();
-      }, refreshIn);
-    }
+    // Background refresh is handled by api.ts startBackgroundRefresh()
+    // This function is kept for backward compatibility
+    startBackgroundRefresh();
   },
 
   initialize: async () => {
@@ -373,11 +314,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   },
 
   logout: async () => {
-    // Clear refresh timer
-    if (refreshTimer) {
-      clearTimeout(refreshTimer);
-      refreshTimer = null;
-    }
+    // Stop background token refresh
+    stopBackgroundRefresh();
 
     // Clear SSO session cookie first
     try {

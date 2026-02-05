@@ -2,24 +2,7 @@
  * Bheem Docs - Editor API Client
  * API integration for document editor features
  */
-import axios from 'axios';
-
-const api = axios.create({
-  baseURL: '/api/v1',
-  headers: {
-    'Content-Type': 'application/json',
-  },
-  withCredentials: true,  // Send cookies with requests
-});
-
-// Add auth token to requests
-api.interceptors.request.use((config) => {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('auth_token') : null;
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
+import { api } from '@/lib/api';
 
 // ===========================================
 // Document CRUD

@@ -65,6 +65,9 @@ export default function SlidesPage() {
   const [filter, setFilter] = useState<'all' | 'starred' | 'recent'>('all');
   const [contextMenu, setContextMenu] = useState<{ id: string; x: number; y: number } | null>(null);
 
+  // Quick access filter from sidebar
+  const [quickAccessFilter, setQuickAccessFilter] = useState<string | null>(null);
+
   // Sorting state
   const [sortBy, setSortBy] = useState<'title' | 'updated_at' | 'created_at'>('updated_at');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
@@ -214,7 +217,21 @@ export default function SlidesPage() {
 
         {/* Docs Sidebar */}
         <div className="fixed left-[60px] top-0 bottom-0 w-[240px] z-40">
-          <DocsSidebar activeType="slides" />
+          <DocsSidebar
+            activeType="slides"
+            activeQuickAccess={quickAccessFilter || undefined}
+            onQuickAccessChange={(id) => {
+              setQuickAccessFilter(id === quickAccessFilter ? null : id);
+              // Map quick access to filter
+              if (id === 'starred') {
+                setFilter('starred');
+              } else if (id === 'recent') {
+                setFilter('recent');
+              } else {
+                setFilter('all');
+              }
+            }}
+          />
         </div>
 
         {/* Main Content */}
